@@ -218,7 +218,7 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 
 ### 5.1 Host
 
-`Duiyi/Features/Conversation/TranslationHostView.swift`：
+`Duiyi/Features/Shared/TranslationHostView.swift`（跨 feature 共享：面对面、同传、历史详情、引导）：
 
 - `TranslationHostView`：面对面双向，两个 `TranslationSession.Configuration`（user→peer、peer→user），两个 `TranslationJobBridge`。
 - `OneWayTranslationHostView`：同传/会议详情单向，一个 configuration、一个 bridge。
@@ -425,7 +425,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 | 入口/组装 | `Duiyi/App/DuiyiApp.swift`、`AppEnvironment.swift`、`RootView.swift`、`AppCoordinator.swift`、`FeatureRegistry.swift`、`PreferencesStore.swift` |
 | 音频 | `Duiyi/Services/Audio/AudioEngineCapturer.swift`、`BufferConverter.swift`、`AudioSessionPolicy.swift` |
 | 听写 | `Duiyi/Services/Speech/BilingualSpeechEngine.swift`、`SpeechSessionGate.swift`、`UtteranceAssembler.swift`、`Duiyi/Services/ServiceProtocols.swift` |
-| 翻译 | `Duiyi/Features/Conversation/TranslationHostView.swift`、`Duiyi/Domain/Models/TranslationJob.swift`、`Duiyi/Services/Translation/TranslationAvailabilityService.swift` |
+| 翻译 | `Duiyi/Features/Shared/TranslationHostView.swift`、`Duiyi/Domain/Models/TranslationJob.swift`、`Duiyi/Services/Translation/TranslationAvailabilityService.swift` |
 | 面对面 | `Duiyi/Features/Conversation/ConversationView.swift`、`ConversationViewModel.swift`、`CaptionPaneView.swift`、`ListeningControl.swift` |
 | 同传 | `Duiyi/Features/Interpretation/InterpretationView.swift`、`InterpretationViewModel.swift`、`DirectionBar.swift`、`VoiceOutControl.swift`、`Duiyi/Domain/Models/Clause.swift` |
 | 会议 | `Duiyi/Features/Meeting/MeetingView.swift`、`MeetingViewModel.swift` |
