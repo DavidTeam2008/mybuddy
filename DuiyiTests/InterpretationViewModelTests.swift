@@ -92,55 +92,6 @@ actor RecordingSpeechEngine: SpeechRecognizing {
     }
 }
 
-/// Deterministic scheduler for interpretation wiring tests: time only moves
-/// when the test advances it, and the recorded delays show what the ViewModel
-/// submitted through the pipeline.
-@MainActor
-private final class InterpretationTranslationScheduler: TranslationScheduler {
-    @MainActor
-    private final class Work: TranslationScheduledTask {
-        let delay: Duration
-        let deadline: Duration
-        var action: (@MainActor @Sendable () -> Void)?
-
-        init(delay: Duration, deadline: Duration, action: @escaping @MainActor @Sendable () -> Void) {
-            self.delay = delay
-            self.deadline = deadline
-            self.action = action
-        }
-
-        func cancel() {
-            action = nil
-        }
-    }
-
-    private var work: [Work] = []
-    private var now: Duration = .zero
-
-    var pendingDelays: [Duration] {
-        work.compactMap { $0.action == nil ? nil : $0.delay }
-    }
-
-    func schedule(
-        after delay: Duration,
-        _ action: @escaping @MainActor @Sendable () -> Void
-    ) -> any TranslationScheduledTask {
-        let item = Work(delay: delay, deadline: now + delay, action: action)
-        work.append(item)
-        return item
-    }
-
-    func advance(by duration: Duration) {
-        now += duration
-        while let index = work.firstIndex(where: { $0.action != nil && $0.deadline <= now }) {
-            let item = work.remove(at: index)
-            let action = item.action
-            item.action = nil
-            action?()
-        }
-    }
-}
-
 @MainActor
 struct InterpretationViewModelTests {
     @Test("Swap archives live and keeps history")
@@ -169,63 +120,68 @@ struct InterpretationViewModelTests {
 
     @Test("Voice-out interpretation submits 25/50 ms delays and the current target")
     func voiceOutSubmitsVoiceOutDelaysAndTarget() async {
-        let (pipeline, scheduler) = makeInterpretationPipeline()
-        let viewModel = makeViewModel(targetLanguage: .korean, pipeline: pipeline)
+        let scheduler = ManualTranslationScheduler()
+        let viewModel = makeViewModel(targetLanguage: .korean, scheduler: scheduler)
         await viewModel.setVoiceOutEnabled(true)
         let id = UUID()
 
         viewModel.accept(Utterance(id: id, language: .english, text: "hello", isFinal: false))
-        #expect(viewModel.outboundJob == nil)
-        #expect(scheduler.pendingDelays == [.milliseconds(25)])
+        #expect(scheduler.scheduledDelays == [.milliseconds(25)])
 
+        // Complete the first submission so the next one is a subsequent packet
+        // rather than another first packet.
         scheduler.advance(by: .milliseconds(25))
-        #expect(viewModel.outboundJob?.utteranceID == id)
-        #expect(viewModel.outboundJob?.target == .korean)
-        #expect(viewModel.outboundJob?.text == "hello")
 
         viewModel.accept(Utterance(id: id, language: .english, text: "hello there", isFinal: false))
-        #expect(scheduler.pendingDelays == [.milliseconds(50)])
+        #expect(scheduler.scheduledDelays == [.milliseconds(25), .milliseconds(50)])
 
+        // The pipeline owns debounce firing; here the submitted job proves the
+        // ViewModel passed through the selected target.
         scheduler.advance(by: .milliseconds(50))
+        #expect(viewModel.outboundJob?.utteranceID == id)
+        #expect(viewModel.outboundJob?.target == .korean)
         #expect(viewModel.outboundJob?.text == "hello there")
     }
 
     @Test("Caption-only interpretation submits 40/90 ms delays and the current target")
     func captionsSubmitStandardDelaysAndTarget() {
-        let (pipeline, scheduler) = makeInterpretationPipeline()
-        let viewModel = makeViewModel(targetLanguage: .korean, pipeline: pipeline)
+        let scheduler = ManualTranslationScheduler()
+        let viewModel = makeViewModel(targetLanguage: .korean, scheduler: scheduler)
         let id = UUID()
 
         viewModel.accept(Utterance(id: id, language: .english, text: "hello", isFinal: false))
-        #expect(scheduler.pendingDelays == [.milliseconds(40)])
+        #expect(scheduler.scheduledDelays == [.milliseconds(40)])
 
+        // Complete the first submission so the next one is a subsequent packet
+        // rather than another first packet.
         scheduler.advance(by: .milliseconds(40))
-        #expect(viewModel.outboundJob?.target == .korean)
 
         viewModel.accept(Utterance(id: id, language: .english, text: "hello there", isFinal: false))
-        #expect(scheduler.pendingDelays == [.milliseconds(90)])
+        #expect(scheduler.scheduledDelays == [.milliseconds(40), .milliseconds(90)])
 
         scheduler.advance(by: .milliseconds(90))
+        #expect(viewModel.outboundJob?.utteranceID == id)
+        #expect(viewModel.outboundJob?.target == .korean)
         #expect(viewModel.outboundJob?.text == "hello there")
     }
 
     @Test("outboundJob is exposed from the pipeline")
-    func outboundJobIsExposedFromPipeline() {
-        let (pipeline, _) = makeInterpretationPipeline()
-        let viewModel = makeViewModel(pipeline: pipeline)
+    func outboundJobIsExposedFromPipeline() throws {
+        let viewModel = makeViewModel()
         let utterance = Utterance(language: .english, text: "Hello there.", isFinal: false)
 
         viewModel.accept(utterance)
 
-        #expect(pipeline.outboundJob != nil)
-        #expect(viewModel.outboundJob?.id == pipeline.outboundJob?.id)
-        #expect(viewModel.outboundJob?.utteranceID == utterance.id)
+        let job = try #require(viewModel.outboundJob)
+        #expect(job.utteranceID == utterance.id)
+        #expect(job.target == .zhHans)
+        #expect(job.text == "Hello there.")
     }
 
     @Test("resetCaptions clears the pipeline's pending and outbound work")
     func resetCaptionsClearsPipeline() {
-        let (pipeline, scheduler) = makeInterpretationPipeline()
-        let viewModel = makeViewModel(pipeline: pipeline)
+        let scheduler = ManualTranslationScheduler()
+        let viewModel = makeViewModel(scheduler: scheduler)
 
         viewModel.accept(Utterance(language: .english, text: "hello", isFinal: false))
         #expect(scheduler.pendingDelays == [.milliseconds(40)])
@@ -233,15 +189,15 @@ struct InterpretationViewModelTests {
         viewModel.resetCaptions()
 
         #expect(scheduler.pendingDelays.isEmpty)
-        #expect(pipeline.outboundJob == nil)
+        #expect(viewModel.outboundJob == nil)
         scheduler.advance(by: .milliseconds(200))
         #expect(viewModel.outboundJob == nil)
     }
 
     @Test("A direction change clears the pipeline's pending and outbound work")
     func directionChangeClearsPipeline() async {
-        let (pipeline, scheduler) = makeInterpretationPipeline()
-        let viewModel = makeViewModel(pipeline: pipeline)
+        let scheduler = ManualTranslationScheduler()
+        let viewModel = makeViewModel(scheduler: scheduler)
 
         viewModel.accept(Utterance(language: .english, text: "hello", isFinal: false))
         #expect(scheduler.pendingDelays == [.milliseconds(40)])
@@ -249,15 +205,14 @@ struct InterpretationViewModelTests {
         await viewModel.swapDirection()
 
         #expect(scheduler.pendingDelays.isEmpty)
-        #expect(pipeline.outboundJob == nil)
+        #expect(viewModel.outboundJob == nil)
         scheduler.advance(by: .milliseconds(200))
         #expect(viewModel.outboundJob == nil)
     }
 
     @Test("Continuation aliases are registered through the pipeline")
     func continuationAliasResolvesThroughPipeline() {
-        let (pipeline, _) = makeInterpretationPipeline()
-        let viewModel = makeViewModel(pipeline: pipeline)
+        let viewModel = makeViewModel(scheduler: ManualTranslationScheduler())
         let first = Utterance(language: .english, text: "Like everyone else", isFinal: false)
         viewModel.accept(first)
         let continuation = Utterance(
@@ -1276,11 +1231,6 @@ struct InterpretationViewModelTests {
         }
     }
 
-    private func makeInterpretationPipeline() -> (TranslationPipeline, InterpretationTranslationScheduler) {
-        let scheduler = InterpretationTranslationScheduler()
-        return (TranslationPipeline(stalePolicy: .dropShorterAny, scheduler: scheduler), scheduler)
-    }
-
     private func makeViewModel(
         speech: any SpeechRecognizing = MockSpeechEngine(),
         audioSession: MockAudioSession = MockAudioSession(),
@@ -1291,7 +1241,7 @@ struct InterpretationViewModelTests {
         sourceLanguage: AppLanguage = .english,
         targetLanguage: AppLanguage = .zhHans,
         userLanguage: AppLanguage? = nil,
-        pipeline: TranslationPipeline? = nil
+        scheduler: (any TranslationScheduler)? = nil
     ) -> InterpretationViewModel {
         let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
         if let userLanguage {
@@ -1300,6 +1250,19 @@ struct InterpretationViewModelTests {
         preferences.sourceLanguage = sourceLanguage
         preferences.targetLanguage = targetLanguage
         preferences.voiceOutEnabled = false
+        if let scheduler {
+            return InterpretationViewModel(
+                gate: gate ?? InterpretationFakeGate(log: InterpretationEventLog()),
+                permissions: MockPermissions(),
+                preferences: preferences,
+                summarizer: MockSummarizer(),
+                audioSession: audioSession,
+                synthesizer: synthesizer,
+                taskStore: store,
+                speechSettleDelay: speechSettleDelay,
+                scheduler: scheduler
+            )
+        }
         if let gate {
             return InterpretationViewModel(
                 gate: gate,
@@ -1309,8 +1272,7 @@ struct InterpretationViewModelTests {
                 audioSession: audioSession,
                 synthesizer: synthesizer,
                 taskStore: store,
-                speechSettleDelay: speechSettleDelay,
-                pipeline: pipeline
+                speechSettleDelay: speechSettleDelay
             )
         }
         return InterpretationViewModel(
@@ -1321,8 +1283,7 @@ struct InterpretationViewModelTests {
             audioSession: audioSession,
             synthesizer: synthesizer,
             taskStore: store,
-            speechSettleDelay: speechSettleDelay,
-            pipeline: pipeline
+            speechSettleDelay: speechSettleDelay
         )
     }
 }

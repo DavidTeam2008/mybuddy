@@ -9,7 +9,7 @@
 - gate 用 owner（`FeatureID`）+ 单调 generation 仲裁唯一听写流：新 start 立即取代旧 owner，旧流静默结束，旧 owner/generation 的 stop 是 no-op；只有当前流非预期结束才报 `recognitionInterrupted`。
 - `BilingualSpeechEngine()` 只在组合根（`AppEnvironment` 默认参数）实例化；其它位置注入 `any SpeechSessionGating` 协议。
 - 改这块必须配假引擎并发测试（20 次快速切换 + 10 次前后台）；真机快速切换仍按发布清单验证。
-- 资源不足降级与 `UtteranceAssembler` 语种锁定是现状（`docs/02-architecture.md` §4），不要顺手改听写策略。
+- 资源不足降级与 `UtteranceAssembler` 语种锁定是现状（`docs/02-architecture.md` §4），不要顺手改听写策略；脚本计数/scalar 判定委托 Domain `ScriptCounts`，不要在 Services 里复制。
 
 ## 2. 翻译：Session 只在 Host View
 
