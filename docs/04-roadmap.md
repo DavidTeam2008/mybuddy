@@ -18,67 +18,82 @@
 | 导出竞态与内容刷新 | 已修复（2026-11-17；回归测试在仓库内；原归档证据未随提取保留） |
 | 语言切换清态 | 已修复；当前实现与回归覆盖见 Conversation/Interpretation ViewModel 测试 |
 | 语言目录实查 | 生产注入 `SystemLanguageCatalog`（探针缓存）；当前仅首页设置消费，v1 扩展到所有语言入口 |
+| Wave 1 数据完整性 | 已合并到 `wave-1-data-integrity`（#2–#12，tip `fd820e4`）：TaskStoreV2、SpeechSessionGate、TaskLifecycle、显性存储降级、清屏/50 条/2 万字语义。iPhone 13 真机清单未验证 |
 | 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
 
 ---
 
 ## 1. P0：会丢数据或卡死主链路
 
-### P0-1 单引擎无全局仲裁（最高优先）
+### P0-1 单引擎全局仲裁（已实现，Wave 1）
 
-**现象**：三个常驻 ViewModel（面对面、同传、会议）共享同一个 `BilingualSpeechEngine` actor。快速切模块、前后台切换、或旧 `stop()` 晚到时，可能出现 A 已 `start`、B 的 `stop()` 后到，把 A 的流 finish 掉。
+**状态**：已实现并合并（#3 gate、#4 lifecycle、#6–#8 三模块接入、#12 契约收口）。
 
-**代码依据**：
+**原现象（Wave 1 前，保留历史）**：三个常驻 ViewModel（面对面、同传、会议）共享同一个 `BilingualSpeechEngine` actor。快速切模块、前后台切换、或旧 `stop()` 晚到时，可能出现 A 已 `start`、B 的 `stop()` 后到，把 A 的流 finish 掉。
 
-- `RootView` 在首帧后创建三个 VM，都注入 `environment.speechEngine`。
-- `BilingualSpeechEngine.stop()` finish 外发流；VM 的 `for await` 退出后走 `handleStreamEnded()`。
-- 各 VM 用 `isStopping` 局部缓解，但没有跨 VM 的 generation/owner。
+**已落地**：
 
-**目标**：引入 App 层 `SpeechSessionGate`（actor 或 `@MainActor` 协调器）：
+- `SpeechSessionGate`（actor，`SpeechSessionGating`）持全局 generation + 当前 owner `FeatureID`。
+- 新 `start` 立即取代旧 owner：旧流结束，旧 owner 的后续 stop 是 no-op；同一 owner 重复 start 也生成新 generation，避免 ABA。
+- 三个 VM 经各自 `TaskLifecycle` 使用同一个 `environment.speechGate`，不直接调 engine。
+- 流结束分类：`isCurrent` 为真 → `recognitionInterrupted`；被取代 → 静默 `pausedListening`，不误报。
+- 启动失败只让新 owner 报错，旧 owner 保持 paused。
 
-- 持全局 generation + 当前 owner `FeatureID`。
-- `request(owner:)` 先停旧 owner，再启动新 owner；旧流事件因 generation 不匹配被丢弃。
-- VM 的 `start/stop` 都经 gate，不直接调 engine。
+**验收状态**：
 
-**验收**：
+- 单元：`SpeechSessionGateTests` / `TaskLifecycleTests` 覆盖 A start → B start → A stop、幂等 stop、同 owner 重启、快速切换与前后台循环；全量单测绿。
+- 真机：iPhone 13 三模块连续切换 + 前后台 10 次**未验证**，按 #13 真机清单执行。
 
-- 单元测试：A start → B start → A stop 不影响 B；A/B 快速交替 20 次，最终 owner 与状态一致。
-- 真机：三模块连续切换 + 前后台 10 次，无“识别暂停”误报、无流被掐断。
+### P0-2 长会话的数据留存（显示窗口已完成，D7 续集组待后续）
 
-### P0-2 长会话的数据留存
+**状态**：显示窗口与计数已实现（#9 会议清屏/计数、#10 同传 50 仅显示、#11 面对面 3 条窗口与恢复）。D7 的续集任务组**不在 Wave 1**，仍为后续 wave。
 
-**现象**：
+**原现象（Wave 1 前，保留历史）**：
 
-| 模块 | 当前 | 风险 |
-| --- | --- | --- |
-| 面对面 | `pane.history` 无上限，`transcript` 无上限 | 长会话内存增长，`append` 全量 upsert 变慢 |
-| 同传 | `historyLimit = 50` 同时截断 pane 与 transcript | 结束前早期内容已从内存消失，落盘也可能缺失 |
-| 会议 | 20,000 字符硬停，计数按内存 transcript；清屏会复位 | 长会无法继续，只能结束重开；可绕过上限 |
+| 模块 | 原问题 |
+| --- | --- |
+| 面对面 | `pane.history` 无上限，恢复回填无窗口 |
+| 同传 | 显示窗口曾连带裁掉 transcript，早期内容从内存消失（Wave 1 #10 已修复） |
+| 会议 | 20,000 字符计数按内存 transcript，清屏曾复位（Wave 1 #9 已改为累计）；无续集关联 |
 
-**目标**（D5 / D7 / Q20 / Q23）：
+**已落地**：
 
-- 面对面 pane 保留 `live` + 最多 3 条历史，transcript 全量。
-- 同传 50 条只裁显示，落盘与导出全量。
-- 会议 20,000 字符作为续集触发点，用组 ID 关联「结束并继续」；计数按任务累计，清屏不复位。
+- 面对面 pane 保留 `live` + 最多 3 条历史（`ConversationLayout.paneHistoryLimit`），恢复只回填每侧 3 条，transcript 全量。
+- 同传 50 条只裁 `pane.history` 显示与恢复回填，transcript / 落盘 / 导出全量；删除同时截断 transcript 的逻辑。
+- 会议 20,000 字符按任务累计，清屏不复位；达到上限自动停听并标记 `isLengthLimited`，任务保持进行中。
+- 清屏只清显示，先 `flush()`；transcript、总结数据与导出全量。
+
+**仍待后续**：
+
+- D7 续集任务组：组 ID、「结束并继续」、组内跳转、整组合并导出（当前只能结束并手动新建；文案/术语表已冻结方向，但未实现）。
 - 历史详情分页加载，避免一次渲染全量。
 
-**验收**：模拟 1 小时文字稿，内存稳定；结束后历史能读回全部行；同传不再丢早期 settled 行；续集任务可在组内跳转。
+**验收状态**：模拟器单测覆盖清屏/计数/窗口；iPhone 13 模拟 1 小时文字稿、同传 50+ 条历史读回、会议 2 万字边界**未验证**，按 #13 真机清单执行。
 
-### P0-3 持久化可靠性与写放大
+### P0-3 持久化可靠性与写放大（降级/结果接缝已完成，写放大/迁移待后续）
 
-**现象**：
+**状态**：降级显性化与结果化接缝已实现（#2 TaskStoreV2、#5 首页/历史/详情横幅与安全删除、#12 契约收口）。写放大与迁移计划未在 Wave 1 范围。
 
-- `DeferredTaskStore.resolved()` 容器失败时静默降级 `InMemoryTaskStore`，用户以为已保存。
-- `SwiftDataTaskStore.append` 每次对传入 entries 全量 upsert 并 `save()`；主线程 `ModelContext`，`autosaveEnabled = true` 又叠加自动保存。
+**原现象（Wave 1 前，保留历史）**：
+
+- 旧实现（Wave 1 已修复）：容器失败时退回内存 store，用户以为已保存。
+- 旧实现（Wave 1 已修复）：SwiftData 自动保存与显式 save 叠加，错误被吞掉。
 - 无 `SchemaMigrationPlan`，字段变更可能崩库/丢库。
 
-**目标**：
+**已落地**：
 
-- 降级显性化：首页/历史显示“本机存储不可用”并提供重试；允许继续但不保存，明确标记；不静默丢历史。
-- 增量落盘：`append` 只传新增/变更行，或维护脏 ID 集合批量 flush；明确 autosave 与显式 save 二选一。
-- 加 v1→v2 迁移演练与自动化测试。
+- 可用性显式（`opening` / `ready` / `unavailable(reason)`），接口提供 `prepare()` / `retry()`；组合根不再 downcast。
+- 读结果区分「空」与「读失败」；写返回 `persisted` / `notPersisted(reason)`；`end` 返回 `ended` / `discardedEmpty` / `notPersisted`，先 append 再按 store 内容判空，失败保持运行中。
+- 首页/历史/详情共享「本机存储不可用」横幅 + 重试；已加载内容不清空；模块标记「本次内容不会保存」，结束后可从内存导出；不自动回填 memory-only 任务。
+- `SwiftDataTaskStore` 关闭 autosave，每个变更显式 `save()` 并 `rollback()`；写失败只自动重试一次，仍失败即停止。
+- 删除任务返回结果，历史/详情确认弹窗与失败提示已上线。
 
-**验收**：注入容器打开失败，UI 有明确提示；长会写入的 save 次数与耗时下降；迁移测试通过。
+**仍待后续**：
+
+- 增量落盘：`append` 仍按传入快照 upsert，长会写放大尚未量化/优化。
+- `SchemaMigrationPlan` v1→v2 演练与自动化测试（P3-1）。
+
+**验收状态**：单元测试覆盖 open/read/write/delete 失败、重试、空稿三态与 v1 样例 round-trip；iPhone 13 注入打开失败看横幅/重试/导出**未验证**，按 #13 真机清单执行。
 
 ---
 
@@ -141,9 +156,9 @@
 | P2-6 | 语言门禁仅覆盖首页设置 | 生产已注入 `SystemLanguageCatalog` 缓存；其余入口仍可选到不可用语言 | v1 扩展到所有语言入口（单语言能力） |
 | P2-7 | 界面文案 `pick` 六参 | `Copy.swift` 遍布六参 | 迁移到 String Catalog，冻结新增 `pick` 参数 |
 | P2-8 | MainActor 上的 LCS/compact | `SpokenText.isRefinement` 等在 VM 主线程 | 下沉后台纯函数，缓存 compact 结果 |
-| P2-9 | 恢复任务不恢复语言对 | `restore(from:)` 只回放文本 | v1 修复：恢复 `source/target` 并提示；首页具体任务/启动对账留 v1.x |
+| P2-9 | 恢复任务不恢复语言对（已修复 Wave 1 #4/#6–#8） | `TaskLifecycle.restore()` 返回任务语言对，VM 应用并提示「继续任务」 | 已闭环；首页具体任务/启动对账仍留 v1.x |
 | P3-1 | 无迁移计划 | `TaskEntity.schemaVersion` 只写不读 | 加 `SchemaMigrationPlan` 与演练 |
-| P3-2 | 空稿/误触结束 | `TaskSessionController.finish` 删除空稿 | 已有确认弹窗，保持 |
+| P3-2 | 空稿/误触结束（已修复 Wave 1） | `TaskLifecycle.endTask` + `TaskStoreV2.end` 按持久化内容判空稿；历史/详情删除有确认与失败提示（#5/#12） | 已闭环，保持 |
 | P3-3 | 重复能力检查/总结/胶囊样式 | 5 套能力检查、4 套总结、10+ 处 chip | 先抽 `ChipStyle` 与 `ModelPreparation` 协调器，再逐项迁移 |
 
 ---
@@ -178,13 +193,13 @@
 
 > 本节是排期的唯一真源；[`decisions.md`](decisions.md) 的 D1–D7 已于 2026-11-23 确认，本表按同一顺序导航，不重复预估。
 
-| 顺序 | 事项 | 依赖 | 预估 |
+| 顺序 | 事项 | 依赖 | 状态 / 预估 |
 | --- | --- | --- | --- |
-| 1 | P0-1 `SpeechSessionGate` + 测试 | 无 | 3–5 天 |
-| 2 | P0-3 降级显性化 + 增量落盘 | 无 | 3–5 天 |
-| 3 | P1-1 翻译队列合并 | 无 | 2–3 天 |
-| 4 | P0-2 长会话分段 | P0-3 | 1–2 周 |
-| 5 | P1-4 混读/短句质量 | 真机夹具 | 1–2 周 |
+| 1 | P0-1 `SpeechSessionGate` + `TaskLifecycle` + 三模块接入 + 测试 | 无 | 已完成 Wave 1（#3/#4/#6–#8） |
+| 2 | P0-3 降级显性化 + 结果化接缝 + 显式 save | 无 | 已完成 Wave 1（#2/#5/#12）；增量落盘、迁移演练仍待后续（3–5 天） |
+| 3 | P0-2 长会话显示窗口 + 计数 | P0-3 已完成部分 | 已完成 Wave 1（#9/#10/#11）；D7 续集任务组仍待后续（1–2 周） |
+| 4 | P1-1 翻译队列合并 | 无 | 未开始（2–3 天） |
+| 5 | P1-4 混读/短句质量 | 真机夹具 | 未开始（1–2 周） |
 
 同一失败检查修复 2 次仍失败，或同一子任务 3 轮修复-验证无进展时停止上报（团队规则）。
 

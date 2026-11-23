@@ -30,7 +30,7 @@
 | TTS | `AVSpeechSynthesizer` | 云 TTS / 自训模型 | 系统离线、六语有声、工程成本低 |
 | 朗读策略 | 仅耳机类路由；从句级 | 外放朗读 / 逐 volatile 读 | 外放会回灌麦克风；读半句体验差 |
 | 音频会话 | `.record/.measurement`；朗读时 `.playAndRecord/.default` | `.voiceChat` 全程 | measurement 保留干净 PCM；AEC 可能压掉对面 |
-| 存储 | SwiftData + `TaskStore` 协议 | Core Data 重栈 / JSON / UserDefaults | 类型映射自然、可注入内存实现 |
+| 存储 | SwiftData + `TaskStore` / `TaskStoreV2` 接缝 | Core Data 重栈 / JSON / UserDefaults | 类型映射自然、可注入内存实现；读写结果显式区分空/失败 |
 | 总结 | FoundationModels，仅可用时生成 | 云 LLM / 本地 digest 回退 | 无网络依赖；13 不支持就明说 |
 | 导出 | Caches 文本 + `ShareLink` | 第三方 SDK / 深链 | 系统分享覆盖所有目标 App |
 | DI | 手动构造 + 协议注入 | TCA / RIBs / Swinject | 三个模块体量不值得引入框架 |
@@ -73,6 +73,15 @@
 | 运行中热切单个 recognizer | 会丢当前句；双路更适合中英插话 |
 | `DictationTranscriber` | 偏听写/标点，实时对话字幕用 `SpeechTranscriber` 更合适 |
 | 打开 `ignoresResourceLimits` | 失败不可预测，不作为默认 |
+
+### 2.5 单流仲裁
+
+三模块共享一个 `BilingualSpeechEngine`，但统一入口是 `SpeechSessionGate`（actor）：
+
+- owner（`FeatureID`）+ 单调 generation 标识每个流；新 `start` 立即取代旧 owner。
+- 旧 owner/旧 generation 的 `stop` 是 no-op；被取代的流结束静默转 `pausedListening`，只有当前流非预期结束才报 `recognitionInterrupted`。
+- `start`/`stop` 串行化，teardown 对每个会话恰好一次；gate 不持有任务或 `SessionState`。
+- 不按模块复制引擎，不用 UI 锁冒充仲裁；真机快速切换仍按发布清单验证。
 
 ---
 
@@ -141,7 +150,7 @@
 
 ---
 
-## 6. 持久化：SwiftData + TaskStore
+## 6. 持久化：SwiftData + TaskStoreV2
 
 ### 6.1 为什么 SwiftData
 
@@ -158,17 +167,20 @@
 ### 6.2 结构
 
 - `TaskEntity` + `TranscriptEntity` 分表，cascade 删除，`sortIndex` 保序。
-- `TaskStore` 协议隔离存储；Feature 不写 `@Query`。
-- `DeferredTaskStore` 把 `ModelContainer` 打开移出首帧；失败时 v1 显性降级：横幅 + 重试，允许继续但不保存，不静默切内存（P0-3）。
-- `SwiftDataTaskStore` 使用主线程 `ModelContext(autosaveEnabled: true)`；`append` 全量 upsert。
+- 存储接缝分两层：`TaskStore` 管 `availability` / `prepare()` / `retry()`；`TaskStoreV2` 管结果化读写。Feature 不写 `@Query`。
+- `DeferredTaskStore` 把 `ModelContainer` 打开移出首帧；失败时保持 `unavailable` 并允许 `retry()`：横幅 + 重试，模块可继续但不保存，**绝不静默切到 `InMemoryTaskStore`**；读失败返回 `.unavailable`，写失败只自动重试一次（P0-3）。
+- `SwiftDataTaskStore` 使用主线程 `ModelContext`，`autosaveEnabled = false`；每个变更显式 `save()` 并返回 `persisted` / `notPersisted`，失败 `rollback()`。
+- `append` 按 entry ID upsert 传入条目；`end` 先 append pending，再以 store 内容判空稿，原子结束或删除。
 - 尚无 `SchemaMigrationPlan`；`schemaVersion` 字段已预留。
 
 ### 6.3 语义
 
-- 只有 `ended` 进历史；空稿结束自动删除。
+- 只有 `ended` 进历史；空稿由 `TaskStoreV2.end` 按持久化内容判断后删除。
 - 暂停只改 `pausedListening`，不结束任务。
 - 实时字幕以内存为准；落盘异步，View 不直接读 SwiftData 当实时状态。
 - 已结束任务的译文通过专用 `updateTranslations` 回填，不放宽 `append` 的写入规则。
+- 清屏先 `flush()`，只清显示；transcript、历史与导出始终全量。
+- 保存失败不轮询、不自动回填；当前任务标记 `isNotSaved`，结束不写历史但保留内存文字稿可导出。
 
 ---
 
@@ -204,8 +216,8 @@
 
 ## 9. 测试与性能
 
-- 单元：Swift Testing；协议注入使 VM 可用假引擎/假 store/假合成器；数量以当前测试结果为准。
-- UI：XCUITest，3 个；模拟器无 `SpeechTranscriber` 时语音用例 skip 是正确行为。
+- 单元：Swift Testing；协议注入使 VM 可用假引擎/假 store/假合成器；`TaskStoreV2` 失败路径用 `ScriptedTaskStore`；数量以当前测试结果为准。
+- UI：XCUITest，4 个；模拟器无 `SpeechTranscriber` 时语音用例 skip 是正确行为。
 - 真机：语音/翻译/TTS/持久化必须真机验证；原 harness 脚本未随提取保留。
 - 启动优化：已暂停。`AppLaunchTracker` + `EarlyLaunchMark` 保留口径；`Order/App.order` 是 Release 二进制重排生成物，禁止手写，收益在当前包体下不可测量。
 
@@ -215,11 +227,11 @@
 
 | 权衡 | 现状 | 影响 |
 | --- | --- | --- |
-| 单引擎共享 | 三 VM 共用一个 actor，无全局仲裁 | 快速切模块可能互相停流（P0-1） |
+| 单引擎共享 | 三 VM 经 `SpeechSessionGate` 共用一个 actor；owner + generation 仲裁 | 快速切模块不再互停（单测覆盖；真机待验） |
 | 双路资源 | 超限降级单路/去 Detector | 会丢一句，用户无提示 |
 | 翻译桥 | pending 单槽 + host 就绪后无界流 | volatile 高频时积压（P1-1） |
-| 持久化 | 主线程 ModelContext + 全量 upsert | 长会写放大（P0-3） |
-| 长会话 | Conversation 窗口 N=3、transcript 全量 / SI 50 条仅显示 / Meeting 2 万字续集 | 显示窗口有界，落盘全量（P0-2） |
+| 持久化 | 主线程 ModelContext + 显式 save（autosave off）+ 全量快照 upsert | 降级已显性；长会写放大与迁移计划仍待后续（P0-3/P3-1） |
+| 长会话 | Conversation 3 条/侧、SI 50 条仅显示、Meeting 2 万字累计；transcript 全量 | 显示窗口有界，落盘全量；D7 续集组后续 wave（P0-2） |
 | 语言切换 | config 变化重建 task，旧译文靠字数丢弃 | 可能漏一句/串语言（P1-3） |
 | 语种融合 | 脚本纯度门禁较严 | 中英混读可能丢句（P1-4） |
 | 目录能力 | `SystemLanguageCatalog` 缓存；门禁仅首页（v1 扩展） | 选到不支持的语言才失败（P2） |

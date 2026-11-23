@@ -17,7 +17,7 @@
 ## 3. 测试替身
 
 - 假引擎：记录 start/stop 顺序、可手动 emit `Utterance`、可模拟 finish/error；不连真麦克风、真模型。
-- 假 store：任务逻辑用 `InMemoryTaskStore`；SwiftData 行为用内存 container 或临时 store，不碰真实用户数据。
+- 假 store：任务逻辑用 `InMemoryTaskStore`（已是 `TaskStoreV2`）；打开失败/读失败/写失败用 `StorageTestSupport.swift` 的 `ScriptedTaskStore`；SwiftData 行为用内存 container 或临时 store，不碰真实用户数据。
 - 假合成器/假 audio session 只做协议实现；不要在测试里发起网络、真实语音资源下载。
 - **不得 mock 能力检查**（如 `SpeechTranscriber.isAvailable`）或改断言来“修绿”；模拟器语音 skip 是 UI 用例的预期行为。
 
@@ -40,4 +40,8 @@
 
 ## 7. 命令
 
-- `xcodebuild test -project Duiyi.xcodeproj -scheme Duiyi -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max'` 跑全量单元；加 `-only-testing:DuiyiTests/ConversationViewModelTests` 跑单文件/单用例。
+- 全量单元（串行，结果包可审计）：
+  `xcodebuild test -project Duiyi.xcodeproj -scheme Duiyi -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' -derivedDataPath /tmp/duiyi-dd -only-testing:DuiyiTests -parallel-testing-enabled NO -resultBundlePath /tmp/duiyi-unit.xcresult`
+  再用 `xcrun xcresulttool get test-results summary --path /tmp/duiyi-unit.xcresult` 判定 `Passed` / `failedTests = 0` / `skippedTests = 0`。
+- 加 `-only-testing:DuiyiTests/ConversationViewModelTests` 跑单文件/单用例。
+- `xcodebuild -quiet` 可能 exit 1 但实际全绿；不要只看 shell exit code，以 xcresult 摘要为准。
