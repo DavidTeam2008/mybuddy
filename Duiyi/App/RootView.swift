@@ -51,10 +51,9 @@ struct RootView: View {
         .task(priority: .utility) {
             // Post-first-frame prewarm (off critical path):
             // VMs themselves are cheap, but touching their code pages + store
-            // should not happen before Home paints.
-            if let deferred = environment.taskStore as? DeferredTaskStore {
-                await deferred.warm()
-            }
+            // should not happen before Home paints. `prepare()` is on the seam,
+            // so no concrete-store downcast is needed.
+            await environment.taskStore.prepare()
             rebuildViewModelsIfNeeded()
             AppLaunchTracker.shared.begin(.viewModelsReady)
         }

@@ -96,8 +96,74 @@ enum TaskStoreError: Error, Equatable, Sendable {
     case notFound
 }
 
+/// Why a storage operation could not complete.
+enum TaskStoreFailureReason: String, Equatable, Sendable {
+    /// The store is not open yet (or a previous open attempt failed).
+    case unavailable
+    /// Opening the underlying container failed.
+    case openFailed
+    /// Reading from the underlying store failed.
+    case readFailed
+    /// Persisting a change failed.
+    case saveFailed
+    /// The addressed task does not exist.
+    case notFound
+}
+
+enum TaskStoreAvailability: Equatable, Sendable {
+    case opening
+    case ready
+    case unavailable(TaskStoreFailureReason)
+}
+
+/// A read that distinguishes "empty" from "storage unavailable".
+enum TaskStoreReadResult<Value: Sendable>: Sendable {
+    case value(Value)
+    case unavailable(TaskStoreFailureReason)
+}
+
+extension TaskStoreReadResult: Equatable where Value: Equatable {}
+
+enum TaskStoreWriteOutcome: Equatable, Sendable {
+    case persisted
+    case notPersisted(TaskStoreFailureReason)
+}
+
+/// A write that also returns the created/updated value.
+enum TaskStoreWriteResult<Value: Sendable>: Sendable {
+    case persisted(Value)
+    case notPersisted(TaskStoreFailureReason)
+}
+
+extension TaskStoreWriteResult: Equatable where Value: Equatable {}
+
+/// The single verdict of `end`: history (`ended`), empty discard, or failure.
+enum TaskStoreEndResult: Equatable, Sendable {
+    case ended(TaskSession)
+    case discardedEmpty
+    case notPersisted(TaskStoreFailureReason)
+}
+
+/// Everything the adapters need to create a task. The localized title is
+/// composed by the lifecycle/UI; adapters never choose the title language.
+struct TaskDraft: Equatable, Sendable {
+    var feature: FeatureID
+    var sourceLanguage: AppLanguage
+    var targetLanguage: AppLanguage?
+    var multilingual: Bool
+    var startedAt: Date
+    var title: String
+}
+
 @MainActor
 protocol TaskStore: AnyObject {
+    /// Single observable availability shared by every consumer of the seam.
+    var availability: TaskStoreAvailability { get }
+    /// Resolves the deferred open at most once. Safe to call repeatedly.
+    func prepare() async
+    /// Retries a failed open. No-op when already ready.
+    func retry() async
+
     func activeTask(for feature: FeatureID) async -> TaskSession?
     func unfinishedTasks() async -> [TaskSession]
     func startNew(
@@ -115,6 +181,35 @@ protocol TaskStore: AnyObject {
     func list(filter: FeatureID?) async -> [TaskSession]
     func task(id: UUID) async -> TaskSession?
     func delete(id: UUID) async throws
+}
+
+/// Result-carrying storage seam (Wave 1, ticket #2).
+///
+/// This refines `TaskStore` beside the legacy methods above so existing
+/// Home/History/ViewModel call sites keep compiling during the expand step.
+/// Consumers migrating to the v2 contract use the `read*` and result-returning
+/// write methods; ticket #12 deletes the legacy methods.
+@MainActor
+protocol TaskStoreV2: TaskStore {
+    func readActiveTask(for feature: FeatureID) async -> TaskStoreReadResult<TaskSession?>
+    func readUnfinishedTasks() async -> TaskStoreReadResult<[TaskSession]>
+    func readList(filter: FeatureID?) async -> TaskStoreReadResult<[TaskSession]>
+    func readTask(id: UUID) async -> TaskStoreReadResult<TaskSession?>
+
+    func startNew(_ draft: TaskDraft) async -> TaskStoreWriteResult<TaskSession>
+    func append(_ entries: [TranscriptEntry], to taskID: UUID) async -> TaskStoreWriteOutcome
+    func updateTranslations(_ entries: [TranscriptEntry], for taskID: UUID) async -> TaskStoreWriteOutcome
+    func setStatus(_ status: TaskStatus, for taskID: UUID) async -> TaskStoreWriteOutcome
+    func saveSummary(_ summary: ConversationSummary, for taskID: UUID) async -> TaskStoreWriteOutcome
+    /// Atomic end: appends `entries`, then decides from the store's persisted
+    /// transcript whether to end into history or discard an empty task. On
+    /// `notPersisted` the task stays running and is not deleted.
+    func end(
+        taskID: UUID,
+        entries: [TranscriptEntry],
+        summary: ConversationSummary?
+    ) async -> TaskStoreEndResult
+    func deleteTask(id: UUID) async -> TaskStoreWriteOutcome
 }
 
 protocol ExportSharing: Sendable {
