@@ -106,7 +106,7 @@
 
 ### P1-1 翻译队列积压
 
-**现象**：`TranslationJobBridge.pending` 只有 1 个槽位，但 host 就绪后 `AsyncStream` 无界；高频 volatile 会排队。`fulfill` 用 `lastAppliedSourceCount` 丢弃过期结果，但积压仍占 session、抬高延迟。同传 voiceOut 档防抖更激进（25/50 ms）。
+**现象**：`TranslationJobBridge.pending` 只有 1 个槽位，但 host 就绪后 `AsyncStream` 无界；高频 volatile 会排队。`TranslationPipeline.accept` 用 `lastAppliedSourceCount` 丢弃过期结果，但积压仍占 session、抬高延迟。同传 voiceOut 档防抖更激进（25/50 ms）。
 
 **目标**：Bridge 改为“每个 utteranceID 只保留最新 job”；`pump` 取最新后清空同 ID 积压；必要时按 session 繁忙度自适应防抖。
 
@@ -129,9 +129,11 @@
 
 ### P1-3 切换语言后的旧翻译状态
 
-**现象**：语言对变化时 `ConversationView` / `InterpretationView` 用 `.id` 重建 Host，旧 session 取消；但 VM 的 `outboundJob`、`sentSourceText`、`lastAppliedSourceCount`、`utteranceAliases` 等状态可能残留（`resetCaptions` 会清，但 `setUserLanguage` / `handlePairChange` 的时序可能漏一句）。
+**现象**：语言对变化时 `ConversationView` / `InterpretationView` 用 `.id` 重建 Host，旧 session 取消；翻译态（`outboundJob`、防抖、`sentSourceText`、`lastAppliedSourceCount`、aliases）现由 `TranslationPipeline` 持有，`reset()` 会一并清空，但 `setUserLanguage` / `handlePairChange` 的调用时序仍可能漏一句。
 
-**目标**：`applyDirectionChange` / `setUserLanguage` / `handlePairChange` 统一清空翻译态：`outboundJob = nil`、取消防抖、清 `sentSourceText`/`lastApplied`/`utteranceAliases`，再重建配置。
+**目标**：`applyDirectionChange` / `setUserLanguage` / `handlePairChange` 在重建配置前统一调用 `pipeline.reset()`。
+
+**状态**：Wave 2（#19）已统一 reset 接缝（`TranslationPipeline.reset()`）；P1-3 的时序行为修复尚未开始，不能据此宣称已修复。
 
 **验收**：切换语言立即说话，不出现旧语言译文写入新行；无串行/重复。
 

@@ -14,7 +14,7 @@
 ## 2. 翻译：Session 只在 Host View
 
 - `TranslationSession` 只能出现在 `*TranslationHostView` 的 `.translationTask`：`Features/Shared/TranslationHostView.swift`（含 `OneWayTranslationHostView`）。Services 不持有、不调用 `TranslationSession`。
-- job 合并/过期丢弃在 `TranslationJobBridge`；P1-1 前不扩大缓冲、不改队列语义。
+- `TranslationJobBridge` 只负责单 pending 槽与 host 就绪后的无界流；job 形成、防抖、过期丢弃在 `Features/Shared/TranslationPipeline`，bridge 不做每句合并。P1-1 前不扩大缓冲、不改队列语义。
 - 语言对变化由 `.id` 重建 Host；Service 只提供 availability（`TranslationAvailabilityChecking`）。
 
 ## 3. 持久化：结果化接缝、内存为准

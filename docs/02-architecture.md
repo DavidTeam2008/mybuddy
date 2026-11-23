@@ -41,7 +41,7 @@ DuiyiUITests/     XCUITest 用例（4 个）
 
 两个系统约束必须写进设计，而不是假装它们不存在：
 
-1. **`TranslationSession` 只能锚在 View 上**（`.translationTask`）。Service 层只产生 `TranslationJob`，由 `TranslationHostView` / `OneWayTranslationHostView` 执行并回调 ViewModel。
+1. **`TranslationSession` 只能锚在 View 上**（`.translationTask`）。共享 `TranslationPipeline` 形成 `TranslationJob`，由 `TranslationHostView` / `OneWayTranslationHostView` 执行并回调 ViewModel；Service 层不持有 session。
 2. **`SpeechAnalyzer` 是长生命周期资源**。当前由一个 `BilingualSpeechEngine` actor 统一持有，三个常驻 ViewModel 经 `SpeechSessionGate` 共享；gate 用 owner + generation 仲裁唯一听写流（P0-1 已关闭，见 [`04-roadmap.md`](04-roadmap.md)）。
 
 ---
@@ -214,7 +214,14 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 
 ---
 
-## 5. 翻译：View 锚定 + 桥
+## 5. 翻译：共享管线 + View 锚定 Host
+
+翻译 job 的生命周期与 Host 执行分离：
+
+- `TranslationPipeline`（`Duiyi/Features/Shared/TranslationPipeline.swift`，`@MainActor @Observable`）拥有 job 形成、防抖/取消、重复抑制、过期判定、单槽 `outboundJob`，以及 `sentSourceText` / `lastAppliedSourceCount` / utterance aliases。
+- `TranslationHostView` / `OneWayTranslationHostView` 只是 `.translationTask` 的泵适配器：从 ViewModel 取得 `outboundJob`，串行 `session.translate`，成功/失败回调 ViewModel。
+- 两个 ViewModel 只保留 feature 策略与副作用：Conversation 做语言路由与 crosstalk，并把结果写入两侧 pane/transcript；Interpretation 选目标语言、写单栏 pane/transcript 并调度 TTS。`fulfill` 是薄适配器：`pipeline.accept` 返回 `TranslationUpdate` 后写 UI。
+- `TranslationTrigger`（Domain 纯函数）只回答非 final 文本是否立即发送；final 旁路属于 pipeline。
 
 ### 5.1 Host
 
@@ -242,19 +249,30 @@ TranslationSession.Configuration(
 
 - Host 未就绪（`translationTask` 还没启动）时，只保留最后一个 job。
 - Host 已就绪时直接 `yield` 到无界 `AsyncStream`，由 `pump` 串行 `session.translate`。
-- 因此高频 volatile 在 host 就绪后仍可能排队；`fulfill` 用 `lastAppliedSourceCount` 丢弃源字数倒退的过期译文（P1-1）。
+- 因此高频 volatile 在 host 就绪后仍可能排队；过期判定在 `TranslationPipeline.accept`，按各自的 `StalePolicy` 丢弃源字数倒退的译文（P1-1）。
 
-### 5.3 节流与去抖
+### 5.3 TranslationPipeline
 
-`ConversationViewModel.enqueueTranslation`（同传复用同一阈值）：
+- 接口：`submit(TranslationSubmission)`、`accept(job:text:) -> TranslationUpdate?`、`fail(job:)`、`reset()`、`outboundJob`、`registerAlias(_:to:)`。
+- `TranslationSubmission` 由 feature 在提交时算好行、`isFinal`、目标语言、首包/后续延迟；pipeline 不读取 feature 状态。
+- 非 final 立即发送由 `TranslationTrigger.shouldSendNow(text:isFirst:language:)` 决定（六语脚本阈值 + `ClauseSplitter` 终止符）；final 直接旁路防抖。
+- 空文本直接返回且不清 `outboundJob`；同一行同文本的非 final 不重复提交，重复 final 仍提交；新提交取消上一防抖。
+- 过期策略显式注入：面对面 `.dropShorterNonFinal`（final 总是应用），同传 `.dropShorterAny`（更短一律丢弃）；两种策略刻意不统一。
+- `accept` / `fail` 只在 job ID 匹配时清空 `outboundJob`，迟到的失败不会清掉新 job；`reset()` 取消防抖并清空 `outboundJob`、`sentSourceText`、`lastAppliedSourceCount` 与 aliases。
+- `accept` 解析 alias 并返回 canonical `utteranceID`；feature 不再维护自己的 alias 表或 `canonicalID` 辅助函数。
+- 调度器可注入：生产用 `Task.sleep`，测试用手动调度器确定性驱动防抖窗口。
 
-- 空文本剪枝。
-- 同一行同文本且非 final → 不重复发送。
-- 立即发送：final、文本以从句标点结尾、或首包且文本值得翻译。
-- 否则防抖：首包 40 ms，后续 90 ms；同传 voiceOut 开启时 25/50 ms。
-- 翻译结果按 `utteranceAliases` 找行；`applyTranslation` 同时尝试写入两侧 pane，再更新 transcript。
+### 5.4 节流与去抖
 
-### 5.4 取消
+| feature | 目标语言 | 首包/后续延迟 | 过期策略 |
+| --- | --- | --- | --- |
+| 面对面 | `LanguageRouter.targetLanguage(detected:userLanguage:peerLanguage:)` | 40/90 ms | `.dropShorterNonFinal` |
+| 同传 | 用户选中的目标语言 | voiceOut 开 25/50 ms；否则 40/90 ms | `.dropShorterAny` |
+
+- ViewModel 在提交时计算目标与延迟，调用 `pipeline.submit`，自身不再持有防抖 Task、`sentSourceText`、`lastAppliedSourceCount` 或 aliases。
+- 结果经 `pipeline.accept` 解析 canonical 行并判过期；Conversation 先写两侧 pane 再更新 transcript，Interpretation 先写字幕再按既有 380 ms 结算调度 TTS。
+
+### 5.5 取消
 
 `TranslationErrorDomain` 14/20 与 `CancellationError` 视为过期，不弹错。真正失败只记日志/状态，不把系统错误直接丢上字幕板。
 
@@ -271,8 +289,8 @@ Utterance
   → 确定 listener / speaker
   → PaneState.applyLive（续句/问候/新句）
   → upsertTranscript
-  → enqueueTranslation → TranslationHostView
-  → fulfill → PaneState.applyTranslation + transcript
+  → enqueueTranslation → TranslationPipeline.submit → TranslationHostView
+  → fulfill → TranslationPipeline.accept → PaneState.applyTranslation + transcript
   → settled 时 TaskLifecycle.persist（250ms 防抖）
 ```
 
@@ -288,8 +306,8 @@ Utterance
 Utterance
   → guard utterance.language == sourceLanguage
   → PaneState.applyLive + transcript
-  → enqueueTranslation（单向 source→target）
-  → fulfill → 字幕
+  → TranslationPipeline.submit（单向 source→target）
+  → fulfill → TranslationPipeline.accept → 字幕
   → settled → ClauseSplitter.consume → TTS 队列
 ```
 
@@ -386,6 +404,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 | `DeferredTaskStore` / `SwiftDataTaskStore` | `@MainActor` | 主上下文 |
 | `LanguageRouter` / `UtteranceAssembler` / `SpokenText` / `ClauseSplitter` | `Sendable` 值语义 | 可重入、可单测 |
 | `SystemSpeechSynthesizer` | `@MainActor` + delegate | AVSpeechSynthesizer 代理回调 |
+| `TranslationPipeline` | `@MainActor` + `@Observable` | 翻译 job 生命周期与 UI 状态 |
 | `TranslationJobBridge` | `@unchecked Sendable` + `NSLock` | 跨 View 任务与流 |
 
 `SendablePCMBuffer` 用 `@unchecked Sendable` 包装 `AVAudioPCMBuffer`，跨 actor 传递，责任在音频层。
@@ -396,8 +415,9 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 
 | 层级 | 覆盖 | 入口 |
 | --- | --- | --- |
-| Domain 纯逻辑 | 路由、assembler、spoken 合并、clause、任务映射 | `DuiyiTests`（Swift Testing） |
-| ViewModel / 生命周期 | 三模块状态机、翻译过期丢弃、清屏、任务恢复、TTS 队列、`TaskLifecycle`/`SpeechSessionGate` 接缝 | `DuiyiTests` |
+| Domain 纯逻辑 | 路由、assembler、spoken 合并、clause、翻译触发阈值、任务映射 | `DuiyiTests`（Swift Testing） |
+| 翻译管线 | job 形成、防抖/取消、重复抑制、两种过期策略、单槽 `outboundJob`、别名、`reset` | `DuiyiTests`（`TranslationPipelineTests`） |
+| ViewModel / 生命周期 | 三模块状态机、pipeline 接线、清屏、任务恢复、TTS 队列、`TaskLifecycle`/`SpeechSessionGate` 接缝 | `DuiyiTests` |
 | 音频策略 | 路由快照/回声判定 | `DuiyiTests` |
 | UI | 冷启动、首页导航、同传听写压力、滑动返回 | `DuiyiUITests`（XCTest，4 个用例） |
 | 真机 | 语音、翻译、TTS、持久化、长会话 | 真机手动验证（原 harness 脚本未随提取保留） |
@@ -425,7 +445,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 | 入口/组装 | `Duiyi/App/DuiyiApp.swift`、`AppEnvironment.swift`、`RootView.swift`、`AppCoordinator.swift`、`FeatureRegistry.swift`、`PreferencesStore.swift` |
 | 音频 | `Duiyi/Services/Audio/AudioEngineCapturer.swift`、`BufferConverter.swift`、`AudioSessionPolicy.swift` |
 | 听写 | `Duiyi/Services/Speech/BilingualSpeechEngine.swift`、`SpeechSessionGate.swift`、`UtteranceAssembler.swift`、`Duiyi/Services/ServiceProtocols.swift` |
-| 翻译 | `Duiyi/Features/Shared/TranslationHostView.swift`、`Duiyi/Domain/Models/TranslationJob.swift`、`Duiyi/Services/Translation/TranslationAvailabilityService.swift` |
+| 翻译 | `Duiyi/Features/Shared/TranslationPipeline.swift`、`Duiyi/Domain/Models/TranslationTrigger.swift`、`Duiyi/Features/Shared/TranslationHostView.swift`、`Duiyi/Domain/Models/TranslationJob.swift`、`Duiyi/Services/Translation/TranslationAvailabilityService.swift` |
 | 面对面 | `Duiyi/Features/Conversation/ConversationView.swift`、`ConversationViewModel.swift`、`CaptionPaneView.swift`、`ListeningControl.swift` |
 | 同传 | `Duiyi/Features/Interpretation/InterpretationView.swift`、`InterpretationViewModel.swift`、`DirectionBar.swift`、`VoiceOutControl.swift`、`Duiyi/Domain/Models/Clause.swift` |
 | 会议 | `Duiyi/Features/Meeting/MeetingView.swift`、`MeetingViewModel.swift` |

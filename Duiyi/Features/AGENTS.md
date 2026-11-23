@@ -15,9 +15,10 @@
 - 长 I/O 交给 Service（`DeferredTaskStore` 已延迟开库）；不要在 `body`、`init` 或首帧路径做同步文件/SwiftData 工作。
 - 回调用 `Task { @MainActor in ... }`；不要用 `Task.detached` 改 UI 状态；任务取消后不得写入过期状态。
 
-## 3. 翻译锚 View、字幕以内存为准
+## 3. 翻译走 `TranslationPipeline`、锚 View，字幕以内存为准
 
-- 需要翻译时由 VM 产出 `TranslationJob`，交给 `TranslationHostView` / `OneWayTranslationHostView` 的 `.translationTask`；VM 不持有 `TranslationSession`。
+- 需要翻译时由 VM 调 `Shared/TranslationPipeline.submit(TranslationSubmission)`：行、`isFinal`、目标语言与首包/后续延迟在提交时算好。pipeline 负责 job 形成、防抖/取消、重复抑制、过期判定、单槽 `outboundJob` 与 aliases；VM 不再自持防抖 Task、`sentSourceText`、`lastAppliedSourceCount` 或 `utteranceAliases`。
+- `fulfill` 只把 `pipeline.accept` 返回的 `TranslationUpdate` 写入 pane/transcript；同传再按既有 380 ms 结算调度 TTS。View 从 VM 的 `outboundJob` 计算属性取 job，交给 `TranslationHostView` / `OneWayTranslationHostView` 的 `.translationTask`；VM 不持有 `TranslationSession`。
 - 现场字幕读 VM 的 `PaneState`/内存数组，不读 SwiftData；落盘异步，View 不等待落盘再更新。
 
 ## 4. 任务语义（交互必须保持）
