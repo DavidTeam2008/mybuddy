@@ -4,7 +4,7 @@ import Testing
 
 /// Deterministic debounce scheduler: time only moves when the test advances it.
 @MainActor
-private final class ManualTranslationScheduler: TranslationScheduler {
+final class ManualTranslationScheduler: TranslationScheduler {
     @MainActor
     private final class Work: TranslationScheduledTask {
         let delay: Duration

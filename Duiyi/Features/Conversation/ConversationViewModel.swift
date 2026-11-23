@@ -24,7 +24,6 @@ final class ConversationViewModel {
     var peerPane = PaneState.empty
     var isSettingsPresented = false
     var isSummaryPresented = false
-    var outboundJob: TranslationJob?
     var autoStartListening: Bool
     var holdScreenAfterPause = false
     var transcript: [TranscriptEntry] = []
@@ -41,15 +40,12 @@ final class ConversationViewModel {
     var resumePromptText: String?
 
     private var speechTask: Task<Void, Never>?
-    private var translationDebounce: Task<Void, Never>?
     private var idleRestoreTask: Task<Void, Never>?
     private var routedSideByUtterance: [UUID: SpeakerSide] = [:]
     private var lastCommittedLanguage: AppLanguage?
     private var lastCommittedAt = Date.distantPast
-    private var lastAppliedSourceCount: [UUID: Int] = [:]
-    private var sentSourceText: [UUID: String] = [:]
-    private var utteranceAliases: [UUID: UUID] = [:]
     private let idleRestoreDelay: Duration
+    private let pipeline: TranslationPipeline
 
     init(
         gate: any SpeechSessionGating,
@@ -58,7 +54,8 @@ final class ConversationViewModel {
         summarizer: any ConversationSummarizing,
         audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
-        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds)
+        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
+        translationScheduler: any TranslationScheduler = TaskTranslationScheduler()
     ) {
         lifecycle = TaskLifecycle(
             feature: .faceToFace,
@@ -66,6 +63,10 @@ final class ConversationViewModel {
             gate: gate,
             permissions: permissions,
             audioSession: audioSession
+        )
+        pipeline = TranslationPipeline(
+            stalePolicy: .dropShorterNonFinal,
+            scheduler: translationScheduler
         )
         self.permissions = permissions
         self.preferences = preferences
@@ -86,7 +87,8 @@ final class ConversationViewModel {
         summarizer: any ConversationSummarizing,
         audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
-        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds)
+        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
+        translationScheduler: any TranslationScheduler = TaskTranslationScheduler()
     ) {
         self.init(
             gate: SpeechSessionGate(engine: speech),
@@ -95,7 +97,8 @@ final class ConversationViewModel {
             summarizer: summarizer,
             audioSession: audioSession,
             taskStore: taskStore,
-            idleRestoreDelay: idleRestoreDelay
+            idleRestoreDelay: idleRestoreDelay,
+            translationScheduler: translationScheduler
         )
     }
 
@@ -103,6 +106,7 @@ final class ConversationViewModel {
     var taskStartedAt: Date? { lifecycle.startedAt }
     var isMemoryOnly: Bool { lifecycle.isMemoryOnly }
     var isNotSaved: Bool { lifecycle.isNotSaved }
+    var outboundJob: TranslationJob? { pipeline.outboundJob }
 
     var canSummarize: Bool {
         transcript.contains { !$0.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -325,14 +329,10 @@ final class ConversationViewModel {
         userPane.resetCaptions()
         peerPane.resetCaptions()
         transcript = []
-        outboundJob = nil
-        translationDebounce?.cancel()
+        pipeline.reset()
         routedSideByUtterance.removeAll()
         lastCommittedLanguage = nil
         lastCommittedAt = .distantPast
-        lastAppliedSourceCount.removeAll()
-        sentSourceText.removeAll()
-        utteranceAliases.removeAll()
         summary = nil
         summaryError = nil
     }
@@ -447,12 +447,12 @@ final class ConversationViewModel {
            ) {
             captionID = UUID()
             carriedTranslation = ""
-            utteranceAliases[utterance.id] = captionID
+            pipeline.registerAlias(utterance.id, to: captionID)
         } else if let existing, existing.source == utterance.language,
            SpokenText.isContinuation(utterance.text, of: existing.sourceText, language: utterance.language) {
             captionID = existing.id
             carriedTranslation = existing.translatedText
-            utteranceAliases[utterance.id] = existing.id
+            pipeline.registerAlias(utterance.id, to: existing.id)
         } else {
             captionID = utterance.id
             carriedTranslation = existing?.id == utterance.id ? existing?.translatedText ?? "" : ""
@@ -476,23 +476,16 @@ final class ConversationViewModel {
     }
 
     func fulfill(job: TranslationJob, text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        if !job.isFinal, let applied = lastAppliedSourceCount[canonicalID(job.utteranceID)], applied > job.text.count {
-            return
-        }
-        let utteranceID = canonicalID(job.utteranceID)
-        lastAppliedSourceCount[utteranceID] = max(lastAppliedSourceCount[utteranceID] ?? 0, job.text.count)
-        applyTranslation(utteranceID: utteranceID, text: trimmed, settle: job.isFinal)
-        if outboundJob?.id == job.id {
-            outboundJob = nil
-        }
+        guard let update = pipeline.accept(job: job, text: text) else { return }
+        applyTranslation(
+            utteranceID: update.utteranceID,
+            text: update.text,
+            settle: update.job.isFinal
+        )
     }
 
     func failTranslation(job: TranslationJob, error: Error) {
-        if outboundJob?.id == job.id {
-            outboundJob = nil
-        }
+        pipeline.fail(job: job)
     }
 
     func requestSummary() async {
@@ -526,43 +519,19 @@ final class ConversationViewModel {
     }
 
     private func enqueueTranslation(_ line: CaptionLine, isFinal: Bool) {
-        let text = line.sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        if sentSourceText[line.id] == text, !isFinal {
-            return
-        }
-
-        let job = TranslationJob(
-            utteranceID: line.id,
-            source: line.source,
-            target: LanguageRouter.targetLanguage(
-                detected: line.source,
-                userLanguage: userLanguage,
-                peerLanguage: peerLanguage
-            ),
-            text: text,
-            isFinal: isFinal
+        pipeline.submit(
+            TranslationSubmission(
+                line: line,
+                isFinal: isFinal,
+                target: LanguageRouter.targetLanguage(
+                    detected: line.source,
+                    userLanguage: userLanguage,
+                    peerLanguage: peerLanguage
+                ),
+                firstDelay: .milliseconds(ConversationLayout.firstTranslationDebounceMilliseconds),
+                delay: .milliseconds(ConversationLayout.translationDebounceMilliseconds)
+            )
         )
-        let isFirst = sentSourceText[line.id] == nil
-        let shouldFlush = isFinal
-            || Self.endsWithClause(text)
-            || (isFirst && Self.isWorthTranslating(text, language: line.source))
-
-        translationDebounce?.cancel()
-        if shouldFlush {
-            sentSourceText[line.id] = text
-            outboundJob = job
-            return
-        }
-        let delay = isFirst
-            ? ConversationLayout.firstTranslationDebounceMilliseconds
-            : ConversationLayout.translationDebounceMilliseconds
-        translationDebounce = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(delay))
-            guard !Task.isCancelled else { return }
-            self?.sentSourceText[line.id] = text
-            self?.outboundJob = job
-        }
     }
 
     private func applyTranslation(utteranceID: UUID, text: String, settle: Bool) {
@@ -633,10 +602,6 @@ final class ConversationViewModel {
             transcript.remove(at: cursor - 1)
             cursor -= 1
         }
-    }
-
-    private func canonicalID(_ id: UUID) -> UUID {
-        utteranceAliases[id] ?? id
     }
 
     private func shouldIgnoreCrosstalk(_ utterance: Utterance) -> Bool {
@@ -786,6 +751,8 @@ final class ConversationViewModel {
         }
     }
 
+    // TranslationTrigger now owns this policy for face-to-face; Interpretation
+    // still borrows these until ticket #18 migrates it. Remove in #19.
     static func endsWithClause(_ text: String) -> Bool {
         guard let last = text.last else { return false }
         return last.unicodeScalars.allSatisfy { ClauseSplitter.terminators.contains($0) }
