@@ -76,6 +76,50 @@ extension Copy {
         )
     }
 
+    static func storageUnavailable(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "本机存储不可用",
+            en: "On-device storage unavailable",
+            ja: "端末の保存領域を利用できません",
+            ko: "기기 저장 공간을 사용할 수 없습니다",
+            th: "ใช้ที่เก็บข้อมูลในเครื่องไม่ได้",
+            vi: "Bộ nhớ trên thiết bị không khả dụng"
+        )
+    }
+
+    static func deleteFailed(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "删除失败，请重试。",
+            en: "Delete failed. Try again.",
+            ja: "削除できませんでした。もう一度お試しください。",
+            ko: "삭제하지 못했습니다. 다시 시도해 주세요.",
+            th: "ลบไม่สำเร็จ ลองอีกครั้ง",
+            vi: "Xóa không thành công. Hãy thử lại."
+        )
+    }
+
+    static func summarySaveFailed(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "总结未能保存。",
+            en: "The summary wasn't saved.",
+            ja: "要約を保存できませんでした。",
+            ko: "요약을 저장하지 못했습니다.",
+            th: "บันทึกสรุปไม่สำเร็จ",
+            vi: "Không lưu được bản tóm tắt."
+        )
+    }
+
+    static func translationSaveFailed(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "译文未能保存。",
+            en: "The translation wasn't saved.",
+            ja: "訳を保存できませんでした。",
+            ko: "번역을 저장하지 못했습니다.",
+            th: "บันทึกคำแปลไม่สำเร็จ",
+            vi: "Không lưu được bản dịch."
+        )
+    }
+
     static func homeButton(for language: AppLanguage) -> String {
         language.pick(zh: "首页", en: "Home", ja: "ホーム", ko: "홈", th: "หน้าแรก", vi: "Trang chủ")
     }
