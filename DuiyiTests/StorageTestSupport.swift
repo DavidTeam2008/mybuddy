@@ -15,15 +15,26 @@ final class ScriptedTaskStore: TaskStoreV2 {
     var deleteFailure: TaskStoreFailureReason?
     var saveSummaryFailure: TaskStoreFailureReason?
     var updateTranslationsFailure: TaskStoreFailureReason?
+    var startNewFailure: TaskStoreFailureReason?
+    var appendFailure: TaskStoreFailureReason?
+    var endFailure: TaskStoreFailureReason?
+    var setStatusFailure: TaskStoreFailureReason?
 
     /// Availability applied by `retry()`; set to `.ready` to model recovery.
     var retryAvailability: TaskStoreAvailability = .ready
+
+    /// Optional observer for cross-seam ordering tests. Receives stable event
+    /// names such as `store-start-new`, `store-append`, and `store-end`.
+    var eventSink: ((String) -> Void)?
 
     private(set) var prepareCalls = 0
     private(set) var retryCalls = 0
     private(set) var deleteCalls = 0
     private(set) var saveSummaryCalls = 0
     private(set) var updateTranslationsCalls = 0
+    private(set) var startNewCalls = 0
+    private(set) var appendCalls = 0
+    private(set) var endCalls = 0
 
     init(
         availability: TaskStoreAvailability = .ready,
@@ -130,11 +141,17 @@ final class ScriptedTaskStore: TaskStoreV2 {
     // MARK: - TaskStoreV2 writes
 
     func startNew(_ draft: TaskDraft) async -> TaskStoreWriteResult<TaskSession> {
-        await base.startNew(draft)
+        startNewCalls += 1
+        eventSink?("store-start-new")
+        if let startNewFailure { return .notPersisted(startNewFailure) }
+        return await base.startNew(draft)
     }
 
     func append(_ entries: [TranscriptEntry], to taskID: UUID) async -> TaskStoreWriteOutcome {
-        await base.append(entries, to: taskID)
+        appendCalls += 1
+        eventSink?("store-append")
+        if let appendFailure { return .notPersisted(appendFailure) }
+        return await base.append(entries, to: taskID)
     }
 
     func updateTranslations(_ entries: [TranscriptEntry], for taskID: UUID) async -> TaskStoreWriteOutcome {
@@ -144,7 +161,8 @@ final class ScriptedTaskStore: TaskStoreV2 {
     }
 
     func setStatus(_ status: TaskStatus, for taskID: UUID) async -> TaskStoreWriteOutcome {
-        await base.setStatus(status, for: taskID)
+        if let setStatusFailure { return .notPersisted(setStatusFailure) }
+        return await base.setStatus(status, for: taskID)
     }
 
     func saveSummary(_ summary: ConversationSummary, for taskID: UUID) async -> TaskStoreWriteOutcome {
@@ -158,7 +176,10 @@ final class ScriptedTaskStore: TaskStoreV2 {
         entries: [TranscriptEntry],
         summary: ConversationSummary?
     ) async -> TaskStoreEndResult {
-        await base.end(taskID: taskID, entries: entries, summary: summary)
+        endCalls += 1
+        eventSink?("store-end")
+        if let endFailure { return .notPersisted(endFailure) }
+        return await base.end(taskID: taskID, entries: entries, summary: summary)
     }
 
     func deleteTask(id: UUID) async -> TaskStoreWriteOutcome {

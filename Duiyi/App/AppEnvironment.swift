@@ -8,6 +8,9 @@ final class AppEnvironment {
     let speechModels: any SpeechModelPreparing
     let translationAvailability: any TranslationAvailabilityChecking
     let speechEngine: any SpeechRecognizing
+    /// The one arbitration seam for the shared engine. Features migrating to
+    /// `TaskLifecycle` listen through this gate.
+    let speechGate: any SpeechSessionGating
     let summarizer: any ConversationSummarizing
     let audioSession: any AudioSessionConfiguring
     let synthesizer: any SpeechSynthesizing
@@ -21,6 +24,7 @@ final class AppEnvironment {
         speechModels: any SpeechModelPreparing = SpeechAssetPreparer(),
         translationAvailability: any TranslationAvailabilityChecking = TranslationAvailabilityService(),
         speechEngine: any SpeechRecognizing = BilingualSpeechEngine(),
+        speechGate: (any SpeechSessionGating)? = nil,
         summarizer: any ConversationSummarizing = FoundationModelsSummarizer(),
         audioSession: any AudioSessionConfiguring = AudioSessionPolicy(),
         synthesizer: any SpeechSynthesizing = SystemSpeechSynthesizer(),
@@ -33,6 +37,7 @@ final class AppEnvironment {
         self.speechModels = speechModels
         self.translationAvailability = translationAvailability
         self.speechEngine = speechEngine
+        self.speechGate = speechGate ?? SpeechSessionGate(engine: speechEngine)
         self.summarizer = summarizer
         self.audioSession = audioSession
         self.synthesizer = synthesizer

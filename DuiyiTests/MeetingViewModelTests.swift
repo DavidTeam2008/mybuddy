@@ -141,13 +141,296 @@ struct MeetingViewModelTests {
         #expect(viewModel.transcript.first?.sourceText.contains("你们会愿意") == true)
     }
 
+    @Test("Beginning a new task stops the old stream before ending, keeping old lines out of the new task")
+    func beginStopsOldStreamBeforeEnding() async {
+        let log = MeetingEventLog()
+        let store = ScriptedTaskStore()
+        store.eventSink = { log.record($0) }
+        let gate = MeetingFakeGate(log: log)
+        let viewModel = makeViewModel(store: store, gate: gate)
+
+        await viewModel.beginTask()
+        await viewModel.start()
+        #expect(viewModel.sessionState == .listening)
+        viewModel.accept(Utterance(language: .zhHans, text: "旧任务最后一句", isFinal: true))
+
+        await viewModel.beginTask()
+
+        #expect(log.contains("gate-stop"))
+        #expect(log.contains("store-end"))
+        let stopIndex = log.firstIndex(of: "gate-stop")
+        let endIndex = log.firstIndex(of: "store-end")
+        #expect(stopIndex != nil && endIndex != nil && stopIndex! < endIndex!)
+        #expect(viewModel.transcript.isEmpty)
+        let active = await store.base.activeTask(for: .meeting)
+        #expect(active?.entries.isEmpty == true)
+        let ended = await store.base.list(filter: .meeting)
+        #expect(ended.first?.entries.contains { $0.sourceText == "旧任务最后一句" } == true)
+    }
+
+    @Test("Ending immediately still flushes the last settled line")
+    func endFlushesPendingCaption() async {
+        let store = InMemoryTaskStore()
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .zhHans, text: "最后一句话", isFinal: true))
+
+        let ended = await viewModel.endTask()
+
+        #expect(ended?.entries.map(\.sourceText) == ["最后一句话"])
+        #expect(viewModel.transcript.isEmpty)
+    }
+
+    @Test("Ending an empty task discards it without history")
+    func endDiscardsEmptyTask() async {
+        let store = InMemoryTaskStore()
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+
+        let ended = await viewModel.endTask()
+
+        #expect(ended == nil)
+        #expect(!viewModel.hasActiveTask)
+        #expect(await store.list(filter: .meeting).isEmpty)
+    }
+
+    @Test("Ending with an empty memory transcript still ends when the store has captions")
+    func endUsesStoreCaptionsForEmptyVerdict() async throws {
+        let store = InMemoryTaskStore()
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        let taskID = try #require(await store.activeTask(for: .meeting)?.id)
+        let persisted = makeEntry("已经落盘的句子")
+        #expect(await store.append([persisted], to: taskID) == .persisted)
+
+        let ended = await viewModel.endTask()
+
+        #expect(ended != nil)
+        #expect(ended?.entries.map(\.sourceText) == ["已经落盘的句子"])
+        let listed = await store.list(filter: .meeting)
+        #expect(listed.count == 1)
+    }
+
+    @Test("An end that cannot be saved keeps the transcript and writes no history")
+    func notSavedEndKeepsTranscript() async {
+        let store = ScriptedTaskStore()
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .zhHans, text: "还没保存的内容", isFinal: true))
+        store.endFailure = .saveFailed
+
+        let ended = await viewModel.endTask()
+
+        #expect(ended == nil)
+        #expect(viewModel.transcript.map(\.sourceText) == ["还没保存的内容"])
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.showsNotSavedBanner)
+        #expect(viewModel.sessionState == .paused)
+        #expect(viewModel.exportableSession.entries.map(\.sourceText) == ["还没保存的内容"])
+        #expect(await store.base.list(filter: .meeting).isEmpty)
+        #expect(store.endCalls == 1)
+    }
+
+    @Test("Restoring applies the task language pair and shows the continue prompt")
+    func restoreAppliesLanguagePairAndPrompt() async throws {
+        let store = InMemoryTaskStore()
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let title = TaskTitle.make(
+            feature: .meeting,
+            source: .english,
+            target: nil,
+            startedAt: startedAt,
+            language: .zhHans,
+            multilingual: false
+        )
+        let draft = TaskDraft(
+            feature: .meeting,
+            sourceLanguage: .english,
+            targetLanguage: nil,
+            multilingual: false,
+            startedAt: startedAt,
+            title: title
+        )
+        guard case let .persisted(seeded) = await store.startNew(draft) else {
+            Issue.record("Could not seed the running task")
+            return
+        }
+        _ = await store.append([makeEntry("Restored line")], to: seeded.id)
+        _ = await store.setStatus(.pausedListening, for: seeded.id)
+
+        let viewModel = makeViewModel(store: store)
+        await viewModel.bootstrap()
+
+        #expect(viewModel.sourceLanguage == .english)
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.transcript.map(\.sourceText) == ["Restored line"])
+        #expect(viewModel.pane.history.count == 1)
+        #expect(viewModel.resumePromptText?.contains("继续任务") == true)
+        #expect(viewModel.resumePromptText?.contains(title) == true)
+        #expect(viewModel.sessionState == .ready)
+    }
+
+    @Test("Restoring a multilingual task keeps both recognition languages")
+    func restoreKeepsMultilingualPair() async throws {
+        let store = InMemoryTaskStore()
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let title = TaskTitle.make(
+            feature: .meeting,
+            source: .zhHans,
+            target: nil,
+            startedAt: startedAt,
+            language: .zhHans,
+            multilingual: true
+        )
+        let draft = TaskDraft(
+            feature: .meeting,
+            sourceLanguage: .zhHans,
+            targetLanguage: nil,
+            multilingual: true,
+            startedAt: startedAt,
+            title: title
+        )
+        guard case let .persisted(seeded) = await store.startNew(draft) else {
+            Issue.record("Could not seed the running task")
+            return
+        }
+        _ = await store.append([makeEntry("把预算确认一下。")], to: seeded.id)
+
+        let viewModel = makeViewModel(store: store)
+        await viewModel.bootstrap()
+
+        #expect(viewModel.recognizesMultipleLanguages)
+        #expect(viewModel.sourceLanguage == .zhHans)
+        #expect(viewModel.recognitionLanguages == [.zhHans, .english])
+    }
+
+    @Test("A new meeting task title follows the interface language")
+    func taskTitleUsesInterfaceLanguage() async {
+        let store = InMemoryTaskStore()
+        let viewModel = makeViewModel(store: store, userLanguage: .english, meetingLanguage: .zhHans)
+        await viewModel.beginTask()
+
+        let task = await store.activeTask(for: .meeting)
+        #expect(task?.title.contains("Meeting notes") == true)
+        #expect(task?.title.contains("会议记录") == false)
+        #expect(task?.sourceLanguage == .zhHans)
+    }
+
+    @Test("A memory-only task with content blocks a new task until the user discards it")
+    func unsavedTaskBlocksNewTask() async {
+        let store = ScriptedTaskStore()
+        store.startNewFailure = .saveFailed
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        #expect(viewModel.isMemoryOnly)
+        #expect(viewModel.showsNotSavedBanner)
+        viewModel.accept(Utterance(language: .zhHans, text: "唯一的副本", isFinal: true))
+
+        await viewModel.beginTask()
+
+        #expect(viewModel.isUnsavedTaskPromptPresented)
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.transcript.map(\.sourceText) == ["唯一的副本"])
+        #expect(store.startNewCalls == 1)
+
+        await viewModel.discardUnsavedTaskAndBegin()
+
+        #expect(!viewModel.isUnsavedTaskPromptPresented)
+        #expect(viewModel.transcript.isEmpty)
+        #expect(viewModel.hasActiveTask)
+        #expect(store.startNewCalls == 2)
+    }
+
+    @Test("Reaching the character limit pauses listening and keeps the task unfinished")
+    func characterLimitPausesListening() async throws {
+        let store = InMemoryTaskStore()
+        let viewModel = makeViewModel(store: store, speech: MockSpeechEngine())
+        await viewModel.beginTask()
+        await viewModel.start()
+        #expect(viewModel.sessionState == .listening)
+
+        let characters = (0..<MeetingLayout.transcriptCharacterLimit).map {
+            Character(UnicodeScalar(0x4E00 + $0)!)
+        }
+        var index = 0
+        while index < characters.count, !viewModel.isLengthLimited {
+            let end = min(index + 100, characters.count)
+            viewModel.accept(
+                Utterance(
+                    language: .zhHans,
+                    text: String(characters[index..<end]),
+                    isFinal: true
+                )
+            )
+            index = end
+        }
+
+        #expect(viewModel.isLengthLimited)
+        await waitUntil { viewModel.sessionState != .listening }
+        #expect(viewModel.sessionState == .paused)
+        #expect(viewModel.isLengthLimited)
+        #expect(viewModel.hasActiveTask)
+        let taskID = try #require(await store.activeTask(for: .meeting)?.id)
+        #expect(await store.task(id: taskID)?.status == .pausedListening)
+        let listed = await store.list(filter: .meeting)
+        #expect(listed.isEmpty)
+    }
+
+    @Test("Ending a task keeps its saved summary in history")
+    func endingTaskPreservesSummary() async {
+        let store = InMemoryTaskStore()
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .zhHans, text: "把预算确认一下。", isFinal: true))
+        await viewModel.requestSummary()
+        #expect(viewModel.summary != nil)
+
+        await viewModel.beginTask()
+
+        let listed = await store.list(filter: .meeting)
+        #expect(listed.first?.summary?.text == "双方约定喝咖啡。")
+    }
+
+    private func waitUntil(
+        maxYields: Int = 500,
+        _ condition: () -> Bool
+    ) async {
+        for _ in 0..<maxYields {
+            if condition() { return }
+            await Task.yield()
+        }
+    }
+
+    private func makeEntry(_ text: String) -> TranscriptEntry {
+        TranscriptEntry(
+            id: UUID(),
+            speaker: .user,
+            source: .zhHans,
+            sourceText: text,
+            translatedText: "",
+            isFinal: true
+        )
+    }
+
     private func makeViewModel(
-        store: InMemoryTaskStore = InMemoryTaskStore(),
-        speech: any SpeechRecognizing = MockSpeechEngine()
+        store: any TaskStoreV2 = InMemoryTaskStore(),
+        speech: any SpeechRecognizing = MockSpeechEngine(),
+        gate: (any SpeechSessionGating)? = nil,
+        userLanguage: AppLanguage = .zhHans,
+        meetingLanguage: AppLanguage = .zhHans
     ) -> MeetingViewModel {
         let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
-        preferences.userLanguage = .zhHans
-        preferences.meetingLanguage = .zhHans
+        preferences.userLanguage = userLanguage
+        preferences.meetingLanguage = meetingLanguage
+        if let gate {
+            return MeetingViewModel(
+                gate: gate,
+                permissions: MockPermissions(),
+                preferences: preferences,
+                summarizer: MockSummarizer(),
+                taskStore: store
+            )
+        }
         return MeetingViewModel(
             speech: speech,
             permissions: MockPermissions(),
@@ -155,5 +438,84 @@ struct MeetingViewModelTests {
             summarizer: MockSummarizer(),
             taskStore: store
         )
+    }
+}
+
+@MainActor
+private final class MeetingEventLog {
+    private(set) var events: [String] = []
+
+    func record(_ event: String) {
+        events.append(event)
+    }
+
+    func contains(_ event: String) -> Bool {
+        events.contains(event)
+    }
+
+    func firstIndex(of event: String) -> Int? {
+        events.firstIndex(of: event)
+    }
+}
+
+@MainActor
+private final class MeetingFakeGate: SpeechSessionGating {
+    struct Start: Equatable {
+        var owner: FeatureID
+        var languages: [AppLanguage]
+        var fallbackLanguage: AppLanguage
+        var style: SpeechRecognitionStyle
+    }
+
+    private let log: MeetingEventLog
+    private var generation: UInt64 = 0
+    private var currentGeneration: UInt64?
+    private var continuation: AsyncStream<Utterance>.Continuation?
+    private(set) var starts: [Start] = []
+    private(set) var stopCount = 0
+    var nextStartError: (any Error)?
+
+    init(log: MeetingEventLog) {
+        self.log = log
+    }
+
+    func start(
+        owner: FeatureID,
+        languages: [AppLanguage],
+        fallbackLanguage: AppLanguage,
+        style: SpeechRecognitionStyle
+    ) async throws -> SpeechSessionHandle {
+        if let nextStartError {
+            self.nextStartError = nil
+            throw nextStartError
+        }
+        generation += 1
+        let next = generation
+        currentGeneration = next
+        let (stream, continuation) = AsyncStream<Utterance>.makeStream()
+        self.continuation = continuation
+        log.record("gate-start")
+        starts.append(
+            Start(
+                owner: owner,
+                languages: languages,
+                fallbackLanguage: fallbackLanguage,
+                style: style
+            )
+        )
+        return SpeechSessionHandle(owner: owner, generation: next, stream: stream)
+    }
+
+    func stop(_ handle: SpeechSessionHandle) async {
+        stopCount += 1
+        log.record("gate-stop")
+        guard currentGeneration == handle.generation else { return }
+        currentGeneration = nil
+        continuation?.finish()
+        continuation = nil
+    }
+
+    func isCurrent(_ handle: SpeechSessionHandle) async -> Bool {
+        currentGeneration == handle.generation
     }
 }
