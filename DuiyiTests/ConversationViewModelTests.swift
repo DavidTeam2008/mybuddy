@@ -776,6 +776,122 @@ struct ConversationViewModelTests {
         #expect(viewModel.hasActiveTask)
     }
 
+    @Test("Conversation submissions use the routed target and 40/90 ms delays")
+    func submissionsUseRoutedTargetAndLocalDelays() async {
+        let scheduler = ManualTranslationScheduler()
+        let viewModel = makeScheduledViewModel(scheduler: scheduler)
+        let id = UUID()
+
+        viewModel.accept(Utterance(id: id, language: .english, text: "hello", isFinal: false))
+        #expect(scheduler.pendingDelays == [.milliseconds(40)])
+
+        scheduler.advance(by: .milliseconds(40))
+        #expect(viewModel.outboundJob?.utteranceID == id)
+        #expect(viewModel.outboundJob?.source == .english)
+        #expect(viewModel.outboundJob?.target == .zhHans)
+        #expect(viewModel.outboundJob?.isFinal == false)
+
+        viewModel.accept(Utterance(id: id, language: .english, text: "helloo", isFinal: false))
+        #expect(scheduler.pendingDelays == [.milliseconds(90)])
+
+        scheduler.advance(by: .milliseconds(90))
+        #expect(viewModel.outboundJob?.text == "helloo")
+    }
+
+    @Test("The view model exposes the pipeline's outbound job")
+    func outboundJobIsExposedFromPipeline() async throws {
+        let viewModel = makeScheduledViewModel(scheduler: ManualTranslationScheduler())
+        let utterance = Utterance(language: .english, text: "See you at three", isFinal: true)
+
+        viewModel.accept(utterance)
+
+        let job = try #require(viewModel.outboundJob)
+        #expect(job.utteranceID == utterance.id)
+        #expect(job.target == .zhHans)
+        #expect(job.text == "See you at three")
+        #expect(job.isFinal)
+
+        viewModel.fulfill(job: job, text: "三点见")
+
+        #expect(viewModel.outboundJob == nil)
+        #expect(viewModel.userPane.live?.translatedText == "三点见")
+    }
+
+    @Test("resetCaptions resets the pipeline and clears sent-text suppression")
+    func resetCaptionsResetsPipeline() async {
+        let scheduler = ManualTranslationScheduler()
+        let viewModel = makeScheduledViewModel(scheduler: scheduler)
+        let id = UUID()
+
+        viewModel.accept(Utterance(id: id, language: .english, text: "hello", isFinal: false))
+        #expect(scheduler.pendingDelays == [.milliseconds(40)])
+
+        viewModel.resetCaptions()
+
+        #expect(viewModel.outboundJob == nil)
+        #expect(scheduler.pendingDelays.isEmpty)
+        scheduler.advance(by: .milliseconds(40))
+        #expect(viewModel.outboundJob == nil)
+
+        viewModel.accept(Utterance(id: id, language: .english, text: "hello", isFinal: false))
+        #expect(scheduler.pendingDelays == [.milliseconds(40)])
+    }
+
+    @Test("Changing the peer language resets the pipeline's pending state")
+    func peerLanguageChangeResetsPipeline() async {
+        let scheduler = ManualTranslationScheduler()
+        let viewModel = makeScheduledViewModel(scheduler: scheduler)
+
+        viewModel.accept(Utterance(language: .english, text: "hello", isFinal: false))
+        #expect(scheduler.pendingDelays == [.milliseconds(40)])
+
+        await viewModel.setPeerLanguage(.japanese)
+
+        #expect(scheduler.pendingDelays.isEmpty)
+        #expect(viewModel.outboundJob == nil)
+    }
+
+    @Test("Continuation aliases are registered through the pipeline")
+    func continuationAliasResolvesThroughPipeline() async {
+        let viewModel = makeScheduledViewModel(scheduler: ManualTranslationScheduler())
+        let first = Utterance(language: .english, text: "See you at three", isFinal: true)
+        let second = Utterance(language: .english, text: "See you at three tomorrow", isFinal: true)
+
+        viewModel.accept(first)
+        viewModel.accept(second)
+
+        // The continuation line itself is keyed to the canonical caption.
+        #expect(viewModel.outboundJob?.utteranceID == first.id)
+
+        // A result keyed by the raw utterance still lands on the canonical line.
+        viewModel.fulfill(
+            job: TranslationJob(
+                utteranceID: second.id,
+                source: .english,
+                target: .zhHans,
+                text: second.text,
+                isFinal: true
+            ),
+            text: "明天三点见"
+        )
+
+        #expect(viewModel.userPane.live?.id == first.id)
+        #expect(viewModel.userPane.live?.translatedText == "明天三点见")
+        #expect(viewModel.transcript.count == 1)
+    }
+
+    private func makeScheduledViewModel(
+        scheduler: ManualTranslationScheduler
+    ) -> ConversationViewModel {
+        ConversationViewModel(
+            gate: ConversationFakeGate(),
+            permissions: MockPermissions(),
+            preferences: makePreferences(userLanguage: .zhHans, peerLanguage: .english),
+            summarizer: MockSummarizer(),
+            translationScheduler: scheduler
+        )
+    }
+
     private func makePreferences(
         userLanguage: AppLanguage,
         peerLanguage: AppLanguage
