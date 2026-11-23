@@ -9,6 +9,20 @@ struct SpeechSessionHandle: Sendable {
     let stream: AsyncStream<Utterance>
 }
 
+/// The gate seam consumed by `TaskLifecycle`. Declaring it as a protocol keeps
+/// the lifecycle testable with a fake arbiter while the app injects the real
+/// `SpeechSessionGate` in the composition root.
+protocol SpeechSessionGating: Sendable {
+    func start(
+        owner: FeatureID,
+        languages: [AppLanguage],
+        fallbackLanguage: AppLanguage,
+        style: SpeechRecognitionStyle
+    ) async throws -> SpeechSessionHandle
+    func stop(_ handle: SpeechSessionHandle) async
+    func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
+}
+
 /// Single entry point for the app's one shared speech engine.
 ///
 /// The gate arbitrates which module owns the sole listening stream. A new
@@ -17,7 +31,7 @@ struct SpeechSessionHandle: Sendable {
 /// `SessionState`; callers classify a stream end by asking `isCurrent(_:)`:
 /// a still-current handle ended unexpectedly (`recognitionInterrupted`),
 /// while a superseded handle ended silently.
-actor SpeechSessionGate {
+actor SpeechSessionGate: SpeechSessionGating {
     private let engine: any SpeechRecognizing
     private var generation: UInt64 = 0
     private var current: SessionIdentity?
