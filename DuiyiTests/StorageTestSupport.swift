@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 @testable import Duiyi
 
 /// A `TaskStoreV2` that can report an unavailable open, fail reads, and fail
@@ -137,29 +138,50 @@ final class ScriptedTaskStore: TaskStoreV2 {
 
 /// The production success-only read methods were removed in ticket #12.
 /// ViewModel tests assert stored state with those read shapes; these helpers
-/// express the same reads through the v2 result contract. A failed read maps to
-/// the old "nothing found" shape; tests that care about failure use the
+/// express the same reads through the v2 result contract. An unavailable read
+/// is a test bug (silently mapping it to nil/empty would hide real failures),
+/// so it records a test issue instead. Tests that assert failure use the
 /// `read*` results directly.
 @MainActor
 extension TaskStoreV2 {
     func activeTask(for feature: FeatureID) async -> TaskSession? {
-        guard case let .value(task) = await readActiveTask(for: feature) else { return nil }
-        return task
+        switch await readActiveTask(for: feature) {
+        case let .value(task):
+            return task
+        case let .unavailable(reason):
+            Issue.record("Test-only activeTask(for:) read hit an unavailable store: \(reason)")
+            return nil
+        }
     }
 
     func unfinishedTasks() async -> [TaskSession] {
-        guard case let .value(tasks) = await readUnfinishedTasks() else { return [] }
-        return tasks
+        switch await readUnfinishedTasks() {
+        case let .value(tasks):
+            return tasks
+        case let .unavailable(reason):
+            Issue.record("Test-only unfinishedTasks() read hit an unavailable store: \(reason)")
+            return []
+        }
     }
 
     func list(filter: FeatureID?) async -> [TaskSession] {
-        guard case let .value(tasks) = await readList(filter: filter) else { return [] }
-        return tasks
+        switch await readList(filter: filter) {
+        case let .value(tasks):
+            return tasks
+        case let .unavailable(reason):
+            Issue.record("Test-only list(filter:) read hit an unavailable store: \(reason)")
+            return []
+        }
     }
 
     func task(id: UUID) async -> TaskSession? {
-        guard case let .value(task) = await readTask(id: id) else { return nil }
-        return task
+        switch await readTask(id: id) {
+        case let .value(task):
+            return task
+        case let .unavailable(reason):
+            Issue.record("Test-only task(id:) read hit an unavailable store: \(reason)")
+            return nil
+        }
     }
 }
 

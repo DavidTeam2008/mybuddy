@@ -1,8 +1,10 @@
 import Foundation
 
 /// Process-local adapter used by tests, previews, and ephemeral compositions.
-/// Every operation reports success through the v2 result contract, so it can
-/// stand in for a durable store without hiding failures.
+/// It is a test/preview adapter, not the production fallback: a failed
+/// `DeferredTaskStore` open must stay `unavailable`, never silently swap in
+/// this store. Every operation reports success through the v2 result contract,
+/// so it can stand in for a durable store without hiding failures.
 @MainActor
 final class InMemoryTaskStore: TaskStoreV2 {
     var availability: TaskStoreAvailability { .ready }
@@ -112,9 +114,7 @@ final class InMemoryTaskStore: TaskStoreV2 {
     ) async -> TaskStoreEndResult {
         guard var task = tasks[taskID] else { return .notPersisted(.notFound) }
         upsert(entries, into: &task)
-        let usable = task.entries.contains {
-            !$0.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
+        let usable = task.entries.contains(where: \.hasUsableText)
         guard usable else {
             tasks.removeValue(forKey: taskID)
             return .discardedEmpty

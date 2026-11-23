@@ -70,8 +70,8 @@ struct TaskDetailView: View {
                                     .accessibilityIdentifier("detail-translation-save-error")
                             }
 
-                            if viewModel.deleteFailure != nil {
-                                Text(Copy.deleteFailed(for: language))
+                            if let reason = viewModel.deleteFailure {
+                                Text(Copy.deleteFailed(reason: reason, for: language))
                                     .font(.footnote)
                                     .foregroundStyle(Tokens.danger)
                                     .accessibilityIdentifier("detail-delete-error")
@@ -211,11 +211,11 @@ struct TaskDetailView: View {
             )
         return Text(text)
             .font(.footnote)
-            .foregroundStyle(used ? Color(hex: 0xB8E0C8) : Color(hex: 0xF0D9B0))
+            .foregroundStyle(used ? Color(hex: 0xB8E0C8) : Tokens.warningText)
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                (used ? Color(hex: 0x1D2A24) : Color(hex: 0x2A2420)),
+                used ? Color(hex: 0x1D2A24) : Tokens.warningBackground,
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
     }

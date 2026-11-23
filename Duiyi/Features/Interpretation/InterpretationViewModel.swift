@@ -39,6 +39,9 @@ final class InterpretationViewModel {
     var skipsBootstrap = false
     /// Set when a new task is blocked by a memory-only task with content.
     var isUnsavedTaskPromptPresented = false
+    /// The blocked task's summary/export sheet is open and the user chose
+    /// "export and continue"; the sheet offers continue once the file is ready.
+    var isExportThenContinuePending = false
     /// "继续任务：…" prompt shown after restoring an unfinished task.
     var resumePromptText: String?
 
@@ -123,7 +126,10 @@ final class InterpretationViewModel {
     var taskStartedAt: Date? { lifecycle.startedAt }
     var isMemoryOnly: Bool { lifecycle.isMemoryOnly }
     var isNotSaved: Bool { lifecycle.isNotSaved }
-    var showsNotSavedBanner: Bool { lifecycle.isNotSaved }
+
+    /// The language the user reads the interface in ("我看的语言"). UI copy and
+    /// summaries follow it; `targetLanguage` stays the translation direction.
+    var interfaceLanguage: AppLanguage { preferences.userLanguage }
 
     var canSummarize: Bool {
         transcript.contains { !$0.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -154,25 +160,25 @@ final class InterpretationViewModel {
 
     var controlLabel: String {
         if !hasActiveTask {
-            return Copy.needNewTask(for: targetLanguage)
+            return Copy.needNewTask(for: interfaceLanguage)
         }
         switch sessionState {
         case .listening:
-            return Copy.listening(for: targetLanguage)
+            return Copy.listening(for: interfaceLanguage)
         case .ready:
-            return Copy.tapToStart(for: targetLanguage)
+            return Copy.tapToStart(for: interfaceLanguage)
         case .paused:
-            return Copy.paused(for: targetLanguage)
+            return Copy.paused(for: interfaceLanguage)
         case .preparing:
-            return Copy.preparing(for: targetLanguage)
+            return Copy.preparing(for: interfaceLanguage)
         case .failed, .idle:
-            return Copy.tapToStart(for: targetLanguage)
+            return Copy.tapToStart(for: interfaceLanguage)
         }
     }
 
     var errorText: String? {
         if case let .failed(error) = sessionState {
-            return error.userMessage(for: targetLanguage)
+            return error.userMessage(for: interfaceLanguage)
         }
         return nil
     }
@@ -186,9 +192,9 @@ final class InterpretationViewModel {
             return voiceOutBlockedMessage
         }
         if voiceOutEnabled {
-            return Copy.voiceOutSpeaking(for: targetLanguage)
+            return Copy.voiceOutSpeaking(for: interfaceLanguage)
         }
-        return Copy.voiceOut(for: targetLanguage)
+        return Copy.voiceOut(for: interfaceLanguage)
     }
 
     var isVoiceOutBlocked: Bool {
@@ -244,7 +250,8 @@ final class InterpretationViewModel {
     @discardableResult
     func discardUnsavedTaskAndBegin() async -> TaskStoreWriteOutcome {
         isUnsavedTaskPromptPresented = false
-        let outcome = await lifecycle.discardCurrentTask()
+        isExportThenContinuePending = false
+        let outcome = await lifecycle.discardMemoryOnlyTask()
         stateOverride = nil
         await createNewTask()
         return outcome
@@ -254,6 +261,30 @@ final class InterpretationViewModel {
         isUnsavedTaskPromptPresented = false
     }
 
+    /// "Export and continue": open the blocked task's summary/export sheet and
+    /// remember that a successful export is followed by a new task.
+    func beginExportThenContinue() {
+        isUnsavedTaskPromptPresented = false
+        isExportThenContinuePending = true
+        isSummaryPresented = true
+    }
+
+    /// Closing the summary without tapping continue keeps the memory-only task
+    /// and its transcript intact.
+    func dismissSummary() {
+        isSummaryPresented = false
+        isExportThenContinuePending = false
+    }
+
+    /// User confirmed continue after the export file was prepared.
+    @discardableResult
+    func continueAfterExport() async -> TaskStoreWriteOutcome {
+        guard isExportThenContinuePending else { return .persisted }
+        isSummaryPresented = false
+        isExportThenContinuePending = false
+        return await discardUnsavedTaskAndBegin()
+    }
+
     func endTask() async -> TaskSession? {
         // Stop this module's stream before cancelling the consumer so the
         // finished stream is classified as superseded, not interrupted.
@@ -261,6 +292,7 @@ final class InterpretationViewModel {
         speechTask?.cancel()
         speechTask = nil
         isUnsavedTaskPromptPresented = false
+        isExportThenContinuePending = false
         await clearSpeechQueue()
         let outcome = await lifecycle.endTask(transcript: transcript, summary: summary)
         stateOverride = nil
@@ -344,6 +376,7 @@ final class InterpretationViewModel {
         await lifecycle.flush()
         pane.resetCaptions()
         isSummaryPresented = false
+        isExportThenContinuePending = false
     }
 
     /// Full reset for a new task, an ended task, or a direction/language
@@ -546,7 +579,7 @@ final class InterpretationViewModel {
     func requestSummary() async {
         summaryAvailability = await summarizer.availability()
         guard canSummarize else {
-            summaryError = DuiyiError.summaryEmpty.userMessage(for: targetLanguage)
+            summaryError = DuiyiError.summaryEmpty.userMessage(for: interfaceLanguage)
             isSummaryPresented = true
             return
         }
@@ -556,16 +589,16 @@ final class InterpretationViewModel {
         summaryError = nil
         if summaryAvailability == .available {
             do {
-                summary = try await summarizer.summarize(entries: transcript, outputLanguage: targetLanguage)
+                summary = try await summarizer.summarize(entries: transcript, outputLanguage: interfaceLanguage)
                 if let summary {
                     await lifecycle.saveSummary(summary)
                 }
             } catch let error as DuiyiError {
                 summary = nil
-                summaryError = error.userMessage(for: targetLanguage)
+                summaryError = error.userMessage(for: interfaceLanguage)
             } catch {
                 summary = nil
-                summaryError = DuiyiError.summaryEmpty.userMessage(for: targetLanguage)
+                summaryError = DuiyiError.summaryEmpty.userMessage(for: interfaceLanguage)
             }
         } else {
             summary = nil
@@ -581,12 +614,6 @@ final class InterpretationViewModel {
         resetCaptions()
         resumePromptText = nil
         _ = await lifecycle.startNewTask(makeNewTaskRequest())
-    }
-
-    /// The language the user reads the interface in ("我看的语言"); task titles
-    /// follow it, not the translation target.
-    private var interfaceLanguage: AppLanguage {
-        preferences.userLanguage
     }
 
     private func makeNewTaskRequest() -> TaskLifecycle.NewTaskRequest {
@@ -636,7 +663,7 @@ final class InterpretationViewModel {
             for await utterance in handle.stream {
                 self?.accept(utterance)
             }
-            await self?.streamEnded()
+            await self?.streamEnded(handle)
         }
     }
 
@@ -888,7 +915,7 @@ final class InterpretationViewModel {
         voiceOutEnabled = false
         preferences.voiceOutEnabled = false
         canSpeakWithoutEcho = false
-        voiceOutBlockedMessage = reason.userMessage(for: targetLanguage)
+        voiceOutBlockedMessage = reason.userMessage(for: interfaceLanguage)
         await clearSpeechQueue()
     }
 
@@ -1017,8 +1044,8 @@ final class InterpretationViewModel {
 
     /// A superseded stream ends silently (the gate's other owner took over);
     /// only a still-current stream is a real recognition interruption.
-    private func streamEnded() async {
-        let interrupted = await lifecycle.handleStreamEnded()
+    private func streamEnded(_ handle: SpeechSessionHandle) async {
+        let interrupted = await lifecycle.handleStreamEnded(handle)
         guard interrupted else { return }
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
@@ -1051,7 +1078,7 @@ final class InterpretationViewModel {
                 )
             )
         }
-        resumePromptText = Copy.continueTask(session.title, for: targetLanguage)
+        resumePromptText = Copy.continueTask(session.title, for: interfaceLanguage)
     }
 
     private func scheduleIdleRestore() {

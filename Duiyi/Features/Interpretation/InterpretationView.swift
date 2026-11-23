@@ -19,17 +19,17 @@ struct InterpretationView: View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
                 ModuleChrome(
-                    title: Copy.interpretationTitle(for: viewModel.targetLanguage),
-                    language: viewModel.targetLanguage,
+                    title: Copy.interpretationTitle(for: viewModel.interfaceLanguage),
+                    language: viewModel.interfaceLanguage,
                     onHome: { coordinator.popToHome() },
                     onHistory: { coordinator.open(.history) }
                 )
                 TaskBar(
-                    language: viewModel.targetLanguage,
+                    language: viewModel.interfaceLanguage,
                     statusText: TaskStatusText.make(
                         hasTask: viewModel.hasActiveTask,
                         startedAt: viewModel.taskStartedAt,
-                        language: viewModel.targetLanguage
+                        language: viewModel.interfaceLanguage
                     ),
                     isActive: viewModel.hasActiveTask,
                     onNewTask: { requestNewTask() },
@@ -38,7 +38,7 @@ struct InterpretationView: View {
                 DirectionBar(
                     sourceLanguage: viewModel.sourceLanguage,
                     targetLanguage: viewModel.targetLanguage,
-                    viewerLanguage: viewModel.targetLanguage,
+                    viewerLanguage: viewModel.interfaceLanguage,
                     picking: picking,
                     onPickSource: { openPicker(.source) },
                     onPickTarget: { openPicker(.target) },
@@ -49,19 +49,11 @@ struct InterpretationView: View {
                 )
                 .padding(.bottom, 8)
 
-                if viewModel.showsNotSavedBanner {
-                    Text(Copy.notSavedBanner(for: viewModel.targetLanguage))
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color(hex: 0xF0D9B0))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(
-                            Color(hex: 0x2A2420),
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        )
-                        .padding(.horizontal, Tokens.horizontalPadding)
-                        .padding(.bottom, 8)
-                        .accessibilityIdentifier("interpretation-not-saved-banner")
+                if viewModel.isNotSaved {
+                    NotSavedBanner(
+                        language: viewModel.interfaceLanguage,
+                        accessibilityIdentifier: "interpretation-not-saved-banner"
+                    )
                 }
 
                 if let prompt = viewModel.resumePromptText {
@@ -83,9 +75,9 @@ struct InterpretationView: View {
                 ListeningControl(
                     sessionState: viewModel.sessionState,
                     label: viewModel.controlLabel,
-                    swapLabel: Copy.swapDirection(for: viewModel.targetLanguage),
-                    settingsLabel: Copy.settingsTitle(for: viewModel.targetLanguage),
-                    settingsHint: Copy.settingsHint(for: viewModel.targetLanguage),
+                    swapLabel: Copy.swapDirection(for: viewModel.interfaceLanguage),
+                    settingsLabel: Copy.settingsTitle(for: viewModel.interfaceLanguage),
+                    settingsHint: Copy.settingsHint(for: viewModel.interfaceLanguage),
                     isEnabled: viewModel.hasActiveTask,
                     onTap: {
                         guard picking == nil else {
@@ -122,7 +114,7 @@ struct InterpretationView: View {
 
             if viewModel.isSettingsPresented {
                 InterpretationSettingsSheet(
-                    viewerLanguage: viewModel.targetLanguage,
+                    viewerLanguage: viewModel.interfaceLanguage,
                     appMode: environment.preferences.appMode,
                     sourceLanguage: viewModel.sourceLanguage,
                     targetLanguage: viewModel.targetLanguage,
@@ -163,17 +155,20 @@ struct InterpretationView: View {
 
             if viewModel.isSummaryPresented {
                 SummarySheet(
-                    language: viewModel.targetLanguage,
+                    language: viewModel.interfaceLanguage,
                     availability: viewModel.summaryAvailability,
                     isLoading: viewModel.isSummarizing,
                     summary: viewModel.summary,
                     errorText: viewModel.summaryError,
                     exportTask: viewModel.exportableSession,
                     exporter: environment.exporter,
+                    continueAfterExport: viewModel.isExportThenContinuePending
+                        ? { Task { await viewModel.continueAfterExport() } }
+                        : nil,
                     onCopy: copySummary,
                     onClose: {
                         withAnimation(.easeOut(duration: 0.18)) {
-                            viewModel.isSummaryPresented = false
+                            viewModel.dismissSummary()
                         }
                     }
                 )
@@ -181,7 +176,7 @@ struct InterpretationView: View {
             }
 
             if showsOpenSettings {
-                Button(Copy.openSettings(for: viewModel.targetLanguage)) {
+                Button(Copy.openSettings(for: viewModel.interfaceLanguage)) {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
                         UIApplication.shared.open(url)
                     }
@@ -193,7 +188,7 @@ struct InterpretationView: View {
                 .background(Tokens.listen, in: Capsule())
                 .padding(.bottom, 120)
             } else if showsModelRetry, !viewModel.isSettingsPresented, !viewModel.isSummaryPresented, picking == nil {
-                Button(Copy.redownloadModels(for: viewModel.targetLanguage)) {
+                Button(Copy.redownloadModels(for: viewModel.interfaceLanguage)) {
                     withAnimation(.easeOut(duration: 0.22)) {
                         viewModel.isSettingsPresented = true
                     }
@@ -206,7 +201,7 @@ struct InterpretationView: View {
                 .background(Tokens.listen, in: Capsule())
                 .padding(.bottom, 120)
             } else if showsSummarizeButton {
-                Button(Copy.summarize(for: viewModel.targetLanguage)) {
+                Button(Copy.summarize(for: viewModel.interfaceLanguage)) {
                     Task { await viewModel.requestSummary() }
                 }
                 .font(.subheadline.weight(.semibold))
@@ -221,39 +216,39 @@ struct InterpretationView: View {
         .ignoresSafeArea()
         .toolbar(.hidden, for: .navigationBar)
         .confirmationDialog(
-            Copy.replaceTaskConfirm(for: viewModel.targetLanguage),
+            Copy.replaceTaskConfirm(for: viewModel.interfaceLanguage),
             isPresented: $confirmNewTask,
             titleVisibility: .visible
         ) {
-            Button(Copy.newTask(for: viewModel.targetLanguage)) {
+            Button(Copy.newTask(for: viewModel.interfaceLanguage)) {
                 Task { await viewModel.beginTask() }
             }
-            Button(Copy.cancel(for: viewModel.targetLanguage), role: .cancel) {}
+            Button(Copy.cancel(for: viewModel.interfaceLanguage), role: .cancel) {}
         }
         .confirmationDialog(
-            Copy.endTaskConfirm(for: viewModel.targetLanguage),
+            Copy.endTaskConfirm(for: viewModel.interfaceLanguage),
             isPresented: $confirmEndTask,
             titleVisibility: .visible
         ) {
-            Button(Copy.endTask(for: viewModel.targetLanguage)) {
+            Button(Copy.endTask(for: viewModel.interfaceLanguage)) {
                 Task { await finishTask() }
             }
-            Button(Copy.cancel(for: viewModel.targetLanguage), role: .cancel) {}
+            Button(Copy.cancel(for: viewModel.interfaceLanguage), role: .cancel) {}
         }
         .confirmationDialog(
-            Copy.unsavedTaskConfirm(for: viewModel.targetLanguage),
+            Copy.unsavedTaskConfirm(for: viewModel.interfaceLanguage),
             isPresented: $viewModel.isUnsavedTaskPromptPresented,
             titleVisibility: .visible
         ) {
-            Button(Copy.exportThenContinue(for: viewModel.targetLanguage)) {
+            Button(Copy.exportThenContinue(for: viewModel.interfaceLanguage)) {
                 withAnimation(.easeOut(duration: 0.18)) {
-                    viewModel.isSummaryPresented = true
+                    viewModel.beginExportThenContinue()
                 }
             }
-            Button(Copy.discardAndStartNew(for: viewModel.targetLanguage), role: .destructive) {
+            Button(Copy.discardAndStartNew(for: viewModel.interfaceLanguage), role: .destructive) {
                 Task { await viewModel.discardUnsavedTaskAndBegin() }
             }
-            Button(Copy.cancel(for: viewModel.targetLanguage), role: .cancel) {
+            Button(Copy.cancel(for: viewModel.interfaceLanguage), role: .cancel) {
                 viewModel.dismissUnsavedTaskPrompt()
             }
         }
@@ -363,7 +358,7 @@ struct InterpretationView: View {
 
     private func languagePicker(for side: DirectionPick) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(side == .source ? Copy.theySpeak(for: viewModel.targetLanguage) : Copy.iListen(for: viewModel.targetLanguage))
+            Text(side == .source ? Copy.theySpeak(for: viewModel.interfaceLanguage) : Copy.iListen(for: viewModel.interfaceLanguage))
                 .font(.footnote)
                 .foregroundStyle(Tokens.textSecondary)
             LanguageChipGrid(
@@ -375,7 +370,7 @@ struct InterpretationView: View {
                     applyTargetLanguage(language)
                 }
             }
-            Button(Copy.done(for: viewModel.targetLanguage)) {
+            Button(Copy.done(for: viewModel.interfaceLanguage)) {
                 picking = nil
             }
             .font(.subheadline.weight(.semibold))
@@ -431,21 +426,21 @@ struct InterpretationView: View {
 
     private var idlePrompt: String {
         if !viewModel.hasActiveTask {
-            return Copy.needNewTask(for: viewModel.targetLanguage)
+            return Copy.needNewTask(for: viewModel.interfaceLanguage)
         }
         switch viewModel.sessionState {
         case .ready, .idle, .paused:
-            return Copy.interpretationIdle(for: viewModel.targetLanguage)
+            return Copy.interpretationIdle(for: viewModel.interfaceLanguage)
         case .preparing:
-            return Copy.preparing(for: viewModel.targetLanguage)
+            return Copy.preparing(for: viewModel.interfaceLanguage)
         default:
-            return Copy.listening(for: viewModel.targetLanguage)
+            return Copy.listening(for: viewModel.interfaceLanguage)
         }
     }
 
     private var sourceLineText: String {
         guard let live = viewModel.pane.live, !live.sourceText.isEmpty else { return " " }
-        return "\(Copy.sourceLinePrefix(for: viewModel.targetLanguage))  \(live.sourceText)"
+        return "\(Copy.sourceLinePrefix(for: viewModel.interfaceLanguage))  \(live.sourceText)"
     }
 
     private var translationProgress: Double {
@@ -582,13 +577,13 @@ struct InterpretationView: View {
             }
             return true
         } catch let error as DuiyiError {
-            redownloadError = error.userMessage(for: viewModel.targetLanguage)
+            redownloadError = error.userMessage(for: viewModel.interfaceLanguage)
             if reportFailure {
                 viewModel.fail(error)
             }
             return false
         } catch {
-            redownloadError = DuiyiError.modelsMissing.userMessage(for: viewModel.targetLanguage)
+            redownloadError = DuiyiError.modelsMissing.userMessage(for: viewModel.interfaceLanguage)
             if reportFailure {
                 viewModel.fail(.modelsMissing)
             }
@@ -606,7 +601,7 @@ struct InterpretationView: View {
                 viewModel.restoreReady()
             }
         case .failure:
-            redownloadError = DuiyiError.modelsMissing.userMessage(for: viewModel.targetLanguage)
+            redownloadError = DuiyiError.modelsMissing.userMessage(for: viewModel.interfaceLanguage)
             isRedownloading = false
             shouldPrepareTranslation = false
             if viewModel.sessionState == .preparing {

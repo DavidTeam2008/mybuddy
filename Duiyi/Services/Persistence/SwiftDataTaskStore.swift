@@ -190,7 +190,7 @@ final class SwiftDataTaskStore: TaskStoreV2 {
         // transcript (existing + just-appended) before ending or deleting.
         upsert(entries, into: entity)
         let hasUsableContent = entity.entries.contains {
-            !$0.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            TranscriptEntry.hasUsableText($0.sourceText)
         }
         if hasUsableContent {
             finish(entity, summary: summary)

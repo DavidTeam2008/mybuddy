@@ -79,6 +79,23 @@ final class SimultaneousFlowTests: XCTestCase {
         try assertHomeModuleNavigation(app)
     }
 
+    /// 持久化的未结束任务在重启后恢复时显示「继续任务」提示，且不依赖语音。
+    func testRestoredTaskShowsResumePrompt() throws {
+        let app = launchApp()
+        startMeetingTask(app)
+        app.terminate()
+
+        let relaunched = launchApp()
+        let meeting = relaunched.buttons["home-module-meeting"]
+        XCTAssertTrue(meeting.waitForExistence(timeout: timeout), "home meeting entry missing")
+        meeting.tap()
+
+        XCTAssertTrue(
+            relaunched.staticTexts["meeting-resume-prompt"].waitForExistence(timeout: timeout),
+            "restored unfinished meeting task did not show its resume prompt"
+        )
+    }
+
     /// 已推入页面从屏幕左边缘右滑应返回上一级。
     func testSwipeBackFromModule() throws {
         let app = launchApp()
@@ -117,6 +134,29 @@ final class SimultaneousFlowTests: XCTestCase {
         historyHome.tap()
         XCTAssertTrue(app.buttons["home-module-simultaneous"].waitForExistence(timeout: timeout),
                       "did not return to home")
+    }
+
+    /// 会议页新建任务不需要语音；等待任务条变为 active，确保 `startNew` 已落盘。
+    private func startMeetingTask(_ app: XCUIApplication) {
+        let meeting = app.buttons["home-module-meeting"]
+        XCTAssertTrue(meeting.waitForExistence(timeout: timeout), "home meeting entry missing")
+        meeting.tap()
+
+        let newTask = app.buttons["taskbar-new-task"]
+        XCTAssertTrue(newTask.waitForExistence(timeout: timeout), "new task button missing")
+        // Let the restore bootstrap settle so a stale restored task cannot race
+        // the new-task tap.
+        sleep(1)
+        newTask.tap()
+        confirmReplaceTaskIfNeeded(app)
+
+        let endTask = app.buttons["taskbar-end-task"]
+        XCTAssertTrue(endTask.waitForExistence(timeout: timeout), "end task button missing")
+        let deadline = Date().addingTimeInterval(timeout)
+        while !endTask.isEnabled && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTAssertTrue(endTask.isEnabled, "new meeting task was not persisted")
     }
 
     private func enterSimultaneousAndStart(_ app: XCUIApplication) {

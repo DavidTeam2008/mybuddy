@@ -57,6 +57,16 @@ struct PlatformTaskTests {
         #expect(viewModel.sessionState != .listening)
     }
 
+    @Test("Delete failure copy names the store reason")
+    func deleteFailureCopyNamesReason() {
+        let unavailable = Copy.deleteFailed(reason: .unavailable, for: .english)
+        let notFound = Copy.deleteFailed(reason: .notFound, for: .english)
+        #expect(unavailable.contains("storage is unavailable"))
+        #expect(notFound.contains("no longer exists"))
+        #expect(unavailable != notFound)
+        #expect(Copy.deleteFailed(reason: .saveFailed, for: .zhHans).contains("写入"))
+    }
+
     @Test("Device-not-eligible copy never asks to turn Apple Intelligence on")
     func deviceNotEligibleCopyIsHonest() {
         let text = Copy.summaryDeviceNotEligible(for: .zhHans)

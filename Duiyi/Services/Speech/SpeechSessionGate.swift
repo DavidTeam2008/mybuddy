@@ -9,6 +9,13 @@ struct SpeechSessionHandle: Sendable {
     let stream: AsyncStream<Utterance>
 }
 
+extension SpeechSessionHandle: Equatable {
+    /// Identity is owner + generation; the stream itself is not comparable.
+    static func == (lhs: SpeechSessionHandle, rhs: SpeechSessionHandle) -> Bool {
+        lhs.owner == rhs.owner && lhs.generation == rhs.generation
+    }
+}
+
 /// The gate seam consumed by `TaskLifecycle`. Declaring it as a protocol keeps
 /// the lifecycle testable with a fake arbiter while the app injects the real
 /// `SpeechSessionGate` in the composition root.

@@ -20,7 +20,7 @@ struct TaskSession: Identifiable, Equatable, Sendable {
     var summary: ConversationSummary?
 
     var hasTranscript: Bool {
-        entries.contains { !$0.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        entries.contains(where: \.hasUsableText)
     }
 
     var duration: TimeInterval {
@@ -110,6 +110,11 @@ enum TaskStoreAvailability: Equatable, Sendable {
     case opening
     case ready
     case unavailable(TaskStoreFailureReason)
+
+    var isUnavailable: Bool {
+        if case .unavailable = self { return true }
+        return false
+    }
 }
 
 /// A read that distinguishes "empty" from "storage unavailable".

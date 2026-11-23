@@ -21,6 +21,11 @@
 | Wave 1 数据完整性 | 已合并到 `wave-1-data-integrity`（#2–#12，tip `fd820e4`）：TaskStoreV2、SpeechSessionGate、TaskLifecycle、显性存储降级、清屏/50 条/2 万字语义。iPhone 13 真机清单未验证 |
 | 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
 
+### Wave 1 测试调整说明（2026-11-23）
+
+- #2–#12 期间既有单元测试为适配 async setter 与 `TaskStoreV2` 结果接口做了机械迁移（改为 `await` 与结果分支），断言与用例语义未改；没有删除测试，也没有新增 skip。
+- 新增的 `storage-retry`、`*-not-saved-banner`、`*-resume-prompt` 标识中，`meeting-resume-prompt` 有模拟器 UI 回归（新建任务 → 重启 → 恢复）。存储失败横幅需要启动期 store 失败注入钩子，暂由 ViewModel 单测覆盖，未新增 UI 用例或 skip。
+
 ---
 
 ## 1. P0：会丢数据或卡死主链路

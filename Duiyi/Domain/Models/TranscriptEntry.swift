@@ -18,6 +18,16 @@ struct TranscriptEntry: Identifiable, Equatable, Sendable, Codable {
         }
         return sourceText
     }
+
+    /// The single predicate for "a line has content worth saving, ending, or
+    /// guarding". Trims whitespace so a blank caption never counts.
+    static func hasUsableText(_ sourceText: String) -> Bool {
+        !sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var hasUsableText: Bool {
+        Self.hasUsableText(sourceText)
+    }
 }
 
 enum SummaryAvailability: Equatable, Sendable {

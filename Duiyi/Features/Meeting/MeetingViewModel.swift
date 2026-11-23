@@ -33,6 +33,9 @@ final class MeetingViewModel {
     var skipsBootstrap = false
     /// Set when a new task is blocked by a memory-only task with content.
     var isUnsavedTaskPromptPresented = false
+    /// The blocked task's summary/export sheet is open and the user chose
+    /// "export and continue"; the sheet offers continue once the file is ready.
+    var isExportThenContinuePending = false
     /// "继续任务：…" prompt shown after restoring an unfinished task.
     var resumePromptText: String?
 
@@ -92,7 +95,6 @@ final class MeetingViewModel {
     var taskStartedAt: Date? { lifecycle.startedAt }
     var isMemoryOnly: Bool { lifecycle.isMemoryOnly }
     var isNotSaved: Bool { lifecycle.isNotSaved }
-    var showsNotSavedBanner: Bool { lifecycle.isNotSaved }
     var displayLanguage: AppLanguage { preferences.userLanguage }
 
     var recognitionLanguages: [AppLanguage] {
@@ -204,7 +206,8 @@ final class MeetingViewModel {
     @discardableResult
     func discardUnsavedTaskAndBegin() async -> TaskStoreWriteOutcome {
         isUnsavedTaskPromptPresented = false
-        let outcome = await lifecycle.discardCurrentTask()
+        isExportThenContinuePending = false
+        let outcome = await lifecycle.discardMemoryOnlyTask()
         stateOverride = nil
         await createNewTask()
         return outcome
@@ -214,10 +217,35 @@ final class MeetingViewModel {
         isUnsavedTaskPromptPresented = false
     }
 
+    /// "Export and continue": open the blocked task's summary/export sheet and
+    /// remember that a successful export is followed by a new task.
+    func beginExportThenContinue() {
+        isUnsavedTaskPromptPresented = false
+        isExportThenContinuePending = true
+        isSummaryPresented = true
+    }
+
+    /// Closing the summary without tapping continue keeps the memory-only task
+    /// and its transcript intact.
+    func dismissSummary() {
+        isSummaryPresented = false
+        isExportThenContinuePending = false
+    }
+
+    /// User confirmed continue after the export file was prepared.
+    @discardableResult
+    func continueAfterExport() async -> TaskStoreWriteOutcome {
+        guard isExportThenContinuePending else { return .persisted }
+        isSummaryPresented = false
+        isExportThenContinuePending = false
+        return await discardUnsavedTaskAndBegin()
+    }
+
     func endTask() async -> TaskSession? {
         speechTask?.cancel()
         speechTask = nil
         isUnsavedTaskPromptPresented = false
+        isExportThenContinuePending = false
         let outcome = await lifecycle.endTask(transcript: transcript, summary: summary)
         stateOverride = nil
         holdScreenAfterPause = false
@@ -256,13 +284,7 @@ final class MeetingViewModel {
         guard case let .started(handle) = await lifecycle.startListening(makeListeningRequest()) else {
             return
         }
-        speechTask?.cancel()
-        speechTask = Task { [weak self] in
-            for await utterance in handle.stream {
-                self?.accept(utterance)
-            }
-            await self?.streamEnded()
-        }
+        attachSpeechTask(handle)
     }
 
     func stop(restoreIdleTimerAfterDelay: Bool = true) async {
@@ -292,6 +314,7 @@ final class MeetingViewModel {
         await lifecycle.flush()
         pane.resetCaptions()
         isSummaryPresented = false
+        isExportThenContinuePending = false
     }
 
     /// Full caption reset, reserved for starting or ending a task.
@@ -531,8 +554,18 @@ final class MeetingViewModel {
         }
     }
 
-    private func streamEnded() async {
-        let interrupted = await lifecycle.handleStreamEnded()
+    private func attachSpeechTask(_ handle: SpeechSessionHandle) {
+        speechTask?.cancel()
+        speechTask = Task { [weak self] in
+            for await utterance in handle.stream {
+                self?.accept(utterance)
+            }
+            await self?.streamEnded(handle)
+        }
+    }
+
+    private func streamEnded(_ handle: SpeechSessionHandle) async {
+        let interrupted = await lifecycle.handleStreamEnded(handle)
         guard interrupted else { return }
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
