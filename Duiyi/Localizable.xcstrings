@@ -1,0 +1,31 @@
+{
+  "sourceLanguage" : "zh-Hans",
+  "strings" : {
+    "%@, %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$@"
+          }
+        }
+      }
+    },
+    "DUIYI" : {
+
+    },
+    "I'd like a coffee." : {
+
+    },
+    "对方" : {
+
+    },
+    "我想点一杯咖啡。" : {
+
+    },
+    "用户" : {
+
+    }
+  },
+  "version" : "1.0"
+}
