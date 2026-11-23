@@ -123,62 +123,6 @@ private final class LifecycleFakeStore: TaskStoreV2 {
     func prepare() async {}
     func retry() async {}
 
-    // MARK: - TaskStore legacy forwarding
-
-    func activeTask(for feature: FeatureID) async -> TaskSession? {
-        await base.activeTask(for: feature)
-    }
-
-    func unfinishedTasks() async -> [TaskSession] {
-        await base.unfinishedTasks()
-    }
-
-    func startNew(
-        feature: FeatureID,
-        source: AppLanguage,
-        target: AppLanguage?,
-        multilingual: Bool
-    ) async throws -> TaskSession {
-        try await base.startNew(
-            feature: feature,
-            source: source,
-            target: target,
-            multilingual: multilingual
-        )
-    }
-
-    func append(taskID: UUID, entries: [TranscriptEntry]) async {
-        await base.append(taskID: taskID, entries: entries)
-    }
-
-    func updateTranslations(taskID: UUID, entries: [TranscriptEntry]) async {
-        await base.updateTranslations(taskID: taskID, entries: entries)
-    }
-
-    func setStatus(taskID: UUID, status: TaskStatus) async {
-        await base.setStatus(taskID: taskID, status: status)
-    }
-
-    func saveSummary(taskID: UUID, summary: ConversationSummary) async {
-        await base.saveSummary(taskID: taskID, summary: summary)
-    }
-
-    func end(taskID: UUID, summary: ConversationSummary?) async throws -> TaskSession {
-        try await base.end(taskID: taskID, summary: summary)
-    }
-
-    func list(filter: FeatureID?) async -> [TaskSession] {
-        await base.list(filter: filter)
-    }
-
-    func task(id: UUID) async -> TaskSession? {
-        await base.task(id: id)
-    }
-
-    func delete(id: UUID) async throws {
-        try await base.delete(id: id)
-    }
-
     // MARK: - TaskStoreV2 reads
 
     func readActiveTask(for feature: FeatureID) async -> TaskStoreReadResult<TaskSession?> {

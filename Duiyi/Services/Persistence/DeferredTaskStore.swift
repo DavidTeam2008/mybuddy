@@ -12,18 +12,17 @@ import SwiftData
 /// A background warm is kicked off at init so the store is usually ready by the
 /// time the user navigates, without blocking the first frame.
 ///
-/// Wave 1 (ticket #2): availability is explicit (`opening` / `ready` /
-/// `unavailable`); a failed open never masquerades as ready. `prepare()` awaits
-/// the deferred open and `retry()` attempts it again. Legacy calls during the
-/// expand step keep working through an in-memory fallback, but that fallback is
-/// reported as `unavailable` and is removed in ticket #12.
+/// Wave 1: availability is explicit (`opening` / `ready` / `unavailable`); a
+/// failed open never masquerades as ready and never falls back to an in-memory
+/// store. `prepare()` awaits the deferred open and `retry()` attempts it again;
+/// reads return `.unavailable` and writes return `.notPersisted` until the
+/// store is ready.
 @MainActor
 @Observable
 final class DeferredTaskStore: TaskStoreV2 {
     private(set) var availability: TaskStoreAvailability = .opening
 
     @ObservationIgnored private var durable: (any TaskStoreV2)?
-    @ObservationIgnored private var legacyFallback: InMemoryTaskStore?
     @ObservationIgnored private var containerTask: Task<ModelContainer?, Never>?
     @ObservationIgnored private var openGeneration = 0
     @ObservationIgnored private let openContainer: @Sendable () async -> ModelContainer?
@@ -53,60 +52,6 @@ final class DeferredTaskStore: TaskStoreV2 {
         availability = .opening
         containerTask = makeOpenTask()
         await resolveOpen()
-    }
-
-    // MARK: - TaskStore (all delegate after lazy resolve)
-
-    func activeTask(for feature: FeatureID) async -> TaskSession? {
-        await legacyStore().activeTask(for: feature)
-    }
-
-    func unfinishedTasks() async -> [TaskSession] {
-        await legacyStore().unfinishedTasks()
-    }
-
-    func startNew(
-        feature: FeatureID,
-        source: AppLanguage,
-        target: AppLanguage?,
-        multilingual: Bool
-    ) async throws -> TaskSession {
-        let store = await legacyStore()
-        return try await store.startNew(feature: feature, source: source, target: target, multilingual: multilingual)
-    }
-
-    func append(taskID: UUID, entries: [TranscriptEntry]) async {
-        await legacyStore().append(taskID: taskID, entries: entries)
-    }
-
-    func updateTranslations(taskID: UUID, entries: [TranscriptEntry]) async {
-        await legacyStore().updateTranslations(taskID: taskID, entries: entries)
-    }
-
-    func setStatus(taskID: UUID, status: TaskStatus) async {
-        await legacyStore().setStatus(taskID: taskID, status: status)
-    }
-
-    func saveSummary(taskID: UUID, summary: ConversationSummary) async {
-        await legacyStore().saveSummary(taskID: taskID, summary: summary)
-    }
-
-    func end(taskID: UUID, summary: ConversationSummary?) async throws -> TaskSession {
-        let store = await legacyStore()
-        return try await store.end(taskID: taskID, summary: summary)
-    }
-
-    func list(filter: FeatureID?) async -> [TaskSession] {
-        await legacyStore().list(filter: filter)
-    }
-
-    func task(id: UUID) async -> TaskSession? {
-        await legacyStore().task(id: id)
-    }
-
-    func delete(id: UUID) async throws {
-        let store = await legacyStore()
-        try await store.delete(id: id)
     }
 
     // MARK: - TaskStoreV2 reads
@@ -221,20 +166,6 @@ final class DeferredTaskStore: TaskStoreV2 {
         let first = await operation()
         guard isTransient(first) else { return first }
         return await operation()
-    }
-
-    /// Legacy call sites keep compiling during the expand step. They use the
-    /// durable store once it is ready; on open failure they keep the pre-v2
-    /// in-memory behavior (removed in ticket #12). The fallback is sticky so
-    /// in-memory tasks do not disappear if a later retry succeeds.
-    private func legacyStore() async -> any TaskStore {
-        await prepare()
-        if let legacyFallback { return legacyFallback }
-        if let durable { return durable }
-        DuiyiLog.session.error("SwiftData store unavailable, legacy calls continue in memory")
-        let fallback = InMemoryTaskStore()
-        legacyFallback = fallback
-        return fallback
     }
 
     private func resolveOpen() async {

@@ -304,30 +304,36 @@ struct TaskStoreV2Tests {
 
         let sessionID: UUID
         do {
-            // Write through the pre-v2 (v1) API to model an existing store.
+            // Write v1-shaped entities directly to model a store created before
+            // the result-carrying seam existed (no production v1 API remains).
             let container = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, url: url)])
-            let legacyStore = SwiftDataTaskStore(container: container)
-            let session = try await legacyStore.startNew(
-                feature: .meeting,
-                source: .zhHans,
-                target: nil,
-                multilingual: false
+            let context = ModelContext(container)
+            context.autosaveEnabled = false
+            let taskID = UUID()
+            let task = TaskEntity(
+                id: taskID,
+                featureRaw: FeatureID.meeting.rawValue,
+                statusRaw: TaskStatus.ended.rawValue,
+                startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                endedAt: Date(timeIntervalSince1970: 1_700_000_060),
+                title: "会议记录 · 中文",
+                sourceLanguageRaw: AppLanguage.zhHans.rawValue
             )
-            sessionID = session.id
-            await legacyStore.append(
-                taskID: session.id,
-                entries: [
-                    TranscriptEntry(
-                        id: UUID(),
-                        speaker: .user,
-                        source: .zhHans,
-                        sourceText: "预算确认一下",
-                        translatedText: "",
-                        isFinal: true
-                    )
-                ]
+            let entry = TranscriptEntity(
+                id: UUID(),
+                speakerRaw: SpeakerSide.user.rawValue,
+                sourceRaw: AppLanguage.zhHans.rawValue,
+                sourceText: "预算确认一下",
+                translatedText: "",
+                isFinal: true,
+                recordedAt: Date(timeIntervalSince1970: 1_700_000_010),
+                sortIndex: 0
             )
-            _ = try await legacyStore.end(taskID: session.id, summary: nil)
+            entry.task = task
+            task.entries.append(entry)
+            context.insert(task)
+            try context.save()
+            sessionID = taskID
         }
 
         let reopenedContainer = try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema, url: url)])
@@ -500,57 +506,6 @@ private final class FailureInjectingTaskStore: TaskStoreV2 {
 
     func prepare() async {}
     func retry() async {}
-
-    // MARK: - TaskStore (legacy) forwarding
-
-    func activeTask(for feature: FeatureID) async -> TaskSession? {
-        await base.activeTask(for: feature)
-    }
-
-    func unfinishedTasks() async -> [TaskSession] {
-        await base.unfinishedTasks()
-    }
-
-    func startNew(
-        feature: FeatureID,
-        source: AppLanguage,
-        target: AppLanguage?,
-        multilingual: Bool
-    ) async throws -> TaskSession {
-        try await base.startNew(feature: feature, source: source, target: target, multilingual: multilingual)
-    }
-
-    func append(taskID: UUID, entries: [TranscriptEntry]) async {
-        await base.append(taskID: taskID, entries: entries)
-    }
-
-    func updateTranslations(taskID: UUID, entries: [TranscriptEntry]) async {
-        await base.updateTranslations(taskID: taskID, entries: entries)
-    }
-
-    func setStatus(taskID: UUID, status: TaskStatus) async {
-        await base.setStatus(taskID: taskID, status: status)
-    }
-
-    func saveSummary(taskID: UUID, summary: ConversationSummary) async {
-        await base.saveSummary(taskID: taskID, summary: summary)
-    }
-
-    func end(taskID: UUID, summary: ConversationSummary?) async throws -> TaskSession {
-        try await base.end(taskID: taskID, summary: summary)
-    }
-
-    func list(filter: FeatureID?) async -> [TaskSession] {
-        await base.list(filter: filter)
-    }
-
-    func task(id: UUID) async -> TaskSession? {
-        await base.task(id: id)
-    }
-
-    func delete(id: UUID) async throws {
-        try await base.delete(id: id)
-    }
 
     // MARK: - TaskStoreV2 reads
 

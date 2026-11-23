@@ -1,13 +1,12 @@
 import Foundation
 
-/// Per-feature owner of the task and listening lifecycle (Wave 1, ticket #4).
+/// Per-feature owner of the task and listening lifecycle (Wave 1).
 ///
-/// This is the expand-step replacement for `TaskSessionController`: it owns the
-/// current task, status transitions, restore, the two-phase new-task flow,
-/// ending, the 250 ms persist debounce, flushing, scene-phase pausing, the
-/// `notSaved` mark, and the common permission/audio/gate listening start-up.
-/// Feature-specific prechecks (for example interpretation voice-out routing)
-/// stay in the ViewModel.
+/// It owns the current task, status transitions, restore, the two-phase
+/// new-task flow, ending, the 250 ms persist debounce, flushing, scene-phase
+/// pausing, the `notSaved` mark, and the common permission/audio/gate listening
+/// start-up. Feature-specific prechecks (for example interpretation voice-out
+/// routing) stay in the ViewModel.
 @MainActor
 @Observable
 final class TaskLifecycle {

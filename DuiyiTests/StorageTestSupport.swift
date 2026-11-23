@@ -60,62 +60,6 @@ final class ScriptedTaskStore: TaskStoreV2 {
         return nil
     }
 
-    // MARK: - TaskStore (legacy, forwarded)
-
-    func activeTask(for feature: FeatureID) async -> TaskSession? {
-        await base.activeTask(for: feature)
-    }
-
-    func unfinishedTasks() async -> [TaskSession] {
-        await base.unfinishedTasks()
-    }
-
-    func startNew(
-        feature: FeatureID,
-        source: AppLanguage,
-        target: AppLanguage?,
-        multilingual: Bool
-    ) async throws -> TaskSession {
-        try await base.startNew(
-            feature: feature,
-            source: source,
-            target: target,
-            multilingual: multilingual
-        )
-    }
-
-    func append(taskID: UUID, entries: [TranscriptEntry]) async {
-        await base.append(taskID: taskID, entries: entries)
-    }
-
-    func updateTranslations(taskID: UUID, entries: [TranscriptEntry]) async {
-        await base.updateTranslations(taskID: taskID, entries: entries)
-    }
-
-    func setStatus(taskID: UUID, status: TaskStatus) async {
-        await base.setStatus(taskID: taskID, status: status)
-    }
-
-    func saveSummary(taskID: UUID, summary: ConversationSummary) async {
-        await base.saveSummary(taskID: taskID, summary: summary)
-    }
-
-    func end(taskID: UUID, summary: ConversationSummary?) async throws -> TaskSession {
-        try await base.end(taskID: taskID, summary: summary)
-    }
-
-    func list(filter: FeatureID?) async -> [TaskSession] {
-        await base.list(filter: filter)
-    }
-
-    func task(id: UUID) async -> TaskSession? {
-        await base.task(id: id)
-    }
-
-    func delete(id: UUID) async throws {
-        try await base.delete(id: id)
-    }
-
     // MARK: - TaskStoreV2 reads
 
     func readActiveTask(for feature: FeatureID) async -> TaskStoreReadResult<TaskSession?> {
@@ -186,6 +130,36 @@ final class ScriptedTaskStore: TaskStoreV2 {
         deleteCalls += 1
         if let deleteFailure { return .notPersisted(deleteFailure) }
         return await base.deleteTask(id: id)
+    }
+}
+
+// MARK: - Test-only read helpers
+
+/// The production success-only read methods were removed in ticket #12.
+/// ViewModel tests assert stored state with those read shapes; these helpers
+/// express the same reads through the v2 result contract. A failed read maps to
+/// the old "nothing found" shape; tests that care about failure use the
+/// `read*` results directly.
+@MainActor
+extension TaskStoreV2 {
+    func activeTask(for feature: FeatureID) async -> TaskSession? {
+        guard case let .value(task) = await readActiveTask(for: feature) else { return nil }
+        return task
+    }
+
+    func unfinishedTasks() async -> [TaskSession] {
+        guard case let .value(tasks) = await readUnfinishedTasks() else { return [] }
+        return tasks
+    }
+
+    func list(filter: FeatureID?) async -> [TaskSession] {
+        guard case let .value(tasks) = await readList(filter: filter) else { return [] }
+        return tasks
+    }
+
+    func task(id: UUID) async -> TaskSession? {
+        guard case let .value(task) = await readTask(id: id) else { return nil }
+        return task
     }
 }
 
