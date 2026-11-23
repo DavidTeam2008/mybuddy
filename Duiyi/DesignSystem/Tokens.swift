@@ -19,6 +19,8 @@ enum Tokens {
     static let cardSimultaneous = Color(hex: 0x161920)
     static let cardMeeting = Color(hex: 0x1C1824)
     static let danger = Color(hex: 0xE07070)
+    static let warningText = Color(hex: 0xF0D9B0)
+    static let warningBackground = Color(hex: 0x2A2420)
     static let controlIdle = Color(hex: 0x2A2E38)
     static let sheet = Color(hex: 0x23262F)
     static let sheetChip = Color(hex: 0x2F3340)

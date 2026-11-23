@@ -46,6 +46,34 @@ struct ExportShareButtonTests {
         #expect(fixture.exporter.callCount == 2)
     }
 
+    @Test("Preparing the export reports the prepared file URL")
+    func preparedExportReportsURL() async {
+        let task = makeTask()
+        let exporter = RecordingExporter()
+        var reported: URL?
+        let host = UIHostingController(
+            rootView: ExportShareButton(
+                task: task,
+                language: .zhHans,
+                exporter: exporter,
+                onPrepared: { reported = $0 }
+            )
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.loadViewIfNeeded()
+        defer { window.isHidden = true }
+
+        for _ in 0..<50 {
+            if reported != nil { break }
+            await Task.yield()
+        }
+
+        #expect(exporter.callCount == 1)
+        #expect(reported?.lastPathComponent == "recording-1.txt")
+    }
+
     private func makeFixture() -> (
         window: UIWindow,
         host: UIHostingController<ExportShareButton>,

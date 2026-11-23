@@ -209,7 +209,7 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 
 ### 4.4 流结束
 
-`stop()` cancel 静音任务、finish 外发流、停止 analyzer；VM 的 `for await` 退出后走 `TaskLifecycle.handleStreamEnded()`。
+`stop()` cancel 静音任务、finish 外发流、停止 analyzer；VM 的 `for await` 退出后把捕获的 `SpeechSessionHandle` 交给 `TaskLifecycle.handleStreamEnded(_:)`。
 生命周期先向 gate 查 `isCurrent(handle)`：当前句柄非预期结束 = `recognitionInterrupted`；被新 owner 取代的句柄静默转 `pausedListening`，不报假错误。`fail()` 仍只 finish 流、不带错误；权限/资源错误在生命周期启动阶段单独映射。
 
 ---
@@ -333,7 +333,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 - `persist(transcript)`：统一 250 ms 防抖；`flush()` 供结束、清屏、进后台使用；begin/end 取消旧防抖，防止旧内容写到新任务。
 - `endTask(transcript:summary:)`：停听 → flush → `TaskStoreV2.end` 原子结束；只有 `.ended` / `.discardedEmpty` 清空字幕；`.notSaved` 保留任务与字幕供导出。
 - `pauseListening()` / `pauseForScenePhase()`：只停流并 flush，任务保持进行中。
-- `handleStreamEnded()`：用 gate 的 `isCurrent` 区分被取代（静默暂停）与真中断（`recognitionInterrupted`）。
+- `handleStreamEnded(_:)`：先确认传入句柄仍是 lifecycle 的当前活动句柄（重启/暂停后的迟到消费者直接忽略），再用 gate 的 `isCurrent` 区分被取代（静默暂停）与真中断（`recognitionInterrupted`）。
 
 ### 7.2 DeferredTaskStore
 

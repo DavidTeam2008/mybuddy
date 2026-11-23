@@ -101,79 +101,102 @@ private final class LifecycleFakeGate: SpeechSessionGating {
     }
 }
 
+/// Adds ordered event logging on top of the shared `ScriptedTaskStore`, so the
+/// failure fields and write counters stay in one place.
 @MainActor
 private final class LifecycleFakeStore: TaskStoreV2 {
     let log: LifecycleEventLog
-    let base: InMemoryTaskStore
-    var availability: TaskStoreAvailability = .ready
-    var startNewFailure: TaskStoreFailureReason?
-    var appendFailure: TaskStoreFailureReason?
-    var endFailure: TaskStoreFailureReason?
-    var setStatusFailure: TaskStoreFailureReason?
-    var deleteFailure: TaskStoreFailureReason?
-    var readFailure: TaskStoreFailureReason?
-    private(set) var appendCount = 0
-    private(set) var endCount = 0
+    private let scripted: ScriptedTaskStore
 
     init(log: LifecycleEventLog) {
         self.log = log
-        base = InMemoryTaskStore()
+        scripted = ScriptedTaskStore()
     }
 
-    func prepare() async {}
-    func retry() async {}
+    var base: InMemoryTaskStore { scripted.base }
+    var availability: TaskStoreAvailability {
+        get { scripted.availability }
+        set { scripted.availability = newValue }
+    }
+    var readFailure: TaskStoreFailureReason? {
+        get { scripted.readFailure }
+        set { scripted.readFailure = newValue }
+    }
+    var startNewFailure: TaskStoreFailureReason? {
+        get { scripted.startNewFailure }
+        set { scripted.startNewFailure = newValue }
+    }
+    var appendFailure: TaskStoreFailureReason? {
+        get { scripted.appendFailure }
+        set { scripted.appendFailure = newValue }
+    }
+    var updateTranslationsFailure: TaskStoreFailureReason? {
+        get { scripted.updateTranslationsFailure }
+        set { scripted.updateTranslationsFailure = newValue }
+    }
+    var saveSummaryFailure: TaskStoreFailureReason? {
+        get { scripted.saveSummaryFailure }
+        set { scripted.saveSummaryFailure = newValue }
+    }
+    var endFailure: TaskStoreFailureReason? {
+        get { scripted.endFailure }
+        set { scripted.endFailure = newValue }
+    }
+    var setStatusFailure: TaskStoreFailureReason? {
+        get { scripted.setStatusFailure }
+        set { scripted.setStatusFailure = newValue }
+    }
+    var deleteFailure: TaskStoreFailureReason? {
+        get { scripted.deleteFailure }
+        set { scripted.deleteFailure = newValue }
+    }
+    var appendCount: Int { scripted.appendCalls }
+    var endCount: Int { scripted.endCalls }
+
+    func prepare() async { await scripted.prepare() }
+    func retry() async { await scripted.retry() }
 
     // MARK: - TaskStoreV2 reads
 
     func readActiveTask(for feature: FeatureID) async -> TaskStoreReadResult<TaskSession?> {
-        if let readFailure { return .unavailable(readFailure) }
-        return await base.readActiveTask(for: feature)
+        await scripted.readActiveTask(for: feature)
     }
 
     func readUnfinishedTasks() async -> TaskStoreReadResult<[TaskSession]> {
-        if let readFailure { return .unavailable(readFailure) }
-        return await base.readUnfinishedTasks()
+        await scripted.readUnfinishedTasks()
     }
 
     func readList(filter: FeatureID?) async -> TaskStoreReadResult<[TaskSession]> {
-        if let readFailure { return .unavailable(readFailure) }
-        return await base.readList(filter: filter)
+        await scripted.readList(filter: filter)
     }
 
     func readTask(id: UUID) async -> TaskStoreReadResult<TaskSession?> {
-        if let readFailure { return .unavailable(readFailure) }
-        return await base.readTask(id: id)
+        await scripted.readTask(id: id)
     }
 
-    // MARK: - TaskStoreV2 writes with optional failure injection
+    // MARK: - TaskStoreV2 writes with ordered logging
 
     func startNew(_ draft: TaskDraft) async -> TaskStoreWriteResult<TaskSession> {
         log.record(.storeStartNew)
-        if let startNewFailure { return .notPersisted(startNewFailure) }
-        return await base.startNew(draft)
+        return await scripted.startNew(draft)
     }
 
     func append(_ entries: [TranscriptEntry], to taskID: UUID) async -> TaskStoreWriteOutcome {
         log.record(.storeAppend(taskID))
-        appendCount += 1
-        if let appendFailure { return .notPersisted(appendFailure) }
-        return await base.append(entries, to: taskID)
+        return await scripted.append(entries, to: taskID)
     }
 
     func updateTranslations(_ entries: [TranscriptEntry], for taskID: UUID) async -> TaskStoreWriteOutcome {
-        if let appendFailure { return .notPersisted(appendFailure) }
-        return await base.updateTranslations(entries, for: taskID)
+        await scripted.updateTranslations(entries, for: taskID)
     }
 
     func setStatus(_ status: TaskStatus, for taskID: UUID) async -> TaskStoreWriteOutcome {
         log.record(.storeSetStatus(status))
-        if let setStatusFailure { return .notPersisted(setStatusFailure) }
-        return await base.setStatus(status, for: taskID)
+        return await scripted.setStatus(status, for: taskID)
     }
 
     func saveSummary(_ summary: ConversationSummary, for taskID: UUID) async -> TaskStoreWriteOutcome {
-        if let appendFailure { return .notPersisted(appendFailure) }
-        return await base.saveSummary(summary, for: taskID)
+        await scripted.saveSummary(summary, for: taskID)
     }
 
     func end(
@@ -182,15 +205,12 @@ private final class LifecycleFakeStore: TaskStoreV2 {
         summary: ConversationSummary?
     ) async -> TaskStoreEndResult {
         log.record(.storeEnd(taskID))
-        endCount += 1
-        if let endFailure { return .notPersisted(endFailure) }
-        return await base.end(taskID: taskID, entries: entries, summary: summary)
+        return await scripted.end(taskID: taskID, entries: entries, summary: summary)
     }
 
     func deleteTask(id: UUID) async -> TaskStoreWriteOutcome {
         log.record(.storeDelete(id))
-        if let deleteFailure { return .notPersisted(deleteFailure) }
-        return await base.deleteTask(id: id)
+        return await scripted.deleteTask(id: id)
     }
 }
 
@@ -501,7 +521,7 @@ struct TaskLifecycleTests {
         _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
         lifecycle.persist([makeEntry("要放弃的内容")])
 
-        let outcome = await lifecycle.discardCurrentTask()
+        let outcome = await lifecycle.discardMemoryOnlyTask()
 
         #expect(outcome == .persisted)
         #expect(lifecycle.current == nil)
@@ -510,7 +530,7 @@ struct TaskLifecycleTests {
         #expect(await store.base.unfinishedTasks().isEmpty)
     }
 
-    @Test("Discarding a durable unsaved task deletes it from the store")
+    @Test("The unsaved flow never deletes a durable task")
     func discardDurableUnsavedTask() async throws {
         let log = LifecycleEventLog()
         let store = LifecycleFakeStore(log: log)
@@ -525,12 +545,14 @@ struct TaskLifecycleTests {
         lifecycle.persist([entry, makeEntry("没写进去的一句")])
         await lifecycle.flush()
         #expect(lifecycle.isNotSaved)
+        #expect(!lifecycle.isMemoryOnly)
 
-        let outcome = await lifecycle.discardCurrentTask()
+        let outcome = await lifecycle.discardMemoryOnlyTask()
 
         #expect(outcome == .persisted)
-        #expect(lifecycle.current == nil)
-        #expect(await store.base.task(id: taskID) == nil)
+        #expect(lifecycle.current?.id == taskID)
+        #expect(lifecycle.hasActiveTask)
+        #expect(await store.base.task(id: taskID) != nil)
     }
 
     @Test("Restore returns the unfinished task with its recorded language pair")
@@ -697,7 +719,7 @@ struct TaskLifecycleTests {
         )
         #expect(await gate.isCurrent(handle) == false)
 
-        let interrupted = await lifecycle.handleStreamEnded()
+        let interrupted = await lifecycle.handleStreamEnded(handle)
 
         #expect(interrupted == false)
         #expect(lifecycle.sessionState == .paused)
@@ -711,17 +733,76 @@ struct TaskLifecycleTests {
         let store = LifecycleFakeStore(log: log)
         let gate = LifecycleFakeGate(log: log)
         let lifecycle = makeLifecycle(store: store, gate: gate)
-        _ = await lifecycle.startNewTask(makeRequest(autoStart: true))
+        let started = await lifecycle.startNewTask(makeRequest(autoStart: true))
+        let handle = try #require(started.handle)
         let taskID = try #require(lifecycle.taskID)
 
         gate.failCurrentStream()
 
-        let interrupted = await lifecycle.handleStreamEnded()
+        let interrupted = await lifecycle.handleStreamEnded(handle)
 
         #expect(interrupted)
         #expect(lifecycle.sessionState == .failed(.recognitionInterrupted))
         #expect(lifecycle.hasActiveTask)
         #expect(await store.base.task(id: taskID)?.status == .pausedListening)
+    }
+
+    @Test("A stale stream ending after a restart leaves the new stream active")
+    func staleStreamEndAfterRestartIsIgnored() async throws {
+        let log = LifecycleEventLog()
+        let store = LifecycleFakeStore(log: log)
+        let gate = LifecycleFakeGate(log: log)
+        let lifecycle = makeLifecycle(store: store, gate: gate)
+        let started = await lifecycle.startNewTask(makeRequest(autoStart: true))
+        let firstHandle = try #require(started.handle)
+        let taskID = try #require(lifecycle.taskID)
+
+        guard case let .started(secondHandle) = await lifecycle.startListening(
+            makeRequest(autoStart: true).listening
+        ) else {
+            Issue.record("Expected the restart to start listening")
+            return
+        }
+        let second = try #require(secondHandle)
+        #expect(await gate.isCurrent(second))
+        #expect(lifecycle.sessionState == .listening)
+
+        let interrupted = await lifecycle.handleStreamEnded(firstHandle)
+
+        #expect(!interrupted)
+        #expect(lifecycle.sessionState == .listening)
+        #expect(await gate.isCurrent(second))
+        #expect(lifecycle.current?.id == taskID)
+        #expect(await store.base.task(id: taskID)?.status == .running)
+    }
+
+    @Test("A durable task with a failed write ends normally instead of hitting the unsaved guard")
+    func durableNotSavedTaskIsNotBlocked() async throws {
+        let log = LifecycleEventLog()
+        let store = LifecycleFakeStore(log: log)
+        let gate = LifecycleFakeGate(log: log)
+        let lifecycle = makeLifecycle(store: store, gate: gate)
+        _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
+        let taskID = try #require(lifecycle.taskID)
+        let saved = makeEntry("已经保存的一句")
+        lifecycle.persist([saved])
+        await lifecycle.flush()
+        store.appendFailure = .saveFailed
+        let unsaved = makeEntry("没写进去的一句")
+        lifecycle.persist([saved, unsaved])
+        await lifecycle.flush()
+        #expect(lifecycle.isNotSaved)
+        #expect(!lifecycle.isMemoryOnly)
+
+        let outcome = await lifecycle.prepareForNewTask()
+
+        #expect(outcome == .ready)
+        #expect(lifecycle.current == nil)
+        #expect(store.endCount == 1)
+        let stored = await store.base.task(id: taskID)
+        #expect(stored?.status == .ended)
+        #expect(stored?.entries.map(\.sourceText) == ["已经保存的一句", "没写进去的一句"])
+        #expect(await store.base.unfinishedTasks().isEmpty)
     }
 
     // MARK: - Helpers

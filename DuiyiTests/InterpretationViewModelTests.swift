@@ -759,7 +759,7 @@ struct InterpretationViewModelTests {
         #expect(ended == nil)
         #expect(viewModel.transcript.map(\.sourceText) == ["还没保存的内容"])
         #expect(viewModel.hasActiveTask)
-        #expect(viewModel.showsNotSavedBanner)
+        #expect(viewModel.isNotSaved)
         #expect(viewModel.sessionState == .paused)
         #expect(viewModel.exportableSession.entries.map(\.sourceText) == ["还没保存的内容"])
         #expect(await store.base.list(filter: .simultaneous).isEmpty)
@@ -777,7 +777,7 @@ struct InterpretationViewModelTests {
 
         await viewModel.stop(restoreIdleTimerAfterDelay: false)
 
-        #expect(viewModel.showsNotSavedBanner)
+        #expect(viewModel.isNotSaved)
         #expect(viewModel.transcript.map(\.sourceText) == ["写不进存储的一句"])
     }
 
@@ -883,6 +883,53 @@ struct InterpretationViewModelTests {
         #expect(chineseTask?.title.contains("同声传译") == true)
     }
 
+    @Test("Interpretation banner and resume copy follow the interface language, not the target")
+    func interfaceCopyUsesInterfaceLanguage() async throws {
+        let store = InMemoryTaskStore()
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let title = "Restored task"
+        let draft = TaskDraft(
+            feature: .simultaneous,
+            sourceLanguage: .english,
+            targetLanguage: .zhHans,
+            multilingual: false,
+            startedAt: startedAt,
+            title: title
+        )
+        guard case let .persisted(seeded) = await store.startNew(draft) else {
+            Issue.record("Could not seed the running task")
+            return
+        }
+        _ = await store.append(
+            [
+                TranscriptEntry(
+                    id: UUID(),
+                    speaker: .peer,
+                    source: .english,
+                    sourceText: "Restored line",
+                    translatedText: "恢复的一句",
+                    isFinal: true
+                )
+            ],
+            to: seeded.id
+        )
+        _ = await store.setStatus(.pausedListening, for: seeded.id)
+
+        let viewModel = makeViewModel(
+            store: store,
+            sourceLanguage: .english,
+            targetLanguage: .zhHans,
+            userLanguage: .english
+        )
+        await viewModel.bootstrap()
+
+        #expect(viewModel.interfaceLanguage == .english)
+        #expect(viewModel.resumePromptText == "Continue task: \(title)")
+        #expect(viewModel.controlLabel == "Tap to start")
+        #expect(Copy.notSavedBanner(for: viewModel.interfaceLanguage).contains("won't be saved"))
+        #expect(!Copy.notSavedBanner(for: viewModel.interfaceLanguage).contains("不会保存"))
+    }
+
     @Test("A memory-only task with content blocks a new task until the user discards it")
     func unsavedTaskBlocksNewTask() async {
         let store = ScriptedTaskStore()
@@ -890,7 +937,7 @@ struct InterpretationViewModelTests {
         let viewModel = makeViewModel(store: store)
         await viewModel.beginTask()
         #expect(viewModel.isMemoryOnly)
-        #expect(viewModel.showsNotSavedBanner)
+        #expect(viewModel.isNotSaved)
         viewModel.accept(Utterance(language: .english, text: "唯一的副本", isFinal: true))
 
         await viewModel.beginTask()
@@ -906,6 +953,51 @@ struct InterpretationViewModelTests {
         #expect(viewModel.transcript.isEmpty)
         #expect(viewModel.hasActiveTask)
         #expect(store.startNewCalls == 2)
+    }
+
+    @Test("Export and continue starts a new task after the user continues")
+    func exportThenContinueStartsNewTask() async {
+        let store = ScriptedTaskStore()
+        store.startNewFailure = .saveFailed
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .english, text: "唯一的副本", isFinal: true))
+        await viewModel.beginTask()
+        #expect(viewModel.isUnsavedTaskPromptPresented)
+
+        viewModel.beginExportThenContinue()
+
+        #expect(viewModel.isSummaryPresented)
+        #expect(viewModel.isExportThenContinuePending)
+        #expect(!viewModel.isUnsavedTaskPromptPresented)
+
+        await viewModel.continueAfterExport()
+
+        #expect(!viewModel.isSummaryPresented)
+        #expect(!viewModel.isExportThenContinuePending)
+        #expect(viewModel.transcript.isEmpty)
+        #expect(viewModel.hasActiveTask)
+        #expect(store.startNewCalls == 2)
+    }
+
+    @Test("Closing the export summary keeps the memory-only task intact")
+    func closingExportSummaryKeepsTask() async {
+        let store = ScriptedTaskStore()
+        store.startNewFailure = .saveFailed
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .english, text: "唯一的副本", isFinal: true))
+        await viewModel.beginTask()
+        viewModel.beginExportThenContinue()
+
+        viewModel.dismissSummary()
+
+        #expect(!viewModel.isSummaryPresented)
+        #expect(!viewModel.isExportThenContinuePending)
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.isMemoryOnly)
+        #expect(viewModel.transcript.map(\.sourceText) == ["唯一的副本"])
+        #expect(store.startNewCalls == 1)
     }
 
     @Test("Sixty settled lines stay in the transcript and export while the pane shows the last fifty")

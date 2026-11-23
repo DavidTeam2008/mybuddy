@@ -38,19 +38,11 @@ struct MeetingView: View {
                     .padding(.horizontal, Tokens.horizontalPadding)
                     .padding(.bottom, 8)
 
-                if viewModel.showsNotSavedBanner {
-                    Text(Copy.notSavedBanner(for: viewModel.displayLanguage))
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color(hex: 0xF0D9B0))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(
-                            Color(hex: 0x2A2420),
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        )
-                        .padding(.horizontal, Tokens.horizontalPadding)
-                        .padding(.bottom, 8)
-                        .accessibilityIdentifier("meeting-not-saved-banner")
+                if viewModel.isNotSaved {
+                    NotSavedBanner(
+                        language: viewModel.displayLanguage,
+                        accessibilityIdentifier: "meeting-not-saved-banner"
+                    )
                 }
 
                 if let prompt = viewModel.resumePromptText {
@@ -131,10 +123,13 @@ struct MeetingView: View {
                     errorText: viewModel.summaryError,
                     exportTask: viewModel.exportableSession,
                     exporter: environment.exporter,
+                    continueAfterExport: viewModel.isExportThenContinuePending
+                        ? { Task { await viewModel.continueAfterExport() } }
+                        : nil,
                     onCopy: copySummary,
                     onClose: {
                         withAnimation(.easeOut(duration: 0.18)) {
-                            viewModel.isSummaryPresented = false
+                            viewModel.dismissSummary()
                         }
                     }
                 )
@@ -187,7 +182,7 @@ struct MeetingView: View {
         ) {
             Button(Copy.exportThenContinue(for: viewModel.displayLanguage)) {
                 withAnimation(.easeOut(duration: 0.18)) {
-                    viewModel.isSummaryPresented = true
+                    viewModel.beginExportThenContinue()
                 }
             }
             Button(Copy.discardAndStartNew(for: viewModel.displayLanguage), role: .destructive) {

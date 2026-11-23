@@ -135,13 +135,15 @@ final class TaskLifecycle {
 
         guard let task = current else { return .ready }
 
-        if isNotSaved && Self.hasUsableText(latestTranscript) {
-            return .blockedByUnsavedTask
-        }
-
+        // Only a task that never reached the store is blocked here. A durable
+        // task whose last write failed still goes through `store.end`, which
+        // either persists it into history or reports `.notSaved`.
         if isMemoryOnly {
-            clearCurrent()
-            return .ready
+            guard latestTranscript.contains(where: \.hasUsableText) else {
+                clearCurrent()
+                return .ready
+            }
+            return .blockedByUnsavedTask
         }
 
         // Hand the store the latest snapshot and any in-memory summary so a
@@ -299,13 +301,16 @@ final class TaskLifecycle {
         await flush()
     }
 
-    /// Classifies a finished stream at the lifecycle seam. A still-current
-    /// handle ended unexpectedly (real interruption); a handle superseded by
-    /// another owner ends silently into paused. The task is never ended here.
+    /// Classifies the end of `handle`'s stream. Only the lifecycle's current
+    /// active handle is acted on: a stale consumer whose stream ended after a
+    /// restart or pause is ignored, so it cannot pause the new stream, raise a
+    /// false interruption, or leave a ghost active handle. A still-current
+    /// handle ending unexpectedly is a real interruption; one superseded by
+    /// another owner pauses silently. The task is never ended here.
     @discardableResult
-    func handleStreamEnded() async -> Bool {
-        guard let handle = activeHandle else { return false }
-        activeHandle = nil
+    func handleStreamEnded(_ handle: SpeechSessionHandle) async -> Bool {
+        guard let activeHandle, activeHandle == handle else { return false }
+        self.activeHandle = nil
 
         guard await gate.isCurrent(handle) else {
             sessionState = .paused
@@ -320,23 +325,13 @@ final class TaskLifecycle {
         return true
     }
 
-    /// Leaves an unsaved task on explicit user request ("discard and start
-    /// new"). A durable task is removed; a memory-only task just disappears.
-    func discardCurrentTask() async -> TaskStoreWriteOutcome {
+    /// Leaves a memory-only task on explicit user request ("discard and start
+    /// new"). A durable task is never deleted through this unsaved flow.
+    func discardMemoryOnlyTask() async -> TaskStoreWriteOutcome {
+        guard isMemoryOnly else { return .persisted }
         await pauseListening()
-        cancelPendingPersist()
-        let outcome: TaskStoreWriteOutcome
-        if let taskID = current?.id, !isMemoryOnly {
-            outcome = await store.deleteTask(id: taskID)
-        } else {
-            outcome = .persisted
-        }
-        current = nil
-        isMemoryOnly = false
-        isNotSaved = false
-        latestTranscript = []
-        sessionState = .ready
-        return outcome
+        clearCurrent()
+        return .persisted
     }
 
     // MARK: - End
@@ -449,9 +444,5 @@ final class TaskLifecycle {
         isNotSaved = false
         latestTranscript = []
         sessionState = .ready
-    }
-
-    private static func hasUsableText(_ entries: [TranscriptEntry]) -> Bool {
-        entries.contains { !$0.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 }

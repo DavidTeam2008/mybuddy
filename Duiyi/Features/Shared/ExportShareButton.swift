@@ -5,6 +5,8 @@ struct ExportShareButton: View {
     let language: AppLanguage
     let exporter: any ExportSharing
     var title: String? = nil
+    /// Reports the prepared share file, or `nil` when preparation failed.
+    var onPrepared: ((URL?) -> Void)? = nil
 
     @State private var fileURL: URL?
 
@@ -42,6 +44,8 @@ struct ExportShareButton: View {
     }
 
     private func prepare() {
-        fileURL = try? exporter.makeTranscriptFile(task: task, language: language)
+        let prepared = try? exporter.makeTranscriptFile(task: task, language: language)
+        fileURL = prepared
+        onPrepared?(prepared)
     }
 }

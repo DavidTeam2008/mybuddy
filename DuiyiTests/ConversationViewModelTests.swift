@@ -404,7 +404,7 @@ struct ConversationViewModelTests {
 
         #expect(viewModel.hasActiveTask)
         #expect(viewModel.isMemoryOnly)
-        #expect(viewModel.showsNotSavedBanner)
+        #expect(viewModel.isNotSaved)
         #expect(viewModel.sessionState == .listening)
         #expect(gate.startCount == 1)
 
@@ -476,7 +476,7 @@ struct ConversationViewModelTests {
         #expect(ended == nil)
         #expect(viewModel.transcript.map(\.sourceText) == ["还没保存的内容"])
         #expect(viewModel.hasActiveTask)
-        #expect(viewModel.showsNotSavedBanner)
+        #expect(viewModel.isNotSaved)
         #expect(viewModel.sessionState == .paused)
         #expect(viewModel.peerPane.live?.sourceText == "还没保存的内容")
         #expect(viewModel.exportableSession.entries.map(\.sourceText) == ["还没保存的内容"])
@@ -667,7 +667,7 @@ struct ConversationViewModelTests {
         )
         await viewModel.beginTask()
         #expect(viewModel.isMemoryOnly)
-        #expect(viewModel.showsNotSavedBanner)
+        #expect(viewModel.isNotSaved)
         viewModel.accept(Utterance(language: .zhHans, text: "唯一的副本", isFinal: true))
 
         await viewModel.beginTask()
@@ -683,6 +683,59 @@ struct ConversationViewModelTests {
         #expect(viewModel.transcript.isEmpty)
         #expect(viewModel.hasActiveTask)
         #expect(store.startNewCalls == 2)
+    }
+
+    @Test("Export and continue starts a new task after the user continues")
+    func exportThenContinueStartsNewTask() async {
+        let store = ScriptedTaskStore()
+        store.startNewFailure = .saveFailed
+        let viewModel = makeGateViewModel(
+            gate: ConversationFakeGate(),
+            store: store,
+            autoStart: false
+        )
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .zhHans, text: "唯一的副本", isFinal: true))
+        await viewModel.beginTask()
+        #expect(viewModel.isUnsavedTaskPromptPresented)
+
+        viewModel.beginExportThenContinue()
+
+        #expect(viewModel.isSummaryPresented)
+        #expect(viewModel.isExportThenContinuePending)
+        #expect(!viewModel.isUnsavedTaskPromptPresented)
+
+        await viewModel.continueAfterExport()
+
+        #expect(!viewModel.isSummaryPresented)
+        #expect(!viewModel.isExportThenContinuePending)
+        #expect(viewModel.transcript.isEmpty)
+        #expect(viewModel.hasActiveTask)
+        #expect(store.startNewCalls == 2)
+    }
+
+    @Test("Closing the export summary keeps the memory-only task intact")
+    func closingExportSummaryKeepsTask() async {
+        let store = ScriptedTaskStore()
+        store.startNewFailure = .saveFailed
+        let viewModel = makeGateViewModel(
+            gate: ConversationFakeGate(),
+            store: store,
+            autoStart: false
+        )
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .zhHans, text: "唯一的副本", isFinal: true))
+        await viewModel.beginTask()
+        viewModel.beginExportThenContinue()
+
+        viewModel.dismissSummary()
+
+        #expect(!viewModel.isSummaryPresented)
+        #expect(!viewModel.isExportThenContinuePending)
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.isMemoryOnly)
+        #expect(viewModel.transcript.map(\.sourceText) == ["唯一的副本"])
+        #expect(store.startNewCalls == 1)
     }
 
     @Test("A new face-to-face task title uses the interface language, not the target")

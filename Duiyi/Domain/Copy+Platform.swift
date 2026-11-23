@@ -87,14 +87,65 @@ extension Copy {
         )
     }
 
-    static func deleteFailed(for language: AppLanguage) -> String {
+    /// Delete failure copy that names the store's reason.
+    static func deleteFailed(reason: TaskStoreFailureReason, for language: AppLanguage) -> String {
+        switch reason {
+        case .unavailable:
+            return language.pick(
+                zh: "删除失败：本机存储不可用，请重试。",
+                en: "Delete failed: on-device storage is unavailable. Try again.",
+                ja: "削除できませんでした：端末の保存領域を利用できません。もう一度お試しください。",
+                ko: "삭제하지 못했습니다: 기기 저장 공간을 사용할 수 없습니다. 다시 시도해 주세요.",
+                th: "ลบไม่สำเร็จ: ใช้ที่เก็บข้อมูลในเครื่องไม่ได้ ลองอีกครั้ง",
+                vi: "Xóa không thành công: bộ nhớ trên thiết bị không khả dụng. Hãy thử lại."
+            )
+        case .openFailed:
+            return language.pick(
+                zh: "删除失败：无法打开本机存储，请重试。",
+                en: "Delete failed: on-device storage couldn't be opened. Try again.",
+                ja: "削除できませんでした：端末の保存領域を開けませんでした。もう一度お試しください。",
+                ko: "삭제하지 못했습니다: 기기 저장 공간을 열지 못했습니다. 다시 시도해 주세요.",
+                th: "ลบไม่สำเร็จ: เปิดที่เก็บข้อมูลในเครื่องไม่ได้ ลองอีกครั้ง",
+                vi: "Xóa không thành công: không mở được bộ nhớ trên thiết bị. Hãy thử lại."
+            )
+        case .readFailed:
+            return language.pick(
+                zh: "删除失败：读取记录出错，请重试。",
+                en: "Delete failed: the record couldn't be read. Try again.",
+                ja: "削除できませんでした：記録を読み込めませんでした。もう一度お試しください。",
+                ko: "삭제하지 못했습니다: 기록을 읽지 못했습니다. 다시 시도해 주세요.",
+                th: "ลบไม่สำเร็จ: อ่านรายการไม่ได้ ลองอีกครั้ง",
+                vi: "Xóa không thành công: không đọc được bản ghi. Hãy thử lại."
+            )
+        case .saveFailed:
+            return language.pick(
+                zh: "删除失败：写入本机存储出错，请重试。",
+                en: "Delete failed: the change couldn't be saved. Try again.",
+                ja: "削除できませんでした：保存領域への書き込みに失敗しました。もう一度お試しください。",
+                ko: "삭제하지 못했습니다: 기기 저장 공간에 쓰지 못했습니다. 다시 시도해 주세요.",
+                th: "ลบไม่สำเร็จ: บันทึกการเปลี่ยนแปลงไม่ได้ ลองอีกครั้ง",
+                vi: "Xóa không thành công: không lưu được thay đổi. Hãy thử lại."
+            )
+        case .notFound:
+            return language.pick(
+                zh: "删除失败：这条记录已不存在。",
+                en: "Delete failed: the record no longer exists.",
+                ja: "削除できませんでした：この記録はもう存在しません。",
+                ko: "삭제하지 못했습니다: 이 기록은 더 이상 없습니다.",
+                th: "ลบไม่สำเร็จ: รายการนี้ไม่มีอยู่แล้ว",
+                vi: "Xóa không thành công: bản ghi này không còn tồn tại."
+            )
+        }
+    }
+
+    static func continueToNewTask(for language: AppLanguage) -> String {
         language.pick(
-            zh: "删除失败，请重试。",
-            en: "Delete failed. Try again.",
-            ja: "削除できませんでした。もう一度お試しください。",
-            ko: "삭제하지 못했습니다. 다시 시도해 주세요.",
-            th: "ลบไม่สำเร็จ ลองอีกครั้ง",
-            vi: "Xóa không thành công. Hãy thử lại."
+            zh: "继续新任务",
+            en: "Continue to new task",
+            ja: "新しいタスクへ進む",
+            ko: "새 작업으로 계속",
+            th: "ไปทำงานใหม่ต่อ",
+            vi: "Tiếp tục sang phiên mới"
         )
     }
 

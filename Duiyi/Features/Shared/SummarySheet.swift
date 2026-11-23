@@ -9,8 +9,13 @@ struct SummarySheet: View {
     let errorText: String?
     var exportTask: TaskSession? = nil
     var exporter: (any ExportSharing)? = nil
+    /// Present only for the unsaved-task "export and continue" flow. The
+    /// continue button appears once the export file has been prepared.
+    var continueAfterExport: (() -> Void)? = nil
     let onCopy: () -> Void
     let onClose: () -> Void
+
+    @State private var isExportReady = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -39,7 +44,12 @@ struct SummarySheet: View {
             .frame(maxHeight: 240)
 
             if let exportTask, let exporter {
-                ExportShareButton(task: exportSession(exportTask), language: language, exporter: exporter)
+                ExportShareButton(
+                    task: exportSession(exportTask),
+                    language: language,
+                    exporter: exporter,
+                    onPrepared: { isExportReady = $0 != nil }
+                )
             }
 
             HStack {
@@ -48,6 +58,15 @@ struct SummarySheet: View {
                         .foregroundStyle(Tokens.textPrimary)
                 }
                 Spacer()
+                if let continueAfterExport, isExportReady {
+                    Button(Copy.continueToNewTask(for: language), action: continueAfterExport)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Tokens.textPrimary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Tokens.sheetChip, in: Capsule())
+                        .accessibilityIdentifier("summary-continue")
+                }
                 Button(Copy.done(for: language), action: onClose)
                     .fontWeight(.semibold)
                     .foregroundStyle(Color(hex: 0x1C1915))
@@ -71,11 +90,13 @@ struct SummarySheet: View {
         }
         return Text(text)
             .font(.footnote)
-            .foregroundStyle(summary?.usedAppleIntelligence == true ? Color(hex: 0xB8E0C8) : Color(hex: 0xF0D9B0))
+            .foregroundStyle(summary?.usedAppleIntelligence == true ? Color(hex: 0xB8E0C8) : Tokens.warningText)
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                (summary?.usedAppleIntelligence == true ? Color(hex: 0x1D2A24) : Color(hex: 0x2A2420)),
+                summary?.usedAppleIntelligence == true
+                    ? Color(hex: 0x1D2A24)
+                    : Tokens.warningBackground,
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
     }

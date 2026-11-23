@@ -28,8 +28,8 @@ struct HistoryView: View {
                 .padding(.bottom, 8)
             }
 
-            if viewModel.deleteFailure != nil {
-                Text(Copy.deleteFailed(for: language))
+            if let reason = viewModel.deleteFailure {
+                Text(Copy.deleteFailed(reason: reason, for: language))
                     .font(.footnote)
                     .foregroundStyle(Tokens.danger)
                     .accessibilityIdentifier("history-delete-error")

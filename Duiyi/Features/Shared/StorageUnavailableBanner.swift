@@ -11,7 +11,7 @@ struct StorageUnavailableBanner: View {
         HStack(spacing: 12) {
             Text(Copy.storageUnavailable(for: language))
                 .font(.footnote)
-                .foregroundStyle(Color(hex: 0xF0D9B0))
+                .foregroundStyle(Tokens.warningText)
             Spacer(minLength: 8)
             Button(Copy.retry(for: language), action: onRetry)
                 .font(.footnote.weight(.semibold))
@@ -21,17 +21,10 @@ struct StorageUnavailableBanner: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            Color(hex: 0x2A2420),
+            Tokens.warningBackground,
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("storage-banner")
-    }
-}
-
-extension TaskStoreAvailability {
-    var isUnavailable: Bool {
-        if case .unavailable = self { return true }
-        return false
     }
 }
