@@ -58,9 +58,7 @@ struct ConversationView: View {
                     },
                     onSwap: {
                         pickingSide = nil
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            viewModel.swapLanguages()
-                        }
+                        Task { await viewModel.swapLanguages() }
                     }
                 )
 
@@ -82,6 +80,29 @@ struct ConversationView: View {
                         onNewTask: { requestNewTask() },
                         onEndTask: { confirmEndTask = true }
                     )
+                    if viewModel.showsNotSavedBanner {
+                        Text(Copy.notSavedBanner(for: viewModel.userLanguage))
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Color(hex: 0xF0D9B0))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .background(
+                                Color(hex: 0x2A2420),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            )
+                            .padding(.horizontal, Tokens.horizontalPadding)
+                            .padding(.bottom, 8)
+                            .accessibilityIdentifier("conversation-not-saved-banner")
+                    }
+                    if let prompt = viewModel.resumePromptText {
+                        Text(prompt)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Tokens.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, Tokens.horizontalPadding)
+                            .padding(.bottom, 8)
+                            .accessibilityIdentifier("conversation-resume-prompt")
+                    }
                     CaptionPaneView(
                         viewerLanguage: viewModel.userLanguage,
                         pane: viewModel.userPane,
@@ -219,6 +240,23 @@ struct ConversationView: View {
             }
             Button(Copy.cancel(for: viewModel.userLanguage), role: .cancel) {}
         }
+        .confirmationDialog(
+            Copy.unsavedTaskConfirm(for: viewModel.userLanguage),
+            isPresented: $viewModel.isUnsavedTaskPromptPresented,
+            titleVisibility: .visible
+        ) {
+            Button(Copy.exportThenContinue(for: viewModel.userLanguage)) {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    viewModel.isSummaryPresented = true
+                }
+            }
+            Button(Copy.discardAndStartNew(for: viewModel.userLanguage), role: .destructive) {
+                Task { await viewModel.discardUnsavedTaskAndBegin() }
+            }
+            Button(Copy.cancel(for: viewModel.userLanguage), role: .cancel) {
+                viewModel.dismissUnsavedTaskPrompt()
+            }
+        }
         .overlay {
             TranslationHostView(
                 userLanguage: viewModel.userLanguage,
@@ -315,16 +353,12 @@ struct ConversationView: View {
 
     private func applyUserLanguage(_ language: AppLanguage) {
         pickingSide = nil
-        withAnimation(.easeInOut(duration: 0.25)) {
-            viewModel.setUserLanguage(language)
-        }
+        Task { await viewModel.setUserLanguage(language) }
     }
 
     private func applyPeerLanguage(_ language: AppLanguage) {
         pickingSide = nil
-        withAnimation(.easeInOut(duration: 0.25)) {
-            viewModel.setPeerLanguage(language)
-        }
+        Task { await viewModel.setPeerLanguage(language) }
     }
 
     private func handlePairChange() async {
