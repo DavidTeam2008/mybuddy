@@ -11,4 +11,7 @@ enum ConversationLayout {
     static let liveFontCap: CGFloat = 32
     static let silenceCommitMilliseconds: UInt64 = 1100
     static let idleRestoreSeconds: Double = 30
+    /// Each face-to-face pane keeps the live line plus at most this many
+    /// history lines; older lines live only in the task transcript.
+    static let paneHistoryLimit = 3
 }
