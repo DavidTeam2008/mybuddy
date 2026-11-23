@@ -44,12 +44,35 @@ struct InterpretationView: View {
                     onPickTarget: { openPicker(.target) },
                     onSwap: {
                         picking = nil
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            viewModel.swapDirection()
-                        }
+                        Task { await viewModel.swapDirection() }
                     }
                 )
                 .padding(.bottom, 8)
+
+                if viewModel.showsNotSavedBanner {
+                    Text(Copy.notSavedBanner(for: viewModel.targetLanguage))
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color(hex: 0xF0D9B0))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(
+                            Color(hex: 0x2A2420),
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        )
+                        .padding(.horizontal, Tokens.horizontalPadding)
+                        .padding(.bottom, 8)
+                        .accessibilityIdentifier("interpretation-not-saved-banner")
+                }
+
+                if let prompt = viewModel.resumePromptText {
+                    Text(prompt)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Tokens.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, Tokens.horizontalPadding)
+                        .padding(.bottom, 8)
+                        .accessibilityIdentifier("interpretation-resume-prompt")
+                }
 
                 if let picking {
                     languagePicker(for: picking)
@@ -80,9 +103,7 @@ struct InterpretationView: View {
                     },
                     onSwap: {
                         picking = nil
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            viewModel.swapDirection()
-                        }
+                        Task { await viewModel.swapDirection() }
                     }
                 )
 
@@ -216,6 +237,23 @@ struct InterpretationView: View {
                 Task { await finishTask() }
             }
             Button(Copy.cancel(for: viewModel.targetLanguage), role: .cancel) {}
+        }
+        .confirmationDialog(
+            Copy.unsavedTaskConfirm(for: viewModel.targetLanguage),
+            isPresented: $viewModel.isUnsavedTaskPromptPresented,
+            titleVisibility: .visible
+        ) {
+            Button(Copy.exportThenContinue(for: viewModel.targetLanguage)) {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    viewModel.isSummaryPresented = true
+                }
+            }
+            Button(Copy.discardAndStartNew(for: viewModel.targetLanguage), role: .destructive) {
+                Task { await viewModel.discardUnsavedTaskAndBegin() }
+            }
+            Button(Copy.cancel(for: viewModel.targetLanguage), role: .cancel) {
+                viewModel.dismissUnsavedTaskPrompt()
+            }
         }
         .overlay {
             OneWayTranslationHostView(
@@ -453,16 +491,12 @@ struct InterpretationView: View {
 
     private func applySourceLanguage(_ language: AppLanguage) {
         picking = nil
-        withAnimation(.easeInOut(duration: 0.25)) {
-            viewModel.setSourceLanguage(language)
-        }
+        Task { await viewModel.setSourceLanguage(language) }
     }
 
     private func applyTargetLanguage(_ language: AppLanguage) {
         picking = nil
-        withAnimation(.easeInOut(duration: 0.25)) {
-            viewModel.setTargetLanguage(language)
-        }
+        Task { await viewModel.setTargetLanguage(language) }
     }
 
     private func selectMode(_ mode: AppMode) {

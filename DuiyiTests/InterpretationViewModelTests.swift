@@ -95,7 +95,7 @@ actor RecordingSpeechEngine: SpeechRecognizing {
 @MainActor
 struct InterpretationViewModelTests {
     @Test("Swap archives live and keeps history")
-    func swapDropsLiveKeepsHistory() {
+    func swapDropsLiveKeepsHistory() async {
         let viewModel = makeViewModel()
         let first = Utterance(language: .english, text: "Please silence your phones.", isFinal: true)
         viewModel.accept(first)
@@ -109,7 +109,7 @@ struct InterpretationViewModelTests {
             ),
             text: "请把手机调成静音。"
         )
-        viewModel.swapDirection()
+        await viewModel.swapDirection()
 
         #expect(viewModel.sourceLanguage == .zhHans)
         #expect(viewModel.targetLanguage == .english)
@@ -440,10 +440,10 @@ struct InterpretationViewModelTests {
     }
 
     @Test("Changing language returns to ready instead of listening")
-    func languageChangeReturnsToReady() {
+    func languageChangeReturnsToReady() async {
         let viewModel = makeViewModel()
         viewModel.sessionState = .listening
-        viewModel.setSourceLanguage(.japanese)
+        await viewModel.setSourceLanguage(.japanese)
         #expect(viewModel.sourceLanguage == .japanese)
         #expect(viewModel.targetLanguage == .zhHans)
         #expect(viewModel.sessionState == .ready)
@@ -470,7 +470,7 @@ struct InterpretationViewModelTests {
     func startUsesSingleSourceLocale() async {
         let speech = RecordingSpeechEngine()
         let viewModel = makeViewModel(speech: speech)
-        viewModel.setSourceLanguage(.japanese)
+        await viewModel.setSourceLanguage(.japanese)
         await viewModel.beginTask()
         await viewModel.start()
         let languages = await speech.startedLanguages
@@ -719,16 +719,191 @@ struct InterpretationViewModelTests {
         #expect(captions.contains("Lucy"))
     }
 
+    @Test("Beginning a new task stops the old stream before ending it")
+    func beginStopsOldStreamBeforeEnding() async {
+        let log = InterpretationEventLog()
+        let store = ScriptedTaskStore()
+        store.eventSink = { log.record($0) }
+        let gate = InterpretationFakeGate(log: log)
+        let viewModel = makeViewModel(store: store, gate: gate)
+
+        await viewModel.beginTask()
+        await viewModel.start()
+        #expect(viewModel.sessionState == .listening)
+        viewModel.accept(Utterance(language: .english, text: "旧任务最后一句", isFinal: true))
+
+        await viewModel.beginTask()
+
+        #expect(log.contains("gate-stop"))
+        #expect(log.contains("store-end"))
+        let stopIndex = log.firstIndex(of: "gate-stop")
+        let endIndex = log.firstIndex(of: "store-end")
+        #expect(stopIndex != nil && endIndex != nil && stopIndex! < endIndex!)
+        #expect(viewModel.transcript.isEmpty)
+        let active = await store.base.activeTask(for: .simultaneous)
+        #expect(active?.entries.isEmpty == true)
+        let ended = await store.base.list(filter: .simultaneous)
+        #expect(ended.first?.entries.contains { $0.sourceText == "旧任务最后一句" } == true)
+    }
+
+    @Test("An end that cannot be saved keeps the transcript, banner, and out of history")
+    func notSavedEndKeepsTranscript() async {
+        let store = ScriptedTaskStore()
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .english, text: "还没保存的内容", isFinal: true))
+        store.endFailure = .saveFailed
+
+        let ended = await viewModel.endTask()
+
+        #expect(ended == nil)
+        #expect(viewModel.transcript.map(\.sourceText) == ["还没保存的内容"])
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.showsNotSavedBanner)
+        #expect(viewModel.sessionState == .paused)
+        #expect(viewModel.exportableSession.entries.map(\.sourceText) == ["还没保存的内容"])
+        #expect(await store.base.list(filter: .simultaneous).isEmpty)
+        #expect(store.endCalls == 1)
+    }
+
+    @Test("A failed transcript write raises the not-saved banner")
+    func failedWriteShowsNotSavedBanner() async {
+        let store = ScriptedTaskStore()
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        await viewModel.start()
+        store.appendFailure = .saveFailed
+        viewModel.accept(Utterance(language: .english, text: "写不进存储的一句", isFinal: true))
+
+        await viewModel.stop(restoreIdleTimerAfterDelay: false)
+
+        #expect(viewModel.showsNotSavedBanner)
+        #expect(viewModel.transcript.map(\.sourceText) == ["写不进存储的一句"])
+    }
+
+    @Test("Restoring applies the recorded language pair and shows the continue prompt")
+    func restoreAppliesLanguagePairAndPrompt() async throws {
+        let store = InMemoryTaskStore()
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let title = TaskTitle.make(
+            feature: .simultaneous,
+            source: .english,
+            target: .zhHans,
+            startedAt: startedAt,
+            language: .zhHans
+        )
+        let draft = TaskDraft(
+            feature: .simultaneous,
+            sourceLanguage: .english,
+            targetLanguage: .zhHans,
+            multilingual: false,
+            startedAt: startedAt,
+            title: title
+        )
+        guard case let .persisted(seeded) = await store.startNew(draft) else {
+            Issue.record("Could not seed the running task")
+            return
+        }
+        let entry = TranscriptEntry(
+            id: UUID(),
+            speaker: .peer,
+            source: .english,
+            sourceText: "Restored line",
+            translatedText: "恢复的一句",
+            isFinal: true
+        )
+        _ = await store.append([entry], to: seeded.id)
+        _ = await store.setStatus(.pausedListening, for: seeded.id)
+
+        let viewModel = makeViewModel(
+            store: store,
+            sourceLanguage: .japanese,
+            targetLanguage: .korean
+        )
+        await viewModel.bootstrap()
+
+        #expect(viewModel.sourceLanguage == .english)
+        #expect(viewModel.targetLanguage == .zhHans)
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.transcript.map(\.sourceText) == ["Restored line"])
+        #expect(viewModel.pane.history.count == 1)
+        #expect(viewModel.resumePromptText?.contains("继续任务") == true)
+        #expect(viewModel.resumePromptText?.contains(title) == true)
+        #expect(viewModel.sessionState == .ready)
+    }
+
+    @Test("Changing direction stops the stream before clearing the live caption")
+    func directionChangeStopsStreamBeforeClearing() async {
+        let log = InterpretationEventLog()
+        let gate = InterpretationFakeGate(log: log)
+        let viewModel = makeViewModel(gate: gate)
+        await viewModel.beginTask()
+        await viewModel.start()
+        viewModel.accept(Utterance(language: .english, text: "Please silence your phones", isFinal: false))
+        #expect(viewModel.pane.live != nil)
+
+        await viewModel.swapDirection()
+
+        #expect(gate.stopCount == 1)
+        #expect(viewModel.pane.live == nil)
+        #expect(viewModel.sessionState == .ready)
+        #expect(gate.starts.count == 1)
+
+        viewModel.accept(Utterance(language: .english, text: "old direction line", isFinal: true))
+        #expect(viewModel.pane.live == nil)
+    }
+
+    @Test("A memory-only task with content blocks a new task until the user discards it")
+    func unsavedTaskBlocksNewTask() async {
+        let store = ScriptedTaskStore()
+        store.startNewFailure = .saveFailed
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        #expect(viewModel.isMemoryOnly)
+        #expect(viewModel.showsNotSavedBanner)
+        viewModel.accept(Utterance(language: .english, text: "唯一的副本", isFinal: true))
+
+        await viewModel.beginTask()
+
+        #expect(viewModel.isUnsavedTaskPromptPresented)
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.transcript.map(\.sourceText) == ["唯一的副本"])
+        #expect(store.startNewCalls == 1)
+
+        await viewModel.discardUnsavedTaskAndBegin()
+
+        #expect(!viewModel.isUnsavedTaskPromptPresented)
+        #expect(viewModel.transcript.isEmpty)
+        #expect(viewModel.hasActiveTask)
+        #expect(store.startNewCalls == 2)
+    }
+
     private func makeViewModel(
         speech: any SpeechRecognizing = MockSpeechEngine(),
         audioSession: MockAudioSession = MockAudioSession(),
         synthesizer: MockSpeechSynthesizer = MockSpeechSynthesizer(),
-        speechSettleDelay: Duration = .milliseconds(0)
+        speechSettleDelay: Duration = .milliseconds(0),
+        store: any TaskStoreV2 = InMemoryTaskStore(),
+        gate: (any SpeechSessionGating)? = nil,
+        sourceLanguage: AppLanguage = .english,
+        targetLanguage: AppLanguage = .zhHans
     ) -> InterpretationViewModel {
         let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
-        preferences.sourceLanguage = .english
-        preferences.targetLanguage = .zhHans
+        preferences.sourceLanguage = sourceLanguage
+        preferences.targetLanguage = targetLanguage
         preferences.voiceOutEnabled = false
+        if let gate {
+            return InterpretationViewModel(
+                gate: gate,
+                permissions: MockPermissions(),
+                preferences: preferences,
+                summarizer: MockSummarizer(),
+                audioSession: audioSession,
+                synthesizer: synthesizer,
+                taskStore: store,
+                speechSettleDelay: speechSettleDelay
+            )
+        }
         return InterpretationViewModel(
             speech: speech,
             permissions: MockPermissions(),
@@ -736,7 +911,68 @@ struct InterpretationViewModelTests {
             summarizer: MockSummarizer(),
             audioSession: audioSession,
             synthesizer: synthesizer,
+            taskStore: store,
             speechSettleDelay: speechSettleDelay
         )
+    }
+}
+
+@MainActor
+private final class InterpretationEventLog {
+    private(set) var events: [String] = []
+
+    func record(_ event: String) {
+        events.append(event)
+    }
+
+    func contains(_ event: String) -> Bool {
+        events.contains(event)
+    }
+
+    func firstIndex(of event: String) -> Int? {
+        events.firstIndex(of: event)
+    }
+}
+
+@MainActor
+private final class InterpretationFakeGate: SpeechSessionGating {
+    private let log: InterpretationEventLog
+    private var generation: UInt64 = 0
+    private var currentGeneration: UInt64?
+    private var continuation: AsyncStream<Utterance>.Continuation?
+    private(set) var starts: [FeatureID] = []
+    private(set) var stopCount = 0
+
+    init(log: InterpretationEventLog) {
+        self.log = log
+    }
+
+    func start(
+        owner: FeatureID,
+        languages: [AppLanguage],
+        fallbackLanguage: AppLanguage,
+        style: SpeechRecognitionStyle
+    ) async throws -> SpeechSessionHandle {
+        generation += 1
+        let next = generation
+        currentGeneration = next
+        let (stream, continuation) = AsyncStream<Utterance>.makeStream()
+        self.continuation = continuation
+        starts.append(owner)
+        log.record("gate-start")
+        return SpeechSessionHandle(owner: owner, generation: next, stream: stream)
+    }
+
+    func stop(_ handle: SpeechSessionHandle) async {
+        stopCount += 1
+        log.record("gate-stop")
+        guard currentGeneration == handle.generation else { return }
+        currentGeneration = nil
+        continuation?.finish()
+        continuation = nil
+    }
+
+    func isCurrent(_ handle: SpeechSessionHandle) async -> Bool {
+        currentGeneration == handle.generation
     }
 }
