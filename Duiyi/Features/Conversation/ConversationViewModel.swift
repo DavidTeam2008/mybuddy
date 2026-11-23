@@ -3,14 +3,20 @@ import Foundation
 @MainActor
 @Observable
 final class ConversationViewModel {
-    private let speech: any SpeechRecognizing
+    private let lifecycle: TaskLifecycle
     private let permissions: any PermissionGranting
     private let preferences: PreferencesStore
     private let summarizer: any ConversationSummarizing
-    private let audioSession: any AudioSessionConfiguring
-    private let task: TaskSessionController
 
-    var sessionState: SessionState = .idle
+    /// Feature-specific transient states (asset preparation, preparation
+    /// failure) layered over the lifecycle-owned session state.
+    private var stateOverride: SessionState?
+
+    var sessionState: SessionState {
+        get { stateOverride ?? lifecycle.sessionState }
+        set { stateOverride = newValue }
+    }
+
     var userLanguage: AppLanguage
     var peerLanguage: AppLanguage
     var fontSize: CaptionFontSize
@@ -26,35 +32,41 @@ final class ConversationViewModel {
     var summaryError: String?
     var summaryAvailability: SummaryAvailability = .unavailable
     var isSummarizing = false
+    /// Set when a new task is blocked by a memory-only task with content.
+    var isUnsavedTaskPromptPresented = false
+    /// "继续任务：…" prompt shown after restoring an unfinished task.
+    var resumePromptText: String?
 
     private var speechTask: Task<Void, Never>?
     private var translationDebounce: Task<Void, Never>?
     private var idleRestoreTask: Task<Void, Never>?
-    private var isStopping = false
     private var routedSideByUtterance: [UUID: SpeakerSide] = [:]
     private var lastCommittedLanguage: AppLanguage?
     private var lastCommittedAt = Date.distantPast
     private var lastAppliedSourceCount: [UUID: Int] = [:]
     private var sentSourceText: [UUID: String] = [:]
     private var utteranceAliases: [UUID: UUID] = [:]
-    private var persistTask: Task<Void, Never>?
     private let idleRestoreDelay: Duration
 
     init(
-        speech: any SpeechRecognizing,
+        gate: any SpeechSessionGating,
         permissions: any PermissionGranting,
         preferences: PreferencesStore,
         summarizer: any ConversationSummarizing,
         audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
-        taskStore: any TaskStore = InMemoryTaskStore(),
+        taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds)
     ) {
-        self.speech = speech
+        lifecycle = TaskLifecycle(
+            feature: .faceToFace,
+            store: taskStore,
+            gate: gate,
+            permissions: permissions,
+            audioSession: audioSession
+        )
         self.permissions = permissions
         self.preferences = preferences
         self.summarizer = summarizer
-        self.audioSession = audioSession
-        self.task = TaskSessionController(feature: .faceToFace, store: taskStore)
         self.idleRestoreDelay = idleRestoreDelay
         userLanguage = preferences.userLanguage
         peerLanguage = preferences.peerLanguage
@@ -62,26 +74,52 @@ final class ConversationViewModel {
         autoStartListening = preferences.autoStartListening
     }
 
-    var hasActiveTask: Bool { task.hasActiveTask }
-    var taskStartedAt: Date? { task.startedAt }
+    /// Compatibility initializer for call sites and tests that inject a raw
+    /// speech engine; the face-to-face lifecycle gets its own gate around it.
+    convenience init(
+        speech: any SpeechRecognizing,
+        permissions: any PermissionGranting,
+        preferences: PreferencesStore,
+        summarizer: any ConversationSummarizing,
+        audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
+        taskStore: any TaskStoreV2 = InMemoryTaskStore(),
+        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds)
+    ) {
+        self.init(
+            gate: SpeechSessionGate(engine: speech),
+            permissions: permissions,
+            preferences: preferences,
+            summarizer: summarizer,
+            audioSession: audioSession,
+            taskStore: taskStore,
+            idleRestoreDelay: idleRestoreDelay
+        )
+    }
+
+    var hasActiveTask: Bool { lifecycle.hasActiveTask }
+    var taskStartedAt: Date? { lifecycle.startedAt }
+    var isMemoryOnly: Bool { lifecycle.isMemoryOnly }
+    var isNotSaved: Bool { lifecycle.isNotSaved }
+    var showsNotSavedBanner: Bool { lifecycle.isNotSaved }
 
     var canSummarize: Bool {
         transcript.contains { !$0.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     var exportableSession: TaskSession {
-        TaskSession(
-            id: task.taskID ?? UUID(),
+        let startedAt = lifecycle.startedAt ?? .now
+        return TaskSession(
+            id: lifecycle.taskID ?? UUID(),
             feature: .faceToFace,
             status: hasActiveTask ? .running : .ended,
-            startedAt: task.startedAt ?? .now,
+            startedAt: startedAt,
             endedAt: nil,
             title: TaskTitle.make(
                 feature: .faceToFace,
                 source: userLanguage,
                 target: peerLanguage,
-                startedAt: task.startedAt ?? .now,
-                language: userLanguage
+                startedAt: startedAt,
+                language: preferences.userLanguage
             ),
             subtitle: nil,
             sourceLanguage: userLanguage,
@@ -124,37 +162,79 @@ final class ConversationViewModel {
 
     func bootstrap() async {
         guard !skipsBootstrap else { return }
-        sessionState = .preparing
-        if let existing = await task.restore() {
-            restore(from: existing)
+        stateOverride = .preparing
+        if let existing = await lifecycle.restore() {
+            applyRestored(existing)
         }
         let status = await permissions.currentStatus()
         if let error = status.asDuiyiError() {
-            sessionState = .failed(error)
+            stateOverride = .failed(error)
             return
         }
-        sessionState = .ready
+        stateOverride = nil
     }
 
+    /// Two-phase begin: the lifecycle stops the old stream and ends the old
+    /// task first; module captions are cleared only after it reports ready.
     func beginTask() async {
-        if hasActiveTask {
-            _ = await task.finish(entries: transcript, summary: summary)
+        // An empty display may be a cleared screen over content the lifecycle
+        // already holds; only overwrite its snapshot with real captions.
+        if !transcript.isEmpty {
+            lifecycle.persist(transcript)
         }
-        resetCaptions()
-        _ = await task.beginNew(source: userLanguage, target: peerLanguage)
-        if autoStartListening {
-            await start()
-        } else {
-            sessionState = .ready
+        stateOverride = nil
+        switch await lifecycle.prepareForNewTask() {
+        case .ready:
+            await createNewTask()
+        case .blockedByUnsavedTask:
+            isUnsavedTaskPromptPresented = true
+        case .notSaved:
+            // Keep the task and captions; the not-saved banner explains why.
+            break
         }
+    }
+
+    /// Explicit user choice from the unsaved-task confirmation: drop the
+    /// memory-only task and start a fresh one.
+    @discardableResult
+    func discardUnsavedTaskAndBegin() async -> TaskStoreWriteOutcome {
+        isUnsavedTaskPromptPresented = false
+        let outcome = await lifecycle.discardCurrentTask()
+        stateOverride = nil
+        await createNewTask()
+        return outcome
+    }
+
+    func dismissUnsavedTaskPrompt() {
+        isUnsavedTaskPromptPresented = false
     }
 
     func endTask() async -> TaskSession? {
-        await stop(restoreIdleTimerAfterDelay: false)
-        let saved = await task.finish(entries: transcript, summary: summary)
-        resetCaptions()
-        sessionState = .ready
-        return saved
+        // Stop this module's stream before cancelling the consumer so the
+        // finished stream is classified as superseded, not interrupted.
+        await lifecycle.pauseListening()
+        speechTask?.cancel()
+        speechTask = nil
+        isUnsavedTaskPromptPresented = false
+        let outcome = await lifecycle.endTask(transcript: transcript, summary: summary)
+        stateOverride = nil
+        holdScreenAfterPause = false
+        idleRestoreTask?.cancel()
+        mutatePane(.user) { $0.speakingHint = nil }
+        mutatePane(.peer) { $0.speakingHint = nil }
+        switch outcome {
+        case let .ended(session):
+            resetCaptions()
+            resumePromptText = nil
+            return session
+        case .discardedEmpty:
+            resetCaptions()
+            resumePromptText = nil
+            return nil
+        case .notSaved:
+            // Keep the transcript in memory for export; nothing was written.
+            return nil
+        }
     }
 
     func toggleListening() async {
@@ -168,53 +248,28 @@ final class ConversationViewModel {
 
     func start() async {
         guard hasActiveTask, sessionState != .listening else { return }
-        isStopping = false
         idleRestoreTask?.cancel()
         holdScreenAfterPause = false
+        stateOverride = nil
 
-        var status = await permissions.currentStatus()
-        if status != .granted {
-            status = await permissions.requestAccess()
-        }
-        if let error = status.asDuiyiError() {
-            sessionState = .failed(error)
+        guard case let .started(handle) = await lifecycle.startListening(makeListeningRequest()) else {
             return
         }
-
-        do {
-            try await audioSession.activate(.faceToFace)
-            let stream = try await speech.start(
-                languages: [userLanguage, peerLanguage],
-                fallbackLanguage: peerLanguage,
-                style: .liveCaptions
-            )
-            sessionState = .listening
-            holdScreenAfterPause = false
-            await task.setListening(true)
-            speechTask?.cancel()
-            speechTask = Task { [weak self] in
-                for await utterance in stream {
-                    self?.accept(utterance)
-                }
-                await self?.handleStreamEnded()
-            }
-        } catch let error as DuiyiError {
-            sessionState = .failed(error)
-        } catch {
-            sessionState = .failed(.recognitionInterrupted)
-        }
+        holdScreenAfterPause = false
+        attachSpeechTask(handle)
     }
 
     func stop(restoreIdleTimerAfterDelay: Bool = true) async {
-        isStopping = true
+        let wasListening = sessionState == .listening
+        if stateOverride == .listening {
+            stateOverride = nil
+        }
+        // Clearing the lifecycle handle first keeps the cancelled stream from
+        // being reported as a recognition interruption.
+        await lifecycle.pauseListening()
         speechTask?.cancel()
         speechTask = nil
-        await speech.stop()
-        let wasListening = sessionState == .listening
         if wasListening {
-            sessionState = .paused
-            await task.setListening(false)
-            await persistNow()
             if restoreIdleTimerAfterDelay {
                 holdScreenAfterPause = true
                 scheduleIdleRestore()
@@ -243,8 +298,12 @@ final class ConversationViewModel {
         summaryError = nil
     }
 
-    func setUserLanguage(_ language: AppLanguage) {
+    /// Language/peer changes stop the current stream before the live captions
+    /// are cleared and translation direction is rebuilt; listening does not
+    /// resume automatically.
+    func setUserLanguage(_ language: AppLanguage) async {
         guard language != userLanguage else { return }
+        await pauseForLanguageChange()
         if language == peerLanguage {
             peerLanguage = userLanguage
             preferences.peerLanguage = peerLanguage
@@ -254,8 +313,9 @@ final class ConversationViewModel {
         resetCaptions()
     }
 
-    func setPeerLanguage(_ language: AppLanguage) {
+    func setPeerLanguage(_ language: AppLanguage) async {
         guard language != peerLanguage else { return }
+        await pauseForLanguageChange()
         if language == userLanguage {
             userLanguage = peerLanguage
             preferences.userLanguage = userLanguage
@@ -265,8 +325,9 @@ final class ConversationViewModel {
         resetCaptions()
     }
 
-    func swapLanguages() {
+    func swapLanguages() async {
         guard userLanguage != peerLanguage else { return }
+        await pauseForLanguageChange()
         let previousUser = userLanguage
         userLanguage = peerLanguage
         peerLanguage = previousUser
@@ -407,7 +468,7 @@ final class ConversationViewModel {
             do {
                 summary = try await summarizer.summarize(entries: transcript, outputLanguage: userLanguage)
                 if let summary {
-                    await task.saveSummary(summary)
+                    await lifecycle.saveSummary(summary)
                 }
             } catch let error as DuiyiError {
                 summary = nil
@@ -469,7 +530,7 @@ final class ConversationViewModel {
             transcript[index].translatedText = text
             if settle {
                 transcript[index].isFinal = true
-                schedulePersist()
+                lifecycle.persist(transcript)
             }
         }
     }
@@ -483,7 +544,7 @@ final class ConversationViewModel {
             transcript[index].isFinal = line.phase == .settled
             dropPrefixTranscript(after: index, speaker: speaker, language: line.source)
             if line.phase == .settled {
-                schedulePersist()
+                lifecycle.persist(transcript)
             }
             return
         }
@@ -499,7 +560,7 @@ final class ConversationViewModel {
             transcript[transcript.count - 1] = updated
             dropPrefixTranscript(after: transcript.count - 1, speaker: speaker, language: line.source)
             if line.phase == .settled {
-                schedulePersist()
+                lifecycle.persist(transcript)
             }
             return
         }
@@ -514,7 +575,7 @@ final class ConversationViewModel {
             )
         )
         if line.phase == .settled {
-            schedulePersist()
+            lifecycle.persist(transcript)
         }
     }
 
@@ -559,16 +620,97 @@ final class ConversationViewModel {
         }
     }
 
-    private func handleStreamEnded() async {
-        guard !isStopping, sessionState == .listening else { return }
-        sessionState = .failed(.recognitionInterrupted)
+    private func createNewTask() async {
+        // The lifecycle already stopped the old stream; drop any stale buffered
+        // utterances so they cannot land in the new task.
+        speechTask?.cancel()
+        speechTask = nil
+        resetCaptions()
+        resumePromptText = nil
+        switch await lifecycle.startNewTask(makeNewTaskRequest()) {
+        case let .started(handle):
+            stateOverride = nil
+            if let handle {
+                attachSpeechTask(handle)
+            }
+        case let .notPersisted(_, handle):
+            // The memory-only task is live; consume its auto-started stream
+            // immediately so autoStart still records speech.
+            stateOverride = nil
+            if let handle {
+                attachSpeechTask(handle)
+            }
+        case .failed:
+            // Leave the lifecycle's failed state visible for the user.
+            break
+        }
+    }
+
+    private func makeNewTaskRequest() -> TaskLifecycle.NewTaskRequest {
+        TaskLifecycle.NewTaskRequest(
+            sourceLanguage: userLanguage,
+            targetLanguage: peerLanguage,
+            multilingual: false,
+            titleLanguage: preferences.userLanguage,
+            startedAt: .now,
+            autoStart: autoStartListening,
+            listening: makeListeningRequest()
+        )
+    }
+
+    private func makeListeningRequest() -> TaskLifecycle.ListeningRequest {
+        TaskLifecycle.ListeningRequest(
+            languages: [userLanguage, peerLanguage],
+            fallbackLanguage: peerLanguage,
+            style: .liveCaptions,
+            audioUseCase: .faceToFace
+        )
+    }
+
+    private func attachSpeechTask(_ handle: SpeechSessionHandle) {
+        speechTask?.cancel()
+        speechTask = Task { [weak self] in
+            for await utterance in handle.stream {
+                self?.accept(utterance)
+            }
+            await self?.streamEnded()
+        }
+    }
+
+    /// A superseded stream ends silently (the gate's other owner took over);
+    /// only a still-current stream is a real recognition interruption.
+    private func streamEnded() async {
+        let interrupted = await lifecycle.handleStreamEnded()
+        guard interrupted else { return }
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
         mutatePane(.user) { $0.speakingHint = nil }
         mutatePane(.peer) { $0.speakingHint = nil }
     }
 
-    private func restore(from session: TaskSession) {
+    /// Stops capture before the pair is mutated and the live captions are
+    /// cleared, so an old-direction stream cannot write into the new routing.
+    private func pauseForLanguageChange() async {
+        let wasActive = sessionState == .listening || sessionState == .paused
+        await lifecycle.pauseListening()
+        speechTask?.cancel()
+        speechTask = nil
+        // The view may already have entered asset preparation for the new
+        // pair; never overwrite that transient state with a stale "ready".
+        if wasActive, stateOverride != .preparing, stateOverride?.isFailed != true {
+            stateOverride = .ready
+        }
+    }
+
+    /// Applies the task's own language pair (not the current preferences) and
+    /// restores its transcript and pane window with a "继续任务：…" prompt.
+    private func applyRestored(_ session: TaskSession) {
+        userLanguage = session.sourceLanguage
+        preferences.userLanguage = session.sourceLanguage
+        if let target = session.targetLanguage, target != session.sourceLanguage {
+            peerLanguage = target
+            preferences.peerLanguage = target
+        }
         transcript = session.entries
         summary = session.summary
         userPane = .empty
@@ -588,19 +730,7 @@ final class ConversationViewModel {
                 )
             }
         }
-    }
-
-    private func schedulePersist() {
-        persistTask?.cancel()
-        persistTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
-            guard !Task.isCancelled else { return }
-            await self?.persistNow()
-        }
-    }
-
-    private func persistNow() async {
-        await task.persist(transcript)
+        resumePromptText = Copy.continueTask(session.title, for: userLanguage)
     }
 
     private func scheduleIdleRestore() {

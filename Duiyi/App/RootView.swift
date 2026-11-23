@@ -152,7 +152,7 @@ struct RootView: View {
 
     private func makeConversationViewModel() -> ConversationViewModel {
         ConversationViewModel(
-            speech: environment.speechEngine,
+            gate: environment.speechGate,
             permissions: environment.permissions,
             preferences: environment.preferences,
             summarizer: environment.summarizer,
