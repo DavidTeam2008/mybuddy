@@ -6,7 +6,7 @@
 ## 1. 依赖与注入
 
 - Features 只依赖 Domain + Services 协议；VM 通过构造器注入 `any SpeechSessionGating` / `any TaskStoreV2` / `SpeechSynthesizing` / `PreferencesStore` 等，不 new 具体 Service。听写入口是 gate，不是 `SpeechRecognizing`；兼容用 `speech:` initializer 只在内部包一层 `SpeechSessionGate`。
-- 不 import `Speech` / `AVFoundation` / `SwiftData`；`Translation` 只允许在 `TranslationHostView.swift`（`@preconcurrency import Translation`）。
+- 不 import `Speech` / `AVFoundation` / `SwiftData`；`Translation` 只允许在跨 feature 共享的 `Shared/TranslationHostView.swift`（`@preconcurrency import Translation`）。
 - 不直读 SwiftData；历史详情走 `TaskStoreV2` 的结果化只读查询（`readTask` 等），读失败显示存储横幅而不是空列表；不复用现场字幕状态机。
 
 ## 2. 并发与主线程
