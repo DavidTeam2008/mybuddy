@@ -2,53 +2,6 @@ import Foundation
 import Testing
 @testable import Duiyi
 
-/// Deterministic debounce scheduler: time only moves when the test advances it.
-@MainActor
-final class ManualTranslationScheduler: TranslationScheduler {
-    @MainActor
-    private final class Work: TranslationScheduledTask {
-        let delay: Duration
-        let deadline: Duration
-        var action: (@MainActor @Sendable () -> Void)?
-
-        init(delay: Duration, deadline: Duration, action: @escaping @MainActor @Sendable () -> Void) {
-            self.delay = delay
-            self.deadline = deadline
-            self.action = action
-        }
-
-        func cancel() {
-            action = nil
-        }
-    }
-
-    private var work: [Work] = []
-    private(set) var now: Duration = .zero
-
-    var pendingDelays: [Duration] {
-        work.compactMap { $0.action == nil ? nil : $0.delay }
-    }
-
-    func schedule(
-        after delay: Duration,
-        _ action: @escaping @MainActor @Sendable () -> Void
-    ) -> any TranslationScheduledTask {
-        let item = Work(delay: delay, deadline: now + delay, action: action)
-        work.append(item)
-        return item
-    }
-
-    func advance(by duration: Duration) {
-        now += duration
-        while let index = work.firstIndex(where: { $0.action != nil && $0.deadline <= now }) {
-            let item = work.remove(at: index)
-            let action = item.action
-            item.action = nil
-            action?()
-        }
-    }
-}
-
 @MainActor
 private func makeSubmission(
     id: UUID = UUID(),
@@ -57,14 +10,14 @@ private func makeSubmission(
     isFinal: Bool = false,
     target: AppLanguage = .zhHans,
     firstDelay: Duration = .milliseconds(40),
-    delay: Duration = .milliseconds(90)
+    subsequentDelay: Duration = .milliseconds(90)
 ) -> TranslationSubmission {
     TranslationSubmission(
         line: CaptionLine(id: id, side: .user, source: language, sourceText: text),
         isFinal: isFinal,
         target: target,
         firstDelay: firstDelay,
-        delay: delay
+        subsequentDelay: subsequentDelay
     )
 }
 
@@ -112,7 +65,7 @@ struct TranslationPipelineTests {
                 text: "你",
                 language: .zhHans,
                 firstDelay: .milliseconds(25),
-                delay: .milliseconds(50)
+                subsequentDelay: .milliseconds(50)
             )
         )
         #expect(scheduler.pendingDelays == [.milliseconds(25)])
@@ -125,7 +78,7 @@ struct TranslationPipelineTests {
                 text: "你好",
                 language: .zhHans,
                 firstDelay: .milliseconds(25),
-                delay: .milliseconds(50)
+                subsequentDelay: .milliseconds(50)
             )
         )
         #expect(scheduler.pendingDelays == [.milliseconds(50)])
@@ -276,7 +229,7 @@ struct TranslationPipelineTests {
         let update = try #require(pipeline.accept(job: job, text: "  Hello.  "))
         #expect(update.job == job)
         #expect(update.utteranceID == id)
-        #expect(update.text == "Hello.")
+        #expect(update.translatedText == "Hello.")
         #expect(pipeline.outboundJob == nil)
     }
 

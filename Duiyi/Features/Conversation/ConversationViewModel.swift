@@ -54,8 +54,38 @@ final class ConversationViewModel {
         summarizer: any ConversationSummarizing,
         audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
+        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds)
+    ) {
+        lifecycle = TaskLifecycle(
+            feature: .faceToFace,
+            store: taskStore,
+            gate: gate,
+            permissions: permissions,
+            audioSession: audioSession
+        )
+        pipeline = TranslationPipeline(stalePolicy: .dropShorterNonFinal)
+        self.permissions = permissions
+        self.preferences = preferences
+        self.summarizer = summarizer
+        self.idleRestoreDelay = idleRestoreDelay
+        userLanguage = preferences.userLanguage
+        peerLanguage = preferences.peerLanguage
+        fontSize = preferences.fontSize
+        autoStartListening = preferences.autoStartListening
+    }
+
+    /// Test seam: injects only the debounce scheduler. The ViewModel still
+    /// constructs its own pipeline with the fixed `.dropShorterNonFinal`
+    /// policy, so callers cannot substitute a different stale rule.
+    init(
+        gate: any SpeechSessionGating,
+        permissions: any PermissionGranting,
+        preferences: PreferencesStore,
+        summarizer: any ConversationSummarizing,
+        audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
+        taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
-        translationScheduler: any TranslationScheduler = TaskTranslationScheduler()
+        scheduler: any TranslationScheduler
     ) {
         lifecycle = TaskLifecycle(
             feature: .faceToFace,
@@ -66,7 +96,7 @@ final class ConversationViewModel {
         )
         pipeline = TranslationPipeline(
             stalePolicy: .dropShorterNonFinal,
-            scheduler: translationScheduler
+            scheduler: scheduler
         )
         self.permissions = permissions
         self.preferences = preferences
@@ -87,8 +117,7 @@ final class ConversationViewModel {
         summarizer: any ConversationSummarizing,
         audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
-        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
-        translationScheduler: any TranslationScheduler = TaskTranslationScheduler()
+        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds)
     ) {
         self.init(
             gate: SpeechSessionGate(engine: speech),
@@ -97,8 +126,7 @@ final class ConversationViewModel {
             summarizer: summarizer,
             audioSession: audioSession,
             taskStore: taskStore,
-            idleRestoreDelay: idleRestoreDelay,
-            translationScheduler: translationScheduler
+            idleRestoreDelay: idleRestoreDelay
         )
     }
 
@@ -479,7 +507,7 @@ final class ConversationViewModel {
         guard let update = pipeline.accept(job: job, text: text) else { return }
         applyTranslation(
             utteranceID: update.utteranceID,
-            text: update.text,
+            text: update.translatedText,
             settle: update.job.isFinal
         )
     }
@@ -529,7 +557,7 @@ final class ConversationViewModel {
                     peerLanguage: peerLanguage
                 ),
                 firstDelay: .milliseconds(ConversationLayout.firstTranslationDebounceMilliseconds),
-                delay: .milliseconds(ConversationLayout.translationDebounceMilliseconds)
+                subsequentDelay: .milliseconds(ConversationLayout.translationDebounceMilliseconds)
             )
         )
     }

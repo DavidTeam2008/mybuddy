@@ -70,8 +70,7 @@ final class InterpretationViewModel {
         synthesizer: any SpeechSynthesizing,
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
-        speechSettleDelay: Duration = .milliseconds(380),
-        pipeline: TranslationPipeline? = nil
+        speechSettleDelay: Duration = .milliseconds(380)
     ) {
         lifecycle = TaskLifecycle(
             feature: .simultaneous,
@@ -87,7 +86,47 @@ final class InterpretationViewModel {
         self.synthesizer = synthesizer
         self.idleRestoreDelay = idleRestoreDelay
         self.speechSettleDelay = speechSettleDelay
-        self.pipeline = pipeline ?? TranslationPipeline(stalePolicy: .dropShorterAny)
+        self.pipeline = TranslationPipeline(stalePolicy: .dropShorterAny)
+        sourceLanguage = preferences.sourceLanguage
+        targetLanguage = preferences.targetLanguage
+        fontSize = preferences.fontSize
+        voiceOutEnabled = preferences.voiceOutEnabled
+        showsSourceLine = preferences.showsSourceLine
+    }
+
+    /// Test seam: injects only the debounce scheduler. The ViewModel still
+    /// constructs its own pipeline with the fixed `.dropShorterAny` policy, so
+    /// callers cannot substitute a different stale rule.
+    init(
+        gate: any SpeechSessionGating,
+        permissions: any PermissionGranting,
+        preferences: PreferencesStore,
+        summarizer: any ConversationSummarizing,
+        audioSession: any AudioSessionConfiguring,
+        synthesizer: any SpeechSynthesizing,
+        taskStore: any TaskStoreV2 = InMemoryTaskStore(),
+        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
+        speechSettleDelay: Duration = .milliseconds(380),
+        scheduler: any TranslationScheduler
+    ) {
+        lifecycle = TaskLifecycle(
+            feature: .simultaneous,
+            store: taskStore,
+            gate: gate,
+            permissions: permissions,
+            audioSession: audioSession
+        )
+        self.permissions = permissions
+        self.preferences = preferences
+        self.summarizer = summarizer
+        self.audioSession = audioSession
+        self.synthesizer = synthesizer
+        self.idleRestoreDelay = idleRestoreDelay
+        self.speechSettleDelay = speechSettleDelay
+        self.pipeline = TranslationPipeline(
+            stalePolicy: .dropShorterAny,
+            scheduler: scheduler
+        )
         sourceLanguage = preferences.sourceLanguage
         targetLanguage = preferences.targetLanguage
         fontSize = preferences.fontSize
@@ -106,8 +145,7 @@ final class InterpretationViewModel {
         synthesizer: any SpeechSynthesizing,
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
-        speechSettleDelay: Duration = .milliseconds(380),
-        pipeline: TranslationPipeline? = nil
+        speechSettleDelay: Duration = .milliseconds(380)
     ) {
         self.init(
             gate: SpeechSessionGate(engine: speech),
@@ -118,8 +156,7 @@ final class InterpretationViewModel {
             synthesizer: synthesizer,
             taskStore: taskStore,
             idleRestoreDelay: idleRestoreDelay,
-            speechSettleDelay: speechSettleDelay,
-            pipeline: pipeline
+            speechSettleDelay: speechSettleDelay
         )
     }
 
@@ -555,13 +592,13 @@ final class InterpretationViewModel {
         guard let update = pipeline.accept(job: job, text: text) else { return }
         let appliedCaption = applyTranslation(
             utteranceID: update.utteranceID,
-            text: update.text,
+            text: update.translatedText,
             settle: job.isFinal
         )
         if appliedCaption {
             scheduleSpeech(
                 utteranceID: update.utteranceID,
-                translated: displayedTranslation(for: update.utteranceID) ?? update.text,
+                translated: displayedTranslation(for: update.utteranceID) ?? update.translatedText,
                 settle: job.isFinal
             )
         }
@@ -714,7 +751,7 @@ final class InterpretationViewModel {
                 isFinal: isFinal,
                 target: targetLanguage,
                 firstDelay: delays.first,
-                delay: delays.subsequent
+                subsequentDelay: delays.subsequent
             )
         )
     }

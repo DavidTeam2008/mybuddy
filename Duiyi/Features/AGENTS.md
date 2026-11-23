@@ -18,6 +18,7 @@
 ## 3. 翻译走 `TranslationPipeline`、锚 View，字幕以内存为准
 
 - 需要翻译时由 VM 调 `Shared/TranslationPipeline.submit(TranslationSubmission)`：行、`isFinal`、目标语言与首包/后续延迟在提交时算好。pipeline 负责 job 形成、防抖/取消、重复抑制、过期判定、单槽 `outboundJob` 与 aliases；VM 不再自持防抖 Task、`sentSourceText`、`lastAppliedSourceCount` 或 `utteranceAliases`。
+- VM 自建 `TranslationPipeline` 并固定自己的 `StalePolicy`（面对面 `.dropShorterNonFinal`、同传 `.dropShorterAny`）。调用方构造器不接收 pipeline 或 scheduler；测试只通过 internal 的 `scheduler:` 初始化器注入调度器。
 - `fulfill` 只把 `pipeline.accept` 返回的 `TranslationUpdate` 写入 pane/transcript；同传再按既有 380 ms 结算调度 TTS。View 从 VM 的 `outboundJob` 计算属性取 job，交给 `TranslationHostView` / `OneWayTranslationHostView` 的 `.translationTask`；VM 不持有 `TranslationSession`。
 - 现场字幕读 VM 的 `PaneState`/内存数组，不读 SwiftData；落盘异步，View 不等待落盘再更新。
 

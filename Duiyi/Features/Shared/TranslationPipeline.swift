@@ -17,7 +17,7 @@ struct TranslationSubmission: Equatable, Sendable {
     var isFinal: Bool
     var target: AppLanguage
     var firstDelay: Duration
-    var delay: Duration
+    var subsequentDelay: Duration
 }
 
 /// An accepted translation result. `utteranceID` is resolved through the
@@ -25,7 +25,7 @@ struct TranslationSubmission: Equatable, Sendable {
 struct TranslationUpdate: Equatable, Sendable {
     let job: TranslationJob
     let utteranceID: UUID
-    let text: String
+    let translatedText: String
 }
 
 /// Debounce scheduling seam. Production waits with `Task.sleep`; tests drive a
@@ -129,7 +129,7 @@ final class TranslationPipeline {
             return
         }
 
-        let delay = isFirst ? submission.firstDelay : submission.delay
+        let delay = isFirst ? submission.firstDelay : submission.subsequentDelay
         let lineID = submission.line.id
         scheduled = scheduler.schedule(after: delay) { [weak self] in
             guard let self else { return }
@@ -167,7 +167,7 @@ final class TranslationPipeline {
         if outboundJob?.id == job.id {
             outboundJob = nil
         }
-        return TranslationUpdate(job: job, utteranceID: utteranceID, text: trimmed)
+        return TranslationUpdate(job: job, utteranceID: utteranceID, translatedText: trimmed)
     }
 
     /// A failed job only clears the outbound slot when it is still the current

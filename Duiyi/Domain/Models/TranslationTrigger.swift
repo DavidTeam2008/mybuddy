@@ -18,18 +18,18 @@ enum TranslationTrigger {
     private static func isWorthTranslating(_ text: String, language: AppLanguage) -> Bool {
         switch language {
         case .zhHans:
-            return UtteranceAssembler.hanCount(text) >= 2
+            return ScriptCounts.hanCount(text) >= 2
         case .english:
-            return UtteranceAssembler.wordCount(text) >= 2 || text.count >= 8
+            return ScriptCounts.wordCount(text) >= 2 || text.count >= 8
         case .japanese:
-            return UtteranceAssembler.kanaCount(text) + UtteranceAssembler.hanCount(text) >= 2
+            return ScriptCounts.kanaCount(text) + ScriptCounts.hanCount(text) >= 2
         case .korean:
-            return UtteranceAssembler.hangulCount(text) >= 2
+            return ScriptCounts.hangulCount(text) >= 2
         case .thai:
-            return UtteranceAssembler.thaiCount(text) >= 2
+            return ScriptCounts.thaiCount(text) >= 2
         case .vietnamese:
-            return UtteranceAssembler.wordCount(text) >= 2
-                || UtteranceAssembler.vietnameseMarkCount(text) >= 1
+            return ScriptCounts.wordCount(text) >= 2
+                || ScriptCounts.vietnameseMarkCount(text) >= 1
                 || text.count >= 8
         }
     }

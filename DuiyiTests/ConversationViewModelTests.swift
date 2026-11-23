@@ -783,19 +783,23 @@ struct ConversationViewModelTests {
         let id = UUID()
 
         viewModel.accept(Utterance(id: id, language: .english, text: "hello", isFinal: false))
-        #expect(scheduler.pendingDelays == [.milliseconds(40)])
+        #expect(scheduler.scheduledDelays == [.milliseconds(40)])
 
+        // Complete the first submission so the next one is a subsequent packet
+        // rather than another first packet.
         scheduler.advance(by: .milliseconds(40))
+
+        viewModel.accept(Utterance(id: id, language: .english, text: "helloo", isFinal: false))
+        #expect(scheduler.scheduledDelays == [.milliseconds(40), .milliseconds(90)])
+
+        // The pipeline owns debounce firing; here the submitted job proves the
+        // ViewModel passed through the routed target and source.
+        scheduler.advance(by: .milliseconds(90))
         #expect(viewModel.outboundJob?.utteranceID == id)
         #expect(viewModel.outboundJob?.source == .english)
         #expect(viewModel.outboundJob?.target == .zhHans)
-        #expect(viewModel.outboundJob?.isFinal == false)
-
-        viewModel.accept(Utterance(id: id, language: .english, text: "helloo", isFinal: false))
-        #expect(scheduler.pendingDelays == [.milliseconds(90)])
-
-        scheduler.advance(by: .milliseconds(90))
         #expect(viewModel.outboundJob?.text == "helloo")
+        #expect(viewModel.outboundJob?.isFinal == false)
     }
 
     @Test("The view model exposes the pipeline's outbound job")
@@ -822,8 +826,10 @@ struct ConversationViewModelTests {
         let scheduler = ManualTranslationScheduler()
         let viewModel = makeScheduledViewModel(scheduler: scheduler)
         let id = UUID()
+        let text = "hello"
 
-        viewModel.accept(Utterance(id: id, language: .english, text: "hello", isFinal: false))
+        // A pending debounce is cancelled by the reset.
+        viewModel.accept(Utterance(id: id, language: .english, text: text, isFinal: false))
         #expect(scheduler.pendingDelays == [.milliseconds(40)])
 
         viewModel.resetCaptions()
@@ -833,8 +839,19 @@ struct ConversationViewModelTests {
         scheduler.advance(by: .milliseconds(40))
         #expect(viewModel.outboundJob == nil)
 
-        viewModel.accept(Utterance(id: id, language: .english, text: "hello", isFinal: false))
+        // A final submission actually records the line's sent text.
+        viewModel.accept(Utterance(id: id, language: .english, text: text, isFinal: true))
+        #expect(viewModel.outboundJob?.utteranceID == id)
+
+        viewModel.resetCaptions()
+        #expect(viewModel.outboundJob == nil)
+
+        // Re-submitting the same text as non-final must still be scheduled,
+        // proving reset cleared the sent-text suppression for this line.
+        viewModel.accept(Utterance(id: id, language: .english, text: text, isFinal: false))
         #expect(scheduler.pendingDelays == [.milliseconds(40)])
+        scheduler.advance(by: .milliseconds(40))
+        #expect(viewModel.outboundJob?.utteranceID == id)
     }
 
     @Test("Changing the peer language resets the pipeline's pending state")
@@ -888,7 +905,7 @@ struct ConversationViewModelTests {
             permissions: MockPermissions(),
             preferences: makePreferences(userLanguage: .zhHans, peerLanguage: .english),
             summarizer: MockSummarizer(),
-            translationScheduler: scheduler
+            scheduler: scheduler
         )
     }
 
