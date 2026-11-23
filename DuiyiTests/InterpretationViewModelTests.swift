@@ -853,6 +853,36 @@ struct InterpretationViewModelTests {
         #expect(viewModel.pane.live == nil)
     }
 
+    @Test("A new interpretation task title follows the interface language")
+    func taskTitleUsesInterfaceLanguage() async {
+        let englishStore = InMemoryTaskStore()
+        let englishViewModel = makeViewModel(
+            store: englishStore,
+            sourceLanguage: .english,
+            targetLanguage: .zhHans,
+            userLanguage: .english
+        )
+        await englishViewModel.beginTask()
+
+        let englishTask = await englishStore.activeTask(for: .simultaneous)
+        #expect(englishTask?.title.contains("Simultaneous") == true)
+        #expect(englishTask?.title.contains("同声传译") == false)
+        #expect(englishTask?.sourceLanguage == .english)
+        #expect(englishTask?.targetLanguage == .zhHans)
+
+        let chineseStore = InMemoryTaskStore()
+        let chineseViewModel = makeViewModel(
+            store: chineseStore,
+            sourceLanguage: .zhHans,
+            targetLanguage: .english,
+            userLanguage: .zhHans
+        )
+        await chineseViewModel.beginTask()
+
+        let chineseTask = await chineseStore.activeTask(for: .simultaneous)
+        #expect(chineseTask?.title.contains("同声传译") == true)
+    }
+
     @Test("A memory-only task with content blocks a new task until the user discards it")
     func unsavedTaskBlocksNewTask() async {
         let store = ScriptedTaskStore()
@@ -886,9 +916,13 @@ struct InterpretationViewModelTests {
         store: any TaskStoreV2 = InMemoryTaskStore(),
         gate: (any SpeechSessionGating)? = nil,
         sourceLanguage: AppLanguage = .english,
-        targetLanguage: AppLanguage = .zhHans
+        targetLanguage: AppLanguage = .zhHans,
+        userLanguage: AppLanguage? = nil
     ) -> InterpretationViewModel {
         let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
+        if let userLanguage {
+            preferences.userLanguage = userLanguage
+        }
         preferences.sourceLanguage = sourceLanguage
         preferences.targetLanguage = targetLanguage
         preferences.voiceOutEnabled = false

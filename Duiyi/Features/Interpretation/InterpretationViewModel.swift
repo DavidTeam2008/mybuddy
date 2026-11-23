@@ -142,7 +142,7 @@ final class InterpretationViewModel {
                 source: sourceLanguage,
                 target: targetLanguage,
                 startedAt: startedAt,
-                language: targetLanguage
+                language: interfaceLanguage
             ),
             subtitle: nil,
             sourceLanguage: sourceLanguage,
@@ -571,12 +571,18 @@ final class InterpretationViewModel {
         _ = await lifecycle.startNewTask(makeNewTaskRequest())
     }
 
+    /// The language the user reads the interface in ("我看的语言"); task titles
+    /// follow it, not the translation target.
+    private var interfaceLanguage: AppLanguage {
+        preferences.userLanguage
+    }
+
     private func makeNewTaskRequest() -> TaskLifecycle.NewTaskRequest {
         TaskLifecycle.NewTaskRequest(
             sourceLanguage: sourceLanguage,
             targetLanguage: targetLanguage,
             multilingual: false,
-            titleLanguage: targetLanguage,
+            titleLanguage: interfaceLanguage,
             startedAt: .now,
             autoStart: false,
             listening: makeListeningRequest()
