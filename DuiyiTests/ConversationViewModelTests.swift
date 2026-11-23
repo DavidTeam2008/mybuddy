@@ -127,6 +127,41 @@ struct ConversationViewModelTests {
         #expect(viewModel.outboundJob == nil)
     }
 
+    @Test("Clearing the display flushes captions, keeps transcript and task, and later lines append")
+    func clearDisplayKeepsTranscriptAndStore() async {
+        let store = InMemoryTaskStore()
+        let gate = ConversationFakeGate()
+        let viewModel = makeGateViewModel(gate: gate, store: store)
+        await viewModel.beginTask()
+
+        gate.emit(Utterance(language: .english, text: "See you at three", isFinal: true))
+        await waitUntil { viewModel.transcript.count == 1 }
+        gate.emit(Utterance(language: .zhHans, text: "好的我知道了", isFinal: false))
+        await waitUntil { viewModel.transcript.count == 2 }
+        viewModel.isSummaryPresented = true
+        viewModel.summary = ConversationSummary(text: "约定三点见。", usedAppleIntelligence: true)
+
+        #expect(viewModel.userPane.speakingHint != nil)
+
+        await viewModel.clearDisplay()
+
+        #expect(viewModel.userPane == .empty)
+        #expect(viewModel.peerPane == .empty)
+        #expect(!viewModel.isSummaryPresented)
+        #expect(viewModel.summary?.text == "约定三点见。")
+        #expect(viewModel.transcript.map(\.sourceText) == ["See you at three", "好的我知道了"])
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.sessionState == .listening)
+        #expect(gate.stopCount == 0)
+        let active = await store.activeTask(for: .faceToFace)
+        #expect(active?.entries.map(\.sourceText) == ["See you at three"])
+
+        // Later captions keep appending to the same transcript.
+        gate.emit(Utterance(language: .english, text: "Bring the contract", isFinal: true))
+        await waitUntil { viewModel.transcript.count == 3 }
+        #expect(viewModel.transcript.map(\.sourceText) == ["See you at three", "好的我知道了", "Bring the contract"])
+    }
+
     @Test("Same utterance cannot flip onto the other pane")
     func languageFlipOnSameUtteranceIsDropped() async {
         let viewModel = makeViewModel()
@@ -498,6 +533,109 @@ struct ConversationViewModelTests {
         #expect(viewModel.sessionState == .ready)
     }
 
+    @Test("Exporting after clearing the display keeps the full transcript")
+    func exportAfterClearUsesFullTranscript() async {
+        let store = ScriptedTaskStore()
+        store.startNewFailure = .saveFailed
+        let gate = ConversationFakeGate()
+        let viewModel = makeGateViewModel(gate: gate, store: store)
+        await viewModel.beginTask()
+        #expect(viewModel.isMemoryOnly)
+
+        gate.emit(Utterance(language: .english, text: "See you at three", isFinal: true))
+        await waitUntil { viewModel.transcript.count == 1 }
+        gate.emit(Utterance(language: .zhHans, text: "好的我知道了", isFinal: true))
+        await waitUntil { viewModel.transcript.count == 2 }
+
+        await viewModel.clearDisplay()
+
+        #expect(viewModel.userPane == .empty)
+        #expect(viewModel.peerPane == .empty)
+        #expect(
+            viewModel.exportableSession.entries.map(\.sourceText)
+                == ["See you at three", "好的我知道了"]
+        )
+    }
+
+    @Test("Each pane keeps only the three most recent history lines while listening")
+    func livePaneKeepsThreeHistoryLines() async {
+        let gate = ConversationFakeGate()
+        let viewModel = makeGateViewModel(gate: gate)
+        await viewModel.beginTask()
+        let texts = [
+            "I will bring the contract",
+            "The meeting starts at three",
+            "Please send the invoice",
+            "We need a receipt",
+            "See you tomorrow",
+        ]
+        for text in texts {
+            gate.emit(Utterance(language: .english, text: text, isFinal: true))
+            await waitUntil { viewModel.transcript.contains { $0.sourceText == text } }
+        }
+
+        #expect(viewModel.transcript.map(\.sourceText) == texts)
+        #expect(viewModel.userPane.live?.sourceText == texts.last)
+        #expect(viewModel.userPane.history.map(\.sourceText) == Array(texts.dropFirst().dropLast()))
+        #expect(viewModel.peerPane.history.isEmpty)
+    }
+
+    @Test("Restoring fills each pane with only the three most recent entries")
+    func restoreFillsEachPaneWithThreeMostRecentEntries() async {
+        let store = InMemoryTaskStore()
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let title = TaskTitle.make(
+            feature: .faceToFace,
+            source: .zhHans,
+            target: .english,
+            startedAt: startedAt,
+            language: .zhHans
+        )
+        let draft = TaskDraft(
+            feature: .faceToFace,
+            sourceLanguage: .zhHans,
+            targetLanguage: .english,
+            multilingual: false,
+            startedAt: startedAt,
+            title: title
+        )
+        guard case let .persisted(seeded) = await store.startNew(draft) else {
+            Issue.record("Could not seed the running task")
+            return
+        }
+        let entries = [
+            makeEntry("user-1", speaker: .user),
+            makeEntry("peer-1", speaker: .peer),
+            makeEntry("user-2", speaker: .user),
+            makeEntry("peer-2", speaker: .peer),
+            makeEntry("user-3", speaker: .user),
+            makeEntry("peer-3", speaker: .peer),
+            makeEntry("user-4", speaker: .user),
+            makeEntry("peer-4", speaker: .peer),
+        ]
+        _ = await store.append(entries, to: seeded.id)
+        _ = await store.setStatus(.pausedListening, for: seeded.id)
+
+        let viewModel = ConversationViewModel(
+            speech: MockSpeechEngine(),
+            permissions: MockPermissions(),
+            preferences: makePreferences(userLanguage: .english, peerLanguage: .zhHans),
+            summarizer: MockSummarizer(),
+            taskStore: store
+        )
+
+        await viewModel.bootstrap()
+
+        #expect(viewModel.transcript.map(\.sourceText) == entries.map(\.sourceText))
+        // Entries spoken by the user are read on the peer pane and vice versa;
+        // only the newest three per pane stay on screen.
+        #expect(viewModel.peerPane.history.map(\.sourceText) == ["user-2", "user-3", "user-4"])
+        #expect(viewModel.userPane.history.map(\.sourceText) == ["peer-2", "peer-3", "peer-4"])
+        #expect(viewModel.userPane.live == nil)
+        #expect(viewModel.peerPane.live == nil)
+        #expect(viewModel.exportableSession.entries.count == entries.count)
+    }
+
     @Test("Changing a language stops the current stream before clearing panes")
     func changingLanguageStopsStream() async {
         let gate = ConversationFakeGate()
@@ -612,10 +750,10 @@ struct ConversationViewModelTests {
         )
     }
 
-    private func makeEntry(_ text: String) -> TranscriptEntry {
+    private func makeEntry(_ text: String, speaker: SpeakerSide = .user) -> TranscriptEntry {
         TranscriptEntry(
             id: UUID(),
-            speaker: .user,
+            speaker: speaker,
             source: .zhHans,
             sourceText: text,
             translatedText: "",

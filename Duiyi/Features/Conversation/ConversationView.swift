@@ -145,7 +145,9 @@ struct ConversationView: View {
                     },
                     onSelectFont: viewModel.setFontSize,
                     onToggleAutoStart: viewModel.setAutoStartListening,
-                    onClear: viewModel.resetCaptions,
+                    onClear: {
+                        Task { await viewModel.clearDisplay() }
+                    },
                     onSummarize: {
                         Task { await viewModel.requestSummary() }
                     },

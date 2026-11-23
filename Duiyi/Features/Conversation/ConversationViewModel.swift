@@ -282,6 +282,16 @@ final class ConversationViewModel {
         mutatePane(.peer) { $0.speakingHint = nil }
     }
 
+    /// Display-only clear: flush any pending captions first, then empty both
+    /// panes and close the summary sheet. The transcript, summary data, task,
+    /// routing bookkeeping, and listening stream stay untouched.
+    func clearDisplay() async {
+        await lifecycle.flush()
+        userPane.resetCaptions()
+        peerPane.resetCaptions()
+        isSummaryPresented = false
+    }
+
     func resetCaptions() {
         userPane.resetCaptions()
         peerPane.resetCaptions()
@@ -428,7 +438,10 @@ final class ConversationViewModel {
             phase: utterance.isFinal ? .settled : .streaming
         )
         var applied = line
-        mutatePane(listener) { applied = $0.applyLive(line) }
+        mutatePane(listener) {
+            applied = $0.applyLive(line)
+            $0.trimHistory(to: ConversationLayout.paneHistoryLimit)
+        }
         upsertTranscript(line: applied, speaker: speaker)
         enqueueTranslation(applied, isFinal: utterance.isFinal)
     }
@@ -728,6 +741,7 @@ final class ConversationViewModel {
                         phase: .settled
                     )
                 )
+                $0.trimHistory(to: ConversationLayout.paneHistoryLimit)
             }
         }
         resumePromptText = Copy.continueTask(session.title, for: userLanguage)
