@@ -376,6 +376,147 @@ struct MeetingViewModelTests {
         #expect(listed.isEmpty)
     }
 
+    @Test("Clearing the display keeps the transcript, export, and listening state")
+    func clearDisplayKeepsTranscriptAndListening() async {
+        let log = MeetingEventLog()
+        let gate = MeetingFakeGate(log: log)
+        let viewModel = makeViewModel(gate: gate)
+        await viewModel.beginTask()
+        await viewModel.start()
+        #expect(viewModel.sessionState == .listening)
+        viewModel.accept(Utterance(language: .zhHans, text: "第一句。", isFinal: true))
+        viewModel.accept(Utterance(language: .zhHans, text: "第二句。", isFinal: true))
+        let saved = viewModel.transcript
+        viewModel.isSummaryPresented = true
+
+        await viewModel.clearDisplay()
+
+        #expect(viewModel.transcript == saved)
+        #expect(viewModel.exportableSession.entries == saved)
+        #expect(viewModel.pane.history.isEmpty)
+        #expect(viewModel.pane.live == nil)
+        #expect(viewModel.pane.speakingHint == nil)
+        #expect(!viewModel.isSummaryPresented)
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.sessionState == .listening)
+        #expect(gate.stopCount == 0)
+
+        viewModel.accept(Utterance(language: .zhHans, text: "第三句。", isFinal: true))
+        #expect(viewModel.transcript.map(\.sourceText) == ["第一句。", "第二句。", "第三句。"])
+        #expect(viewModel.exportableSession.entries.count == 3)
+    }
+
+    @Test("Clearing the display flushes the pending caption before clearing")
+    func clearDisplayFlushesPendingCaption() async {
+        let log = MeetingEventLog()
+        let store = ScriptedTaskStore()
+        store.eventSink = { log.record($0) }
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .zhHans, text: "清屏前的最后一句", isFinal: true))
+
+        await viewModel.clearDisplay()
+
+        let active = await store.base.activeTask(for: .meeting)
+        #expect(active?.entries.map(\.sourceText) == ["清屏前的最后一句"])
+        #expect(store.appendCalls == 1)
+        #expect(log.contains("store-append"))
+        #expect(!viewModel.isNotSaved)
+    }
+
+    @Test("The 20k character count keeps accumulating across a display clear")
+    func characterCountAccumulatesAcrossClear() async {
+        let viewModel = makeViewModel()
+        await viewModel.beginTask()
+        let characters = (0..<MeetingLayout.transcriptCharacterLimit).map {
+            Character(UnicodeScalar(0x4E00 + $0)!)
+        }
+        let half = MeetingLayout.transcriptCharacterLimit / 2
+
+        var index = 0
+        while index < half {
+            let end = min(index + 100, half)
+            viewModel.accept(
+                Utterance(
+                    language: .zhHans,
+                    text: String(characters[index..<end]),
+                    isFinal: true
+                )
+            )
+            index = end
+        }
+        await viewModel.clearDisplay()
+        #expect(!viewModel.isLengthLimited)
+        #expect(viewModel.transcript.reduce(0) { $0 + $1.sourceText.count } == half)
+
+        while index < characters.count {
+            let end = min(index + 100, characters.count)
+            viewModel.accept(
+                Utterance(
+                    language: .zhHans,
+                    text: String(characters[index..<end]),
+                    isFinal: true
+                )
+            )
+            index = end
+        }
+
+        #expect(viewModel.isLengthLimited)
+        #expect(viewModel.transcript.reduce(0) { $0 + $1.sourceText.count } >= MeetingLayout.transcriptCharacterLimit)
+    }
+
+    @Test("The 20k limit stays after a display clear and keeps the task unfinished")
+    func lengthLimitSurvivesClear() async throws {
+        let store = InMemoryTaskStore()
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        await viewModel.start()
+        let characters = (0..<MeetingLayout.transcriptCharacterLimit).map {
+            Character(UnicodeScalar(0x4E00 + $0)!)
+        }
+        var index = 0
+        while index < characters.count, !viewModel.isLengthLimited {
+            let end = min(index + 100, characters.count)
+            viewModel.accept(
+                Utterance(
+                    language: .zhHans,
+                    text: String(characters[index..<end]),
+                    isFinal: true
+                )
+            )
+            index = end
+        }
+        #expect(viewModel.isLengthLimited)
+        await waitUntil { viewModel.sessionState != .listening }
+        let transcriptCount = viewModel.transcript.count
+
+        await viewModel.clearDisplay()
+
+        #expect(viewModel.isLengthLimited)
+        #expect(viewModel.errorText == Copy.meetingTooLong(for: .zhHans))
+        #expect(viewModel.transcript.count == transcriptCount)
+        #expect(viewModel.hasActiveTask)
+        let taskID = try #require(await store.activeTask(for: .meeting)?.id)
+        #expect(await store.task(id: taskID)?.status == .pausedListening)
+        #expect(await store.list(filter: .meeting).isEmpty)
+    }
+
+    @Test("Clearing the display closes the summary sheet but keeps the summary data")
+    func clearDisplayKeepsSummaryData() async {
+        let viewModel = makeViewModel()
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .zhHans, text: "把预算确认一下。", isFinal: true))
+        await viewModel.requestSummary()
+        let summaryText = viewModel.summary?.text
+        #expect(viewModel.isSummaryPresented)
+
+        await viewModel.clearDisplay()
+
+        #expect(!viewModel.isSummaryPresented)
+        #expect(viewModel.summary?.text == summaryText)
+        #expect(viewModel.exportableSession.summary?.text == summaryText)
+    }
+
     @Test("Ending a task keeps its saved summary in history")
     func endingTaskPreservesSummary() async {
         let store = InMemoryTaskStore()
