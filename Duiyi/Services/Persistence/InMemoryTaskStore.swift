@@ -1,7 +1,12 @@
 import Foundation
 
 @MainActor
-final class InMemoryTaskStore: TaskStore {
+final class InMemoryTaskStore: TaskStoreV2 {
+    var availability: TaskStoreAvailability { .ready }
+
+    func prepare() async {}
+    func retry() async {}
+
     private var tasks: [UUID: TaskSession] = [:]
 
     func activeTask(for feature: FeatureID) async -> TaskSession? {
@@ -122,5 +127,94 @@ final class InMemoryTaskStore: TaskStore {
 
     func delete(id: UUID) async throws {
         guard tasks.removeValue(forKey: id) != nil else { throw TaskStoreError.notFound }
+    }
+
+    // MARK: - TaskStoreV2 reads
+
+    func readActiveTask(for feature: FeatureID) async -> TaskStoreReadResult<TaskSession?> {
+        .value(await activeTask(for: feature))
+    }
+
+    func readUnfinishedTasks() async -> TaskStoreReadResult<[TaskSession]> {
+        .value(await unfinishedTasks())
+    }
+
+    func readList(filter: FeatureID?) async -> TaskStoreReadResult<[TaskSession]> {
+        .value(await list(filter: filter))
+    }
+
+    func readTask(id: UUID) async -> TaskStoreReadResult<TaskSession?> {
+        .value(await task(id: id))
+    }
+
+    // MARK: - TaskStoreV2 writes
+
+    func startNew(_ draft: TaskDraft) async -> TaskStoreWriteResult<TaskSession> {
+        let session = TaskSession(
+            id: UUID(),
+            feature: draft.feature,
+            status: .running,
+            startedAt: draft.startedAt,
+            endedAt: nil,
+            title: draft.title,
+            subtitle: nil,
+            sourceLanguage: draft.sourceLanguage,
+            targetLanguage: draft.targetLanguage,
+            entries: [],
+            summary: nil
+        )
+        tasks[session.id] = session
+        return .persisted(session)
+    }
+
+    func append(_ entries: [TranscriptEntry], to taskID: UUID) async -> TaskStoreWriteOutcome {
+        guard tasks[taskID] != nil else { return .notPersisted(.notFound) }
+        await append(taskID: taskID, entries: entries)
+        return .persisted
+    }
+
+    func updateTranslations(_ entries: [TranscriptEntry], for taskID: UUID) async -> TaskStoreWriteOutcome {
+        guard tasks[taskID] != nil else { return .notPersisted(.notFound) }
+        await updateTranslations(taskID: taskID, entries: entries)
+        return .persisted
+    }
+
+    func setStatus(_ status: TaskStatus, for taskID: UUID) async -> TaskStoreWriteOutcome {
+        guard tasks[taskID] != nil else { return .notPersisted(.notFound) }
+        await setStatus(taskID: taskID, status: status)
+        return .persisted
+    }
+
+    func saveSummary(_ summary: ConversationSummary, for taskID: UUID) async -> TaskStoreWriteOutcome {
+        guard tasks[taskID] != nil else { return .notPersisted(.notFound) }
+        await saveSummary(taskID: taskID, summary: summary)
+        return .persisted
+    }
+
+    func end(
+        taskID: UUID,
+        entries: [TranscriptEntry],
+        summary: ConversationSummary?
+    ) async -> TaskStoreEndResult {
+        guard tasks[taskID] != nil else { return .notPersisted(.notFound) }
+        await append(taskID: taskID, entries: entries)
+        guard let task = tasks[taskID] else { return .notPersisted(.notFound) }
+        let usable = task.entries.contains {
+            !$0.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard usable else {
+            tasks.removeValue(forKey: taskID)
+            return .discardedEmpty
+        }
+        do {
+            let ended = try await end(taskID: taskID, summary: summary)
+            return .ended(ended)
+        } catch {
+            return .notPersisted(.notFound)
+        }
+    }
+
+    func deleteTask(id: UUID) async -> TaskStoreWriteOutcome {
+        tasks.removeValue(forKey: id) != nil ? .persisted : .notPersisted(.notFound)
     }
 }

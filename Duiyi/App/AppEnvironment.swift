@@ -11,7 +11,7 @@ final class AppEnvironment {
     let summarizer: any ConversationSummarizing
     let audioSession: any AudioSessionConfiguring
     let synthesizer: any SpeechSynthesizing
-    let taskStore: any TaskStore
+    let taskStore: any TaskStoreV2
     let exporter: any ExportSharing
     let languageCatalog: any LanguageCataloging
 
@@ -24,7 +24,7 @@ final class AppEnvironment {
         summarizer: any ConversationSummarizing = FoundationModelsSummarizer(),
         audioSession: any AudioSessionConfiguring = AudioSessionPolicy(),
         synthesizer: any SpeechSynthesizing = SystemSpeechSynthesizer(),
-        taskStore: (any TaskStore)? = nil,
+        taskStore: (any TaskStoreV2)? = nil,
         exporter: any ExportSharing = TranscriptExportService(),
         languageCatalog: any LanguageCataloging = SystemLanguageCatalog()
     ) {
@@ -41,9 +41,10 @@ final class AppEnvironment {
         self.languageCatalog = languageCatalog
     }
 
-    static func makeTaskStore() -> any TaskStore {
+    static func makeTaskStore() -> any TaskStoreV2 {
         // Deferred: zero I/O at init. Real ModelContainer opens after first frame
-        // on a utility queue (see DeferredTaskStore). Falls back to memory on failure.
+        // on a utility queue (see DeferredTaskStore). Open failure is exposed as
+        // `unavailable`; callers can `retry()`.
         DeferredTaskStore()
     }
 }
