@@ -25,7 +25,6 @@ final class InterpretationViewModel {
     var pane = PaneState.empty
     var isSettingsPresented = false
     var isSummaryPresented = false
-    var outboundJob: TranslationJob?
     var holdScreenAfterPause = false
     var transcript: [TranscriptEntry] = []
     var summary: ConversationSummary?
@@ -45,14 +44,12 @@ final class InterpretationViewModel {
     /// "继续任务：…" prompt shown after restoring an unfinished task.
     var resumePromptText: String?
 
+    private let pipeline: TranslationPipeline
+
     private var speechTask: Task<Void, Never>?
-    private var translationDebounce: Task<Void, Never>?
     private var idleRestoreTask: Task<Void, Never>?
     private var routeTask: Task<Void, Never>?
     private var speakTask: Task<Void, Never>?
-    private var lastAppliedSourceCount: [UUID: Int] = [:]
-    private var sentSourceText: [UUID: String] = [:]
-    private var utteranceAliases: [UUID: UUID] = [:]
     private var spokenPrefixes: [UUID: String] = [:]
     private var lastSpokenTranslation = ""
     private var spokenCompactTail = ""
@@ -73,7 +70,8 @@ final class InterpretationViewModel {
         synthesizer: any SpeechSynthesizing,
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
-        speechSettleDelay: Duration = .milliseconds(380)
+        speechSettleDelay: Duration = .milliseconds(380),
+        pipeline: TranslationPipeline? = nil
     ) {
         lifecycle = TaskLifecycle(
             feature: .simultaneous,
@@ -89,6 +87,7 @@ final class InterpretationViewModel {
         self.synthesizer = synthesizer
         self.idleRestoreDelay = idleRestoreDelay
         self.speechSettleDelay = speechSettleDelay
+        self.pipeline = pipeline ?? TranslationPipeline(stalePolicy: .dropShorterAny)
         sourceLanguage = preferences.sourceLanguage
         targetLanguage = preferences.targetLanguage
         fontSize = preferences.fontSize
@@ -107,7 +106,8 @@ final class InterpretationViewModel {
         synthesizer: any SpeechSynthesizing,
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
-        speechSettleDelay: Duration = .milliseconds(380)
+        speechSettleDelay: Duration = .milliseconds(380),
+        pipeline: TranslationPipeline? = nil
     ) {
         self.init(
             gate: SpeechSessionGate(engine: speech),
@@ -118,7 +118,8 @@ final class InterpretationViewModel {
             synthesizer: synthesizer,
             taskStore: taskStore,
             idleRestoreDelay: idleRestoreDelay,
-            speechSettleDelay: speechSettleDelay
+            speechSettleDelay: speechSettleDelay,
+            pipeline: pipeline
         )
     }
 
@@ -203,6 +204,11 @@ final class InterpretationViewModel {
 
     var pendingSpeechCount: Int {
         pendingJobs.count
+    }
+
+    /// The single translation job waiting for the Host; the pipeline owns it.
+    var outboundJob: TranslationJob? {
+        pipeline.outboundJob
     }
 
     func bootstrap() async {
@@ -384,11 +390,7 @@ final class InterpretationViewModel {
     func resetCaptions() {
         pane.resetCaptions()
         transcript = []
-        outboundJob = nil
-        translationDebounce?.cancel()
-        lastAppliedSourceCount.removeAll()
-        sentSourceText.removeAll()
-        utteranceAliases.removeAll()
+        pipeline.reset()
         spokenPrefixes.removeAll()
         lastSpokenTranslation = ""
         spokenCompactTail = ""
@@ -523,13 +525,13 @@ final class InterpretationViewModel {
            ) {
             captionID = UUID()
             carriedTranslation = ""
-            utteranceAliases[utterance.id] = captionID
+            pipeline.registerAlias(utterance.id, to: captionID)
         } else if let existing, existing.source == utterance.language,
            SpokenText.isContinuation(text, of: existing.sourceText, language: utterance.language)
             || SpokenText.isRefinement(text, of: existing.sourceText) {
             captionID = existing.id
             carriedTranslation = existing.translatedText
-            utteranceAliases[utterance.id] = existing.id
+            pipeline.registerAlias(utterance.id, to: existing.id)
         } else {
             captionID = utterance.id
             carriedTranslation = existing?.id == utterance.id ? existing?.translatedText ?? "" : ""
@@ -550,30 +552,23 @@ final class InterpretationViewModel {
     }
 
     func fulfill(job: TranslationJob, text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let utteranceID = canonicalID(job.utteranceID)
-        if let applied = lastAppliedSourceCount[utteranceID], applied > job.text.count {
-            return
-        }
-        lastAppliedSourceCount[utteranceID] = max(lastAppliedSourceCount[utteranceID] ?? 0, job.text.count)
-        let appliedCaption = applyTranslation(utteranceID: utteranceID, text: trimmed, settle: job.isFinal)
+        guard let update = pipeline.accept(job: job, text: text) else { return }
+        let appliedCaption = applyTranslation(
+            utteranceID: update.utteranceID,
+            text: update.text,
+            settle: job.isFinal
+        )
         if appliedCaption {
             scheduleSpeech(
-                utteranceID: utteranceID,
-                translated: displayedTranslation(for: utteranceID) ?? trimmed,
+                utteranceID: update.utteranceID,
+                translated: displayedTranslation(for: update.utteranceID) ?? update.text,
                 settle: job.isFinal
             )
-        }
-        if outboundJob?.id == job.id {
-            outboundJob = nil
         }
     }
 
     func failTranslation(job: TranslationJob, error: Error) {
-        if outboundJob?.id == job.id {
-            outboundJob = nil
-        }
+        pipeline.fail(job: job)
     }
 
     func requestSummary() async {
@@ -698,11 +693,7 @@ final class InterpretationViewModel {
         speechTask = nil
         pane.archiveLive()
         pane.speakingHint = nil
-        outboundJob = nil
-        translationDebounce?.cancel()
-        lastAppliedSourceCount.removeAll()
-        sentSourceText.removeAll()
-        utteranceAliases.removeAll()
+        pipeline.reset()
         spokenPrefixes.removeAll()
         lastSpokenTranslation = ""
         spokenCompactTail = ""
@@ -716,37 +707,16 @@ final class InterpretationViewModel {
     }
 
     private func enqueueTranslation(_ line: CaptionLine, isFinal: Bool) {
-        let text = line.sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        if sentSourceText[line.id] == text, !isFinal {
-            return
-        }
-
-        let job = TranslationJob(
-            utteranceID: line.id,
-            source: sourceLanguage,
-            target: targetLanguage,
-            text: text,
-            isFinal: isFinal
+        let delays = translationDelays()
+        pipeline.submit(
+            TranslationSubmission(
+                line: line,
+                isFinal: isFinal,
+                target: targetLanguage,
+                firstDelay: delays.first,
+                delay: delays.subsequent
+            )
         )
-        let isFirst = sentSourceText[line.id] == nil
-        let shouldFlush = isFinal
-            || ConversationViewModel.endsWithClause(text)
-            || (isFirst && ConversationViewModel.isWorthTranslating(text, language: line.source))
-
-        translationDebounce?.cancel()
-        if shouldFlush {
-            sentSourceText[line.id] = text
-            outboundJob = job
-            return
-        }
-        let delay = translationDelayMilliseconds(isFirst: isFirst)
-        translationDebounce = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(delay))
-            guard !Task.isCancelled else { return }
-            self?.sentSourceText[line.id] = text
-            self?.outboundJob = job
-        }
     }
 
     @discardableResult
@@ -778,13 +748,15 @@ final class InterpretationViewModel {
         return nil
     }
 
-    private func translationDelayMilliseconds(isFirst: Bool) -> UInt64 {
+    /// Voice-out keeps its tighter 25/50 ms cadence; captions keep 40/90 ms.
+    private func translationDelays() -> (first: Duration, subsequent: Duration) {
         if voiceOutEnabled {
-            return isFirst ? 25 : 50
+            return (.milliseconds(25), .milliseconds(50))
         }
-        return isFirst
-            ? ConversationLayout.firstTranslationDebounceMilliseconds
-            : ConversationLayout.translationDebounceMilliseconds
+        return (
+            .milliseconds(ConversationLayout.firstTranslationDebounceMilliseconds),
+            .milliseconds(ConversationLayout.translationDebounceMilliseconds)
+        )
     }
 
     private func scheduleSpeech(utteranceID: UUID, translated: String, settle: Bool) {
@@ -1036,10 +1008,6 @@ final class InterpretationViewModel {
             transcript.removeLast()
             transcript[transcript.count - 1] = merged
         }
-    }
-
-    private func canonicalID(_ id: UUID) -> UUID {
-        utteranceAliases[id] ?? id
     }
 
     /// A superseded stream ends silently (the gate's other owner took over);
