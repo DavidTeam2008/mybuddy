@@ -751,29 +751,4 @@ final class ConversationViewModel {
         }
     }
 
-    // TranslationTrigger now owns this policy for face-to-face; Interpretation
-    // still borrows these until ticket #18 migrates it. Remove in #19.
-    static func endsWithClause(_ text: String) -> Bool {
-        guard let last = text.last else { return false }
-        return last.unicodeScalars.allSatisfy { ClauseSplitter.terminators.contains($0) }
-    }
-
-    static func isWorthTranslating(_ text: String, language: AppLanguage) -> Bool {
-        switch language {
-        case .zhHans:
-            return UtteranceAssembler.hanCount(text) >= 2
-        case .english:
-            return UtteranceAssembler.wordCount(text) >= 2 || text.count >= 8
-        case .japanese:
-            return UtteranceAssembler.kanaCount(text) + UtteranceAssembler.hanCount(text) >= 2
-        case .korean:
-            return UtteranceAssembler.hangulCount(text) >= 2
-        case .thai:
-            return UtteranceAssembler.thaiCount(text) >= 2
-        case .vietnamese:
-            return UtteranceAssembler.wordCount(text) >= 2
-                || UtteranceAssembler.vietnameseMarkCount(text) >= 1
-                || text.count >= 8
-        }
-    }
 }
