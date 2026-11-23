@@ -92,10 +92,6 @@ enum MeetingRecognition {
     }
 }
 
-enum TaskStoreError: Error, Equatable, Sendable {
-    case notFound
-}
-
 /// Why a storage operation could not complete.
 enum TaskStoreFailureReason: String, Equatable, Sendable {
     /// The store is not open yet (or a previous open attempt failed).
@@ -155,6 +151,9 @@ struct TaskDraft: Equatable, Sendable {
     var title: String
 }
 
+/// The storage seam's availability/lifecycle contract, shared by every
+/// adapter. Reads and writes live on `TaskStoreV2` and always report their
+/// outcome, so "empty" is never confused with "storage unavailable".
 @MainActor
 protocol TaskStore: AnyObject {
     /// Single observable availability shared by every consumer of the seam.
@@ -163,32 +162,13 @@ protocol TaskStore: AnyObject {
     func prepare() async
     /// Retries a failed open. No-op when already ready.
     func retry() async
-
-    func activeTask(for feature: FeatureID) async -> TaskSession?
-    func unfinishedTasks() async -> [TaskSession]
-    func startNew(
-        feature: FeatureID,
-        source: AppLanguage,
-        target: AppLanguage?,
-        multilingual: Bool
-    ) async throws -> TaskSession
-    func append(taskID: UUID, entries: [TranscriptEntry]) async
-    /// 只回填已有条目的译文；允许用于已结束任务，避免放宽 transcript 写入规则。
-    func updateTranslations(taskID: UUID, entries: [TranscriptEntry]) async
-    func setStatus(taskID: UUID, status: TaskStatus) async
-    func saveSummary(taskID: UUID, summary: ConversationSummary) async
-    func end(taskID: UUID, summary: ConversationSummary?) async throws -> TaskSession
-    func list(filter: FeatureID?) async -> [TaskSession]
-    func task(id: UUID) async -> TaskSession?
-    func delete(id: UUID) async throws
 }
 
-/// Result-carrying storage seam (Wave 1, ticket #2).
+/// Result-carrying storage seam (Wave 1).
 ///
-/// This refines `TaskStore` beside the legacy methods above so existing
-/// Home/History/ViewModel call sites keep compiling during the expand step.
-/// Consumers migrating to the v2 contract use the `read*` and result-returning
-/// write methods; ticket #12 deletes the legacy methods.
+/// Reads distinguish a value from an unavailable store; writes report
+/// `persisted` / `notPersisted`. `end` is atomic and returns ended, empty
+/// discard, or failure. There are no success-only variants.
 @MainActor
 protocol TaskStoreV2: TaskStore {
     func readActiveTask(for feature: FeatureID) async -> TaskStoreReadResult<TaskSession?>
@@ -214,86 +194,4 @@ protocol TaskStoreV2: TaskStore {
 
 protocol ExportSharing: Sendable {
     func makeTranscriptFile(task: TaskSession, language: AppLanguage) throws -> URL
-}
-
-@MainActor
-final class TaskSessionController {
-    let feature: FeatureID
-    private let store: any TaskStore
-    private(set) var current: TaskSession?
-
-    init(feature: FeatureID, store: any TaskStore) {
-        self.feature = feature
-        self.store = store
-    }
-
-    var hasActiveTask: Bool {
-        guard let current else { return false }
-        return current.status != .ended
-    }
-
-    var taskID: UUID? { current?.id }
-    var startedAt: Date? { current?.startedAt }
-
-    func restore() async -> TaskSession? {
-        current = await store.activeTask(for: feature)
-        return current
-    }
-
-    func beginNew(
-        source: AppLanguage,
-        target: AppLanguage?,
-        multilingual: Bool = false
-    ) async -> TaskSession? {
-        do {
-            let session = try await store.startNew(
-                feature: feature,
-                source: source,
-                target: target,
-                multilingual: multilingual
-            )
-            current = session
-            return session
-        } catch {
-            return nil
-        }
-    }
-
-    func persist(_ entries: [TranscriptEntry]) async {
-        guard let id = current?.id else { return }
-        await store.append(taskID: id, entries: entries)
-    }
-
-    func setListening(_ listening: Bool) async {
-        guard let id = current?.id else { return }
-        let status: TaskStatus = listening ? .running : .pausedListening
-        await store.setStatus(taskID: id, status: status)
-        current?.status = status
-    }
-
-    func saveSummary(_ summary: ConversationSummary) async {
-        guard let id = current?.id else { return }
-        await store.saveSummary(taskID: id, summary: summary)
-        current?.summary = summary
-    }
-
-    func finish(entries: [TranscriptEntry], summary: ConversationSummary?) async -> TaskSession? {
-        guard let id = current?.id else { return nil }
-        await store.append(taskID: id, entries: entries)
-        let usable = entries.contains {
-            !$0.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        if !usable {
-            try? await store.delete(id: id)
-            current = nil
-            return nil
-        }
-        do {
-            let saved = try await store.end(taskID: id, summary: summary)
-            current = nil
-            return saved
-        } catch {
-            return nil
-        }
-    }
 }

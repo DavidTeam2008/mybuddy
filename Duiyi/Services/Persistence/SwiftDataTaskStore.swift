@@ -17,126 +17,6 @@ final class SwiftDataTaskStore: TaskStoreV2 {
         context.autosaveEnabled = false
     }
 
-    // MARK: - TaskStore (legacy, transitional until ticket #12)
-
-    func activeTask(for feature: FeatureID) async -> TaskSession? {
-        let raw = feature.rawValue
-        let ended = TaskStatus.ended.rawValue
-        var descriptor = FetchDescriptor<TaskEntity>(
-            predicate: #Predicate { entity in
-                entity.featureRaw == raw && entity.statusRaw != ended
-            },
-            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
-        )
-        descriptor.fetchLimit = 1
-        do {
-            return try context.fetch(descriptor).first.flatMap(TaskMapping.session(from:))
-        } catch {
-            logReadFailure(error)
-            return nil
-        }
-    }
-
-    func unfinishedTasks() async -> [TaskSession] {
-        let ended = TaskStatus.ended.rawValue
-        let descriptor = FetchDescriptor<TaskEntity>(
-            predicate: #Predicate { entity in
-                entity.statusRaw != ended
-            },
-            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
-        )
-        do {
-            return try context.fetch(descriptor).compactMap(TaskMapping.session(from:))
-        } catch {
-            logReadFailure(error)
-            return []
-        }
-    }
-
-    func startNew(
-        feature: FeatureID,
-        source: AppLanguage,
-        target: AppLanguage?,
-        multilingual: Bool
-    ) async throws -> TaskSession {
-        let startedAt = Date()
-        let title = TaskTitle.make(
-            feature: feature,
-            source: source,
-            target: target,
-            startedAt: startedAt,
-            language: target ?? source,
-            multilingual: multilingual
-        )
-        let entity = TaskEntity(
-            id: UUID(),
-            featureRaw: feature.rawValue,
-            statusRaw: TaskStatus.running.rawValue,
-            startedAt: startedAt,
-            title: title,
-            sourceLanguageRaw: source.rawValue,
-            targetLanguageRaw: target?.rawValue
-        )
-        context.insert(entity)
-        try context.save()
-        guard let session = TaskMapping.session(from: entity) else {
-            throw TaskStoreError.notFound
-        }
-        return session
-    }
-
-    func append(taskID: UUID, entries: [TranscriptEntry]) async {
-        guard let entity = entity(id: taskID), entity.statusRaw != TaskStatus.ended.rawValue else { return }
-        upsert(entries, into: entity)
-        saveLegacy()
-    }
-
-    func updateTranslations(taskID: UUID, entries: [TranscriptEntry]) async {
-        guard let entity = entity(id: taskID) else { return }
-        applyTranslations(entries, to: entity)
-        saveLegacy()
-    }
-
-    func setStatus(taskID: UUID, status: TaskStatus) async {
-        guard let entity = entity(id: taskID), entity.statusRaw != TaskStatus.ended.rawValue else { return }
-        entity.statusRaw = status.rawValue
-        saveLegacy()
-    }
-
-    func saveSummary(taskID: UUID, summary: ConversationSummary) async {
-        guard let entity = entity(id: taskID) else { return }
-        entity.summaryText = summary.text
-        entity.usedAppleIntelligence = summary.usedAppleIntelligence
-        saveLegacy()
-    }
-
-    func end(taskID: UUID, summary: ConversationSummary?) async throws -> TaskSession {
-        guard let entity = entity(id: taskID) else { throw TaskStoreError.notFound }
-        finish(entity, summary: summary)
-        try context.save()
-        guard let session = TaskMapping.session(from: entity) else { throw TaskStoreError.notFound }
-        return session
-    }
-
-    func list(filter: FeatureID?) async -> [TaskSession] {
-        do {
-            return try context.fetch(listDescriptor(filter: filter)).compactMap(TaskMapping.session(from:))
-        } catch {
-            logReadFailure(error)
-            return []
-        }
-    }
-
-    func task(id: UUID) async -> TaskSession? {
-        entity(id: id).flatMap(TaskMapping.session(from:))
-    }
-
-    func delete(id: UUID) async throws {
-        guard let entity = entity(id: id) else { throw TaskStoreError.notFound }
-        context.delete(entity)
-        try context.save()
-    }
-
     // MARK: - TaskStoreV2 reads
 
     func readActiveTask(for feature: FeatureID) async -> TaskStoreReadResult<TaskSession?> {
@@ -362,15 +242,6 @@ final class SwiftDataTaskStore: TaskStoreV2 {
         return try context.fetch(descriptor).first
     }
 
-    private func entity(id: UUID) -> TaskEntity? {
-        do {
-            return try fetchEntity(id: id)
-        } catch {
-            logReadFailure(error)
-            return nil
-        }
-    }
-
     private func listDescriptor(filter: FeatureID?) -> FetchDescriptor<TaskEntity> {
         let ended = TaskStatus.ended.rawValue
         if let filter {
@@ -442,15 +313,6 @@ final class SwiftDataTaskStore: TaskStoreV2 {
         if entity.featureRaw == FeatureID.meeting.rawValue, entity.subtitle == nil {
             let session = TaskMapping.session(from: entity)
             entity.subtitle = session.flatMap { TaskTitle.subtitle(from: $0.entries) }
-        }
-    }
-
-    private func saveLegacy() {
-        do {
-            try context.save()
-        } catch {
-            context.rollback()
-            DuiyiLog.session.error("SwiftData legacy save failed: \(error, privacy: .public)")
         }
     }
 
