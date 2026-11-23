@@ -7,11 +7,7 @@ struct TaskDetailView: View {
 
     let taskID: UUID
 
-    @State private var task: TaskSession?
-    @State private var availability: SummaryAvailability = .unavailable
-    @State private var isSummarizing = false
-    @State private var summaryError: String?
-    @State private var confirmDelete = false
+    @State private var viewModel: TaskDetailViewModel?
     @State private var translateJob: TranslationJob?
     @State private var pendingTranslate: [TranscriptEntry] = []
 
@@ -26,86 +22,119 @@ struct TaskDetailView: View {
                 onHistory: { coordinator.pop() }
             )
 
-            if let task {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text(task.title)
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(Tokens.textPrimary)
-                        Text(TaskFormatting.historyMeta(task: task, language: language))
-                            .font(.footnote)
-                            .foregroundStyle(Tokens.textSecondary)
+            if let viewModel {
+                if viewModel.showsStorageBanner {
+                    StorageUnavailableBanner(language: language) {
+                        Task { await viewModel.retry() }
+                    }
+                    .padding(.horizontal, Tokens.horizontalPadding)
+                    .padding(.top, 8)
+                }
 
-                        availabilityBanner
-
-                        if let summary = task.summary, !summary.text.isEmpty {
-                            Text(summary.text)
-                                .font(.body)
+                if let task = viewModel.task {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text(task.title)
+                                .font(.title3.weight(.semibold))
                                 .foregroundStyle(Tokens.textPrimary)
-                        } else if let summaryError {
-                            Text(summaryError)
-                                .font(.body)
-                                .foregroundStyle(Tokens.danger)
-                        } else if isSummarizing {
-                            Text(Copy.summaryLoading(for: language))
+                            Text(TaskFormatting.historyMeta(task: task, language: language))
+                                .font(.footnote)
                                 .foregroundStyle(Tokens.textSecondary)
-                        }
 
-                        Text(Copy.transcriptSection(for: language))
-                            .font(.footnote)
-                            .foregroundStyle(Tokens.textSecondary)
-                        ForEach(task.entries) { entry in
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    if task.feature == .meeting {
-                                        Text(entry.source.badge)
-                                            .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(Tokens.languageBadge(entry.source))
+                            availabilityBanner
+
+                            if let summary = task.summary, !summary.text.isEmpty {
+                                Text(summary.text)
+                                    .font(.body)
+                                    .foregroundStyle(Tokens.textPrimary)
+                            } else if let summaryError = viewModel.summaryError {
+                                Text(summaryError)
+                                    .font(.body)
+                                    .foregroundStyle(Tokens.danger)
+                            } else if viewModel.isSummarizing {
+                                Text(Copy.summaryLoading(for: language))
+                                    .foregroundStyle(Tokens.textSecondary)
+                            }
+
+                            if viewModel.summarySaveFailure != nil {
+                                Text(Copy.summarySaveFailed(for: language))
+                                    .font(.footnote)
+                                    .foregroundStyle(Tokens.danger)
+                                    .accessibilityIdentifier("detail-summary-save-error")
+                            }
+
+                            if viewModel.translationSaveFailure != nil {
+                                Text(Copy.translationSaveFailed(for: language))
+                                    .font(.footnote)
+                                    .foregroundStyle(Tokens.danger)
+                                    .accessibilityIdentifier("detail-translation-save-error")
+                            }
+
+                            if viewModel.deleteFailure != nil {
+                                Text(Copy.deleteFailed(for: language))
+                                    .font(.footnote)
+                                    .foregroundStyle(Tokens.danger)
+                                    .accessibilityIdentifier("detail-delete-error")
+                            }
+
+                            Text(Copy.transcriptSection(for: language))
+                                .font(.footnote)
+                                .foregroundStyle(Tokens.textSecondary)
+                            ForEach(task.entries) { entry in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        if task.feature == .meeting {
+                                            Text(entry.source.badge)
+                                                .font(.caption2.weight(.semibold))
+                                                .foregroundStyle(Tokens.languageBadge(entry.source))
+                                        }
+                                        Text(entry.sourceText)
+                                            .foregroundStyle(Tokens.textPrimary)
                                     }
-                                    Text(entry.sourceText)
-                                        .foregroundStyle(Tokens.textPrimary)
+                                    if !entry.translatedText.isEmpty {
+                                        Text(entry.translatedText)
+                                            .foregroundStyle(Tokens.textSecondary)
+                                    }
                                 }
-                                if !entry.translatedText.isEmpty {
-                                    Text(entry.translatedText)
-                                        .foregroundStyle(Tokens.textSecondary)
-                                }
+                                .font(.body)
                             }
-                            .font(.body)
-                        }
 
-                        if canSummarize {
-                            Button(Copy.summarize(for: language)) {
-                                Task { await summarize() }
+                            if canSummarize {
+                                Button(Copy.summarize(for: language)) {
+                                    Task { await viewModel.summarize(language: language) }
+                                }
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Color(hex: 0x1C1915))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Tokens.listen, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+
+                            if task.feature == .meeting, needsTranslation(task) {
+                                Button(Copy.translateToMine(for: language)) {
+                                    startTranslation(for: task)
+                                }
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Tokens.listen)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                            }
+
+                            ExportShareButton(task: task, language: language, exporter: environment.exporter)
+
+                            Button(Copy.delete(for: language)) {
+                                viewModel.requestDelete()
                             }
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color(hex: 0x1C1915))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(Tokens.listen, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        }
-
-                        if task.feature == .meeting, needsTranslation(task) {
-                            Button(Copy.translateToMine(for: language)) {
-                                startTranslation(for: task)
-                            }
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Tokens.listen)
+                            .foregroundStyle(Tokens.danger)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
                         }
-
-                        ExportShareButton(task: task, language: language, exporter: environment.exporter)
-
-                        Button(Copy.delete(for: language)) {
-                            confirmDelete = true
-                        }
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Tokens.danger)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
+                        .padding(.horizontal, Tokens.horizontalPadding)
+                        .padding(.bottom, 32)
                     }
-                    .padding(.horizontal, Tokens.horizontalPadding)
-                    .padding(.bottom, 32)
+                } else {
+                    Spacer()
                 }
             } else {
                 Spacer()
@@ -126,28 +155,42 @@ struct TaskDetailView: View {
             }
         }
         .task {
-            task = await environment.taskStore.task(id: taskID)
-            availability = await environment.summarizer.availability()
+            if viewModel?.taskID != taskID {
+                viewModel = TaskDetailViewModel(
+                    taskID: taskID,
+                    store: environment.taskStore,
+                    summarizer: environment.summarizer
+                )
+            }
+            await viewModel?.load()
         }
         .confirmationDialog(
             Copy.deleteTaskConfirm(for: language),
-            isPresented: $confirmDelete,
+            isPresented: Binding(
+                get: { viewModel?.pendingDelete == true },
+                set: { presented in
+                    if !presented { viewModel?.cancelDelete() }
+                }
+            ),
             titleVisibility: .visible
         ) {
             Button(Copy.delete(for: language), role: .destructive) {
                 Task {
-                    try? await environment.taskStore.delete(id: taskID)
-                    coordinator.popToHome()
-                    coordinator.open(.history)
+                    if await viewModel?.confirmDelete() == true {
+                        coordinator.popToHome()
+                        coordinator.open(.history)
+                    }
                 }
             }
-            Button(Copy.cancel(for: language), role: .cancel) {}
+            Button(Copy.cancel(for: language), role: .cancel) {
+                viewModel?.cancelDelete()
+            }
         }
         .preferredColorScheme(.dark)
     }
 
     private var canSummarize: Bool {
-        task?.hasTranscript == true && !isSummarizing
+        viewModel?.task?.hasTranscript == true && viewModel?.isSummarizing == false
     }
 
     private func needsTranslation(_ task: TaskSession) -> Bool {
@@ -159,10 +202,13 @@ struct TaskDetailView: View {
     }
 
     private var availabilityBanner: some View {
-        let used = task?.summary?.usedAppleIntelligence == true
+        let used = viewModel?.task?.summary?.usedAppleIntelligence == true
         let text = used
             ? Copy.appleIntelligenceGenerated(for: language)
-            : Copy.summaryAvailabilityMessage(availability, for: language)
+            : Copy.summaryAvailabilityMessage(
+                viewModel?.summaryAvailability ?? .unavailable,
+                for: language
+            )
         return Text(text)
             .font(.footnote)
             .foregroundStyle(used ? Color(hex: 0xB8E0C8) : Color(hex: 0xF0D9B0))
@@ -172,28 +218,6 @@ struct TaskDetailView: View {
                 (used ? Color(hex: 0x1D2A24) : Color(hex: 0x2A2420)),
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
-    }
-
-    private func summarize() async {
-        guard var current = task, current.hasTranscript else { return }
-        isSummarizing = true
-        summaryError = nil
-        if availability == .available {
-            do {
-                let summary = try await environment.summarizer.summarize(
-                    entries: current.entries,
-                    outputLanguage: language
-                )
-                current.summary = summary
-                task = current
-                await environment.taskStore.saveSummary(taskID: current.id, summary: summary)
-            } catch let error as DuiyiError {
-                summaryError = error.userMessage(for: language)
-            } catch {
-                summaryError = DuiyiError.summaryEmpty.userMessage(for: language)
-            }
-        }
-        isSummarizing = false
     }
 
     private func startTranslation(for task: TaskSession) {
@@ -221,18 +245,8 @@ struct TaskDetailView: View {
     }
 
     private func handleTranslated(job: TranslationJob, text: String) {
-        guard var current = task,
-              let index = current.entries.firstIndex(where: { $0.id == job.utteranceID }) else {
-            advanceTranslation()
-            return
-        }
-        current.entries[index].translatedText = text
-        task = current
         Task {
-            await environment.taskStore.updateTranslations(
-                taskID: current.id,
-                entries: [current.entries[index]]
-            )
+            await viewModel?.applyTranslation(entryID: job.utteranceID, text: text)
         }
         advanceTranslation()
     }

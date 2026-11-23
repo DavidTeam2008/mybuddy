@@ -20,12 +20,32 @@ struct HistoryView: View {
                 .padding(.horizontal, Tokens.horizontalPadding)
                 .padding(.bottom, 8)
 
-            if viewModel.tasks.isEmpty {
+            if viewModel.showsStorageBanner {
+                StorageUnavailableBanner(language: language) {
+                    Task { await viewModel.retry() }
+                }
+                .padding(.horizontal, Tokens.horizontalPadding)
+                .padding(.bottom, 8)
+            }
+
+            if viewModel.deleteFailure != nil {
+                Text(Copy.deleteFailed(for: language))
+                    .font(.footnote)
+                    .foregroundStyle(Tokens.danger)
+                    .accessibilityIdentifier("history-delete-error")
+                    .padding(.horizontal, Tokens.horizontalPadding)
+                    .padding(.bottom, 8)
+                    .onTapGesture { viewModel.dismissDeleteFailure() }
+            }
+
+            if viewModel.tasks.isEmpty, viewModel.readFailure == nil {
                 Text(Copy.historyEmpty(for: language))
                     .font(.body)
                     .foregroundStyle(Tokens.textSecondary)
                     .padding(.horizontal, Tokens.horizontalPadding)
                     .padding(.top, 24)
+                Spacer()
+            } else if viewModel.tasks.isEmpty {
                 Spacer()
             } else {
                 List {
@@ -39,7 +59,7 @@ struct HistoryView: View {
                         .listRowSeparatorTint(Tokens.sheetChip)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
-                                Task { await viewModel.delete(id: task.id) }
+                                viewModel.requestDelete(task)
                             } label: {
                                 Text(Copy.delete(for: language))
                             }
@@ -54,6 +74,24 @@ struct HistoryView: View {
         .toolbar(.hidden, for: .navigationBar)
         .task {
             await viewModel.reload()
+        }
+        .confirmationDialog(
+            Copy.deleteTaskConfirm(for: language),
+            isPresented: Binding(
+                get: { viewModel.pendingDeletion != nil },
+                set: { presented in
+                    if !presented { viewModel.cancelDelete() }
+                }
+            ),
+            titleVisibility: .visible,
+            presenting: viewModel.pendingDeletion
+        ) { task in
+            Button(Copy.delete(for: language), role: .destructive) {
+                Task { await viewModel.confirmDelete(task) }
+            }
+            Button(Copy.cancel(for: language), role: .cancel) {
+                viewModel.cancelDelete()
+            }
         }
         .preferredColorScheme(.dark)
     }

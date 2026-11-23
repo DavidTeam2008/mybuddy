@@ -4,7 +4,7 @@ struct HomeView: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(AppCoordinator.self) private var coordinator
 
-    @State private var unfinished: [TaskSession] = []
+    @State private var viewModel: HomeViewModel?
     @State private var isSettingsPresented = false
 
     private var language: AppLanguage { environment.preferences.userLanguage }
@@ -31,11 +31,17 @@ struct HomeView: View {
                     .accessibilityLabel(Copy.settingsTitle(for: language))
                 }
 
-                if !unfinished.isEmpty {
+                if viewModel?.showsStorageBanner == true {
+                    StorageUnavailableBanner(language: language) {
+                        Task { await viewModel?.retry() }
+                    }
+                }
+
+                if let viewModel, !viewModel.unfinished.isEmpty {
                     Text(Copy.unfinishedTasks(for: language))
                         .font(.footnote)
                         .foregroundStyle(Tokens.listen)
-                    ForEach(unfinished) { task in
+                    ForEach(viewModel.unfinished) { task in
                         Button {
                             environment.preferences.appMode = task.feature.appMode
                             coordinator.open(task.feature.route)
@@ -87,7 +93,9 @@ struct HomeView: View {
             // Deferred: let Home paint empty first, then fill unfinished tasks.
             // Triggers DeferredTaskStore resolve off the first-frame transaction.
             AppLaunchTracker.shared.begin(.homeTaskStart)
-            unfinished = await environment.taskStore.unfinishedTasks()
+            let viewModel = self.viewModel ?? HomeViewModel(store: environment.taskStore)
+            self.viewModel = viewModel
+            await viewModel.load()
             AppLaunchTracker.shared.begin(.homeTaskEnd)
         }
         .sheet(isPresented: $isSettingsPresented) {
