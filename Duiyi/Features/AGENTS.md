@@ -5,9 +5,9 @@
 
 ## 1. 依赖与注入
 
-- Features 只依赖 Domain + Services 协议；VM 通过构造器注入 `any SpeechRecognizing` / `TaskStore` / `SpeechSynthesizing` / `PreferencesStore` 等，不 new 具体 Service。
+- Features 只依赖 Domain + Services 协议；VM 通过构造器注入 `any SpeechSessionGating` / `any TaskStoreV2` / `SpeechSynthesizing` / `PreferencesStore` 等，不 new 具体 Service。听写入口是 gate，不是 `SpeechRecognizing`；兼容用 `speech:` initializer 只在内部包一层 `SpeechSessionGate`。
 - 不 import `Speech` / `AVFoundation` / `SwiftData`；`Translation` 只允许在 `TranslationHostView.swift`（`@preconcurrency import Translation`）。
-- 不直读 SwiftData；历史详情走 `TaskStore` 的只读查询，不复用现场字幕状态机。
+- 不直读 SwiftData；历史详情走 `TaskStoreV2` 的结果化只读查询（`readTask` 等），读失败显示存储横幅而不是空列表；不复用现场字幕状态机。
 
 ## 2. 并发与主线程
 
@@ -22,7 +22,11 @@
 
 ## 4. 任务语义（交互必须保持）
 
-- 显式“新任务 → 结束任务”；只有 ended 进历史；空稿结束自动删除（内存与 store 都无可用条目时）；暂停只停麦克风，不结束任务。
+- 任务生命周期在 `TaskLifecycle`：`beginTask` 走 `prepareForNewTask()` → 清本模块字幕 → `startNewTask()`；结束走 `endTask`；VM 不自行实现 250ms 防抖、restore 映射或空稿判断。
+- 显式“新任务 → 结束任务”；只有 ended 进历史；空稿由 `TaskStoreV2.end` 按 store 中持久化内容判断后删除；暂停只停麦克风，不结束任务。
+- 清屏用 `clearDisplay()`：先 `flush()`，只清显示（pane/字幕/翻译与总结显示），保留 transcript、总结数据与会议计数；`resetCaptions()` 只用于新任务、结束任务、换语言/方向。
+- 同传 50 条只裁 pane 显示与恢复回填；面对面每侧 live + 3 条历史、恢复只回填 3 条；transcript / 历史 / 导出始终全量。会议 2 万字按任务累计，清屏不复位。
+- 存储不可用时继续显示已加载内容，用共享横幅 + 重试；当前任务标记「本次内容不会保存」，结束后不写历史但可从内存导出；有内容的未保存任务在新建前必须让用户选择导出或放弃。
 - 后台/切模块只停听，不自动结束；不要把“结束任务”改成自动保存。
 
 ## 5. UI 入口与可测试性
