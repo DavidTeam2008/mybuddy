@@ -298,6 +298,61 @@ extension Copy {
         )
     }
 
+    static func notSavedBanner(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "本次内容不会保存",
+            en: "This content won't be saved",
+            ja: "この内容は保存されません",
+            ko: "이 내용은 저장되지 않습니다",
+            th: "เนื้อหานี้จะไม่ถูกบันทึก",
+            vi: "Nội dung này sẽ không được lưu"
+        )
+    }
+
+    static func continueTask(_ title: String, for language: AppLanguage) -> String {
+        language.pick(
+            zh: "继续任务：\(title)",
+            en: "Continue task: \(title)",
+            ja: "タスクを続ける：\(title)",
+            ko: "작업 계속: \(title)",
+            th: "ทำงานต่อ: \(title)",
+            vi: "Tiếp tục phiên: \(title)"
+        )
+    }
+
+    static func unsavedTaskConfirm(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "当前任务还没有保存。导出后继续，或放弃并新建。",
+            en: "The current task isn't saved. Export and continue, or discard it and start new.",
+            ja: "現在のタスクは保存されていません。書き出して続けるか、破棄して新しく始めてください。",
+            ko: "현재 작업이 저장되지 않았습니다. 내보낸 후 계속하거나 버리고 새로 시작하세요.",
+            th: "งานปัจจุบันยังไม่ถูกบันทึก ส่งออกแล้วทำต่อ หรือทิ้งแล้วเริ่มใหม่",
+            vi: "Phiên hiện tại chưa được lưu. Hãy xuất rồi tiếp tục, hoặc bỏ và mở phiên mới."
+        )
+    }
+
+    static func exportThenContinue(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "导出后继续",
+            en: "Export and continue",
+            ja: "書き出して続ける",
+            ko: "내보낸 후 계속",
+            th: "ส่งออกแล้วทำต่อ",
+            vi: "Xuất rồi tiếp tục"
+        )
+    }
+
+    static func discardAndStartNew(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "放弃并新建",
+            en: "Discard and start new",
+            ja: "破棄して新しく始める",
+            ko: "버리고 새로 시작",
+            th: "ทิ้งแล้วเริ่มใหม่",
+            vi: "Bỏ và mở phiên mới"
+        )
+    }
+
     static func translateToMine(for language: AppLanguage) -> String {
         language.pick(
             zh: "译成我看的语言",

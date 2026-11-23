@@ -134,7 +134,7 @@ final class TaskLifecycle {
         await pauseListening()
         await flush()
 
-        guard current != nil else { return .ready }
+        guard let task = current else { return .ready }
 
         if isNotSaved && Self.hasUsableText(latestTranscript) {
             return .blockedByUnsavedTask
@@ -145,8 +145,13 @@ final class TaskLifecycle {
             return .ready
         }
 
-        guard let taskID = current?.id else { return .ready }
-        switch await store.end(taskID: taskID, entries: [], summary: nil) {
+        // Hand the store the latest snapshot and any in-memory summary so a
+        // task cannot lose its last line or generated summary on replacement.
+        switch await store.end(
+            taskID: task.id,
+            entries: latestTranscript,
+            summary: task.summary
+        ) {
         case .ended, .discardedEmpty:
             clearCurrent()
             return .ready
@@ -384,6 +389,17 @@ final class TaskLifecycle {
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
             await self?.writePendingPersist()
+        }
+    }
+
+    /// Persists a generated summary for the active task. A memory-only task
+    /// keeps it on `current` so export still carries it.
+    func saveSummary(_ summary: ConversationSummary) async {
+        guard current != nil else { return }
+        current?.summary = summary
+        guard let taskID = current?.id, !isMemoryOnly else { return }
+        if case .notPersisted = await store.saveSummary(summary, for: taskID) {
+            isNotSaved = true
         }
     }
 

@@ -38,6 +38,31 @@ struct MeetingView: View {
                     .padding(.horizontal, Tokens.horizontalPadding)
                     .padding(.bottom, 8)
 
+                if viewModel.showsNotSavedBanner {
+                    Text(Copy.notSavedBanner(for: viewModel.displayLanguage))
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color(hex: 0xF0D9B0))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(
+                            Color(hex: 0x2A2420),
+                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        )
+                        .padding(.horizontal, Tokens.horizontalPadding)
+                        .padding(.bottom, 8)
+                        .accessibilityIdentifier("meeting-not-saved-banner")
+                }
+
+                if let prompt = viewModel.resumePromptText {
+                    Text(prompt)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Tokens.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, Tokens.horizontalPadding)
+                        .padding(.bottom, 8)
+                        .accessibilityIdentifier("meeting-resume-prompt")
+                }
+
                 transcriptColumn
 
                 ListeningControl(
@@ -154,6 +179,23 @@ struct MeetingView: View {
                 Task { await finishTask() }
             }
             Button(Copy.cancel(for: viewModel.displayLanguage), role: .cancel) {}
+        }
+        .confirmationDialog(
+            Copy.unsavedTaskConfirm(for: viewModel.displayLanguage),
+            isPresented: $viewModel.isUnsavedTaskPromptPresented,
+            titleVisibility: .visible
+        ) {
+            Button(Copy.exportThenContinue(for: viewModel.displayLanguage)) {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    viewModel.isSummaryPresented = true
+                }
+            }
+            Button(Copy.discardAndStartNew(for: viewModel.displayLanguage), role: .destructive) {
+                Task { await viewModel.discardUnsavedTaskAndBegin() }
+            }
+            Button(Copy.cancel(for: viewModel.displayLanguage), role: .cancel) {
+                viewModel.dismissUnsavedTaskPrompt()
+            }
         }
         .preferredColorScheme(.dark)
     }

@@ -175,7 +175,7 @@ struct RootView: View {
 
     private func makeMeetingViewModel() -> MeetingViewModel {
         MeetingViewModel(
-            speech: environment.speechEngine,
+            gate: environment.speechGate,
             permissions: environment.permissions,
             preferences: environment.preferences,
             summarizer: environment.summarizer,

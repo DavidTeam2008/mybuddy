@@ -3,14 +3,20 @@ import Foundation
 @MainActor
 @Observable
 final class MeetingViewModel {
-    private let speech: any SpeechRecognizing
+    private let lifecycle: TaskLifecycle
     private let permissions: any PermissionGranting
     private let preferences: PreferencesStore
     private let summarizer: any ConversationSummarizing
-    private let audioSession: any AudioSessionConfiguring
-    private let task: TaskSessionController
 
-    var sessionState: SessionState = .idle
+    /// Feature-specific transient states (preparing assets, failed model
+    /// preparation) layered over the lifecycle-owned session state.
+    private var stateOverride: SessionState?
+
+    var sessionState: SessionState {
+        get { stateOverride ?? lifecycle.sessionState }
+        set { stateOverride = newValue }
+    }
+
     var sourceLanguage: AppLanguage
     var recognizesMultipleLanguages: Bool
     var fontSize: CaptionFontSize
@@ -25,37 +31,68 @@ final class MeetingViewModel {
     var isSummarizing = false
     var isLengthLimited = false
     var skipsBootstrap = false
+    /// Set when a new task is blocked by a memory-only task with content.
+    var isUnsavedTaskPromptPresented = false
+    /// "继续任务：…" prompt shown after restoring an unfinished task.
+    var resumePromptText: String?
 
     private var speechTask: Task<Void, Never>?
     private var idleRestoreTask: Task<Void, Never>?
-    private var persistTask: Task<Void, Never>?
-    private var isStopping = false
     private var utteranceAliases: [UUID: UUID] = [:]
     private let idleRestoreDelay: Duration
 
     init(
-        speech: any SpeechRecognizing,
+        gate: any SpeechSessionGating,
         permissions: any PermissionGranting,
         preferences: PreferencesStore,
         summarizer: any ConversationSummarizing,
         audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
-        taskStore: any TaskStore = InMemoryTaskStore(),
+        taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds)
     ) {
-        self.speech = speech
+        lifecycle = TaskLifecycle(
+            feature: .meeting,
+            store: taskStore,
+            gate: gate,
+            permissions: permissions,
+            audioSession: audioSession
+        )
         self.permissions = permissions
         self.preferences = preferences
         self.summarizer = summarizer
-        self.audioSession = audioSession
-        self.task = TaskSessionController(feature: .meeting, store: taskStore)
         self.idleRestoreDelay = idleRestoreDelay
         sourceLanguage = preferences.meetingLanguage
         recognizesMultipleLanguages = preferences.meetingRecognizesMultipleLanguages
         fontSize = preferences.fontSize
     }
 
-    var hasActiveTask: Bool { task.hasActiveTask }
-    var taskStartedAt: Date? { task.startedAt }
+    /// Compatibility initializer for call sites and tests that inject a raw
+    /// speech engine; the meeting lifecycle gets its own gate around it.
+    convenience init(
+        speech: any SpeechRecognizing,
+        permissions: any PermissionGranting,
+        preferences: PreferencesStore,
+        summarizer: any ConversationSummarizing,
+        audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
+        taskStore: any TaskStoreV2 = InMemoryTaskStore(),
+        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds)
+    ) {
+        self.init(
+            gate: SpeechSessionGate(engine: speech),
+            permissions: permissions,
+            preferences: preferences,
+            summarizer: summarizer,
+            audioSession: audioSession,
+            taskStore: taskStore,
+            idleRestoreDelay: idleRestoreDelay
+        )
+    }
+
+    var hasActiveTask: Bool { lifecycle.hasActiveTask }
+    var taskStartedAt: Date? { lifecycle.startedAt }
+    var isMemoryOnly: Bool { lifecycle.isMemoryOnly }
+    var isNotSaved: Bool { lifecycle.isNotSaved }
+    var showsNotSavedBanner: Bool { lifecycle.isNotSaved }
     var displayLanguage: AppLanguage { preferences.userLanguage }
 
     var recognitionLanguages: [AppLanguage] {
@@ -105,17 +142,18 @@ final class MeetingViewModel {
     }
 
     var exportableSession: TaskSession {
-        TaskSession(
-            id: task.taskID ?? UUID(),
+        let startedAt = lifecycle.startedAt ?? .now
+        return TaskSession(
+            id: lifecycle.taskID ?? UUID(),
             feature: .meeting,
             status: hasActiveTask ? .running : .ended,
-            startedAt: task.startedAt ?? .now,
+            startedAt: startedAt,
             endedAt: nil,
             title: TaskTitle.make(
                 feature: .meeting,
                 source: sourceLanguage,
                 target: nil,
-                startedAt: task.startedAt ?? .now,
+                startedAt: startedAt,
                 language: displayLanguage,
                 multilingual: recognizesMultipleLanguages
             ),
@@ -129,39 +167,75 @@ final class MeetingViewModel {
 
     func bootstrap() async {
         guard !skipsBootstrap else { return }
-        sessionState = .preparing
-        if let existing = await task.restore() {
-            restore(from: existing)
+        stateOverride = .preparing
+        if let existing = await lifecycle.restore() {
+            applyRestored(existing)
         }
         let status = await permissions.currentStatus()
         if let error = status.asDuiyiError() {
-            sessionState = .failed(error)
+            stateOverride = .failed(error)
             return
         }
-        sessionState = .ready
+        stateOverride = nil
     }
 
+    /// Two-phase begin: the lifecycle stops the old stream and ends the old
+    /// task first; module captions are cleared only after it reports ready.
     func beginTask() async {
-        if hasActiveTask {
-            _ = await task.finish(entries: transcript, summary: summary)
+        // An empty display may be a cleared screen over content the lifecycle
+        // already holds; only overwrite its snapshot with real captions.
+        if !transcript.isEmpty {
+            lifecycle.persist(transcript)
         }
-        resetCaptions()
-        isLengthLimited = false
-        _ = await task.beginNew(
-            source: recognizesMultipleLanguages ? displayLanguage : sourceLanguage,
-            target: nil,
-            multilingual: recognizesMultipleLanguages
-        )
-        sessionState = .ready
+        stateOverride = nil
+        switch await lifecycle.prepareForNewTask() {
+        case .ready:
+            await createNewTask()
+        case .blockedByUnsavedTask:
+            isUnsavedTaskPromptPresented = true
+        case .notSaved:
+            // Keep the task and captions; the not-saved banner explains why.
+            break
+        }
+    }
+
+    /// Explicit user choice from the unsaved-task confirmation: drop the
+    /// memory-only task and start a fresh one.
+    @discardableResult
+    func discardUnsavedTaskAndBegin() async -> TaskStoreWriteOutcome {
+        isUnsavedTaskPromptPresented = false
+        let outcome = await lifecycle.discardCurrentTask()
+        stateOverride = nil
+        await createNewTask()
+        return outcome
+    }
+
+    func dismissUnsavedTaskPrompt() {
+        isUnsavedTaskPromptPresented = false
     }
 
     func endTask() async -> TaskSession? {
-        await stop(restoreIdleTimerAfterDelay: false)
-        let saved = await task.finish(entries: transcript, summary: summary)
-        resetCaptions()
-        isLengthLimited = false
-        sessionState = .ready
-        return saved
+        speechTask?.cancel()
+        speechTask = nil
+        isUnsavedTaskPromptPresented = false
+        let outcome = await lifecycle.endTask(transcript: transcript, summary: summary)
+        stateOverride = nil
+        holdScreenAfterPause = false
+        idleRestoreTask?.cancel()
+        pane.speakingHint = nil
+        switch outcome {
+        case let .ended(session):
+            resetCaptions()
+            resumePromptText = nil
+            return session
+        case .discardedEmpty:
+            resetCaptions()
+            resumePromptText = nil
+            return nil
+        case .notSaved:
+            // Keep the transcript in memory for export; nothing was written.
+            return nil
+        }
     }
 
     func toggleListening() async {
@@ -175,52 +249,32 @@ final class MeetingViewModel {
 
     func start() async {
         guard hasActiveTask, !isLengthLimited, sessionState != .listening else { return }
-        isStopping = false
+        stateOverride = nil
         idleRestoreTask?.cancel()
         holdScreenAfterPause = false
 
-        var status = await permissions.currentStatus()
-        if status != .granted {
-            status = await permissions.requestAccess()
-        }
-        if let error = status.asDuiyiError() {
-            sessionState = .failed(error)
+        guard case let .started(handle) = await lifecycle.startListening(makeListeningRequest()) else {
             return
         }
-
-        do {
-            try await audioSession.activate(.interpretationCaptions)
-            let stream = try await speech.start(
-                languages: recognitionLanguages,
-                fallbackLanguage: recognizesMultipleLanguages ? displayLanguage : sourceLanguage,
-                style: .meetingNotes
-            )
-            sessionState = .listening
-            await task.setListening(true)
-            speechTask?.cancel()
-            speechTask = Task { [weak self] in
-                for await utterance in stream {
-                    self?.accept(utterance)
-                }
-                await self?.handleStreamEnded()
+        speechTask?.cancel()
+        speechTask = Task { [weak self] in
+            for await utterance in handle.stream {
+                self?.accept(utterance)
             }
-        } catch let error as DuiyiError {
-            sessionState = .failed(error)
-        } catch {
-            sessionState = .failed(.recognitionInterrupted)
+            await self?.streamEnded()
         }
     }
 
     func stop(restoreIdleTimerAfterDelay: Bool = true) async {
-        isStopping = true
+        let wasListening = sessionState == .listening
         speechTask?.cancel()
         speechTask = nil
-        await speech.stop()
-        let wasListening = sessionState == .listening
+        if stateOverride == .listening {
+            stateOverride = nil
+        }
+        await lifecycle.pauseListening()
+        pane.speakingHint = nil
         if wasListening {
-            sessionState = .paused
-            await task.setListening(false)
-            await persistNow()
             if restoreIdleTimerAfterDelay {
                 holdScreenAfterPause = true
                 scheduleIdleRestore()
@@ -229,7 +283,6 @@ final class MeetingViewModel {
                 idleRestoreTask?.cancel()
             }
         }
-        pane.speakingHint = nil
     }
 
     func resetCaptions() {
@@ -269,16 +322,16 @@ final class MeetingViewModel {
     func enterPreparing() {
         idleRestoreTask?.cancel()
         holdScreenAfterPause = false
-        sessionState = .preparing
+        stateOverride = .preparing
     }
 
     func restoreReady() {
-        guard sessionState == .preparing else { return }
-        sessionState = .ready
+        guard stateOverride == .preparing else { return }
+        stateOverride = nil
     }
 
     func fail(_ error: DuiyiError) {
-        sessionState = .failed(error)
+        stateOverride = .failed(error)
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
     }
@@ -331,10 +384,12 @@ final class MeetingViewModel {
         let applied = pane.applyLive(line)
         upsertTranscript(line: applied)
         if applied.phase == .settled {
-            schedulePersist()
+            lifecycle.persist(transcript)
             if transcriptCharacterCount() >= MeetingLayout.transcriptCharacterLimit {
                 isLengthLimited = true
-                Task { await stop(restoreIdleTimerAfterDelay: false) }
+                Task { [weak self] in
+                    await self?.stop(restoreIdleTimerAfterDelay: false)
+                }
             }
         }
     }
@@ -354,7 +409,7 @@ final class MeetingViewModel {
             do {
                 summary = try await summarizer.summarize(entries: transcript, outputLanguage: displayLanguage)
                 if let summary {
-                    await task.saveSummary(summary)
+                    await lifecycle.saveSummary(summary)
                 }
             } catch let error as DuiyiError {
                 summary = nil
@@ -369,9 +424,39 @@ final class MeetingViewModel {
         isSummarizing = false
     }
 
-    private func restore(from session: TaskSession) {
+    private func createNewTask() async {
+        resetCaptions()
+        resumePromptText = nil
+        _ = await lifecycle.startNewTask(makeNewTaskRequest())
+    }
+
+    private func makeNewTaskRequest() -> TaskLifecycle.NewTaskRequest {
+        TaskLifecycle.NewTaskRequest(
+            sourceLanguage: recognizesMultipleLanguages ? displayLanguage : sourceLanguage,
+            targetLanguage: nil,
+            multilingual: recognizesMultipleLanguages,
+            titleLanguage: displayLanguage,
+            startedAt: .now,
+            autoStart: false,
+            listening: makeListeningRequest()
+        )
+    }
+
+    private func makeListeningRequest() -> TaskLifecycle.ListeningRequest {
+        TaskLifecycle.ListeningRequest(
+            languages: recognitionLanguages,
+            fallbackLanguage: recognizesMultipleLanguages ? displayLanguage : sourceLanguage,
+            style: .meetingNotes,
+            audioUseCase: .interpretationCaptions
+        )
+    }
+
+    private func applyRestored(_ session: TaskSession) {
+        sourceLanguage = session.sourceLanguage
+        recognizesMultipleLanguages = Self.isMultilingualTitle(session.title)
         transcript = session.entries
         summary = session.summary
+        isLengthLimited = transcriptCharacterCount() >= MeetingLayout.transcriptCharacterLimit
         pane = .empty
         for entry in session.entries {
             pane.history.append(
@@ -385,6 +470,14 @@ final class MeetingViewModel {
                 )
             )
         }
+        resumePromptText = Copy.continueTask(session.title, for: displayLanguage)
+    }
+
+    /// A meeting task records its recognition mode only in the generated title
+    /// ("multiple languages" vs. one language name); use that to restore the
+    /// language pair without a schema change.
+    private static func isMultilingualTitle(_ title: String) -> Bool {
+        AppLanguage.allCases.contains { title.contains(Copy.meetingMultilingual(for: $0)) }
     }
 
     private func upsertTranscript(line: CaptionLine) {
@@ -420,34 +513,20 @@ final class MeetingViewModel {
         transcript.reduce(0) { $0 + $1.sourceText.count }
     }
 
-    private func schedulePersist() {
-        persistTask?.cancel()
-        persistTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
-            guard !Task.isCancelled else { return }
-            await self?.persistNow()
-        }
-    }
-
-    private func persistNow() async {
-        await task.persist(transcript)
-    }
-
     private func pauseRecognitionForLanguageChange() {
         pane.archiveLive()
         pane.speakingHint = nil
         if sessionState == .listening || sessionState == .paused {
-            sessionState = .ready
+            stateOverride = .ready
         }
     }
 
-    private func handleStreamEnded() async {
-        guard !isStopping, sessionState == .listening else { return }
-        sessionState = .failed(.recognitionInterrupted)
+    private func streamEnded() async {
+        let interrupted = await lifecycle.handleStreamEnded()
+        guard interrupted else { return }
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
         pane.speakingHint = nil
-        await persistNow()
     }
 
     private func scheduleIdleRestore() {
