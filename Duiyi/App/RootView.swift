@@ -163,7 +163,7 @@ struct RootView: View {
 
     private func makeInterpretationViewModel() -> InterpretationViewModel {
         InterpretationViewModel(
-            speech: environment.speechEngine,
+            gate: environment.speechGate,
             permissions: environment.permissions,
             preferences: environment.preferences,
             summarizer: environment.summarizer,
