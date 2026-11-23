@@ -1,7 +1,7 @@
 # AGENTS.md · Duiyi/Features
 
 > 触发：改 ViewModel / View / 导航入口 / 任务条交互前先读本页。
-> 本页只写 Features 的增量约束；项目规则见根 [`AGENTS.md`](../../AGENTS.md)，依赖理由见 [`references/contracts.md`](../../references/contracts.md)，加模块步骤见 [`docs/02-architecture.md`](../../docs/02-architecture.md)。
+> 本页只写 Features 的增量约束；项目规则见根 [`AGENTS.md`](../../AGENTS.md)，依赖理由见 [`docs/02-architecture.md`](../../docs/02-architecture.md) §1，加模块步骤见 [`docs/02-architecture.md`](../../docs/02-architecture.md)。
 
 ## 1. 依赖与注入
 
@@ -22,7 +22,7 @@
 
 ## 4. 任务语义（交互必须保持）
 
-- 显式“新任务 → 结束任务”；只有 ended 进历史；空稿结束自动删除；暂停只停麦克风，不结束任务。
+- 显式“新任务 → 结束任务”；只有 ended 进历史；空稿结束自动删除（内存与 store 都无可用条目时）；暂停只停麦克风，不结束任务。
 - 后台/切模块只停听，不自动结束；不要把“结束任务”改成自动保存。
 
 ## 5. UI 入口与可测试性
@@ -44,4 +44,4 @@
 
 ## 7. 完成判据
 
-- VM/纯逻辑：`make test`；导航/布局：`make test-ui`；语音/翻译/TTS 相关：真机验证。不能操作设备写“未验证”。
+- VM/纯逻辑：`DuiyiTests`（Swift Testing）；导航/布局：`DuiyiUITests`（XCTest）；语音/翻译/TTS 相关：真机验证。不能操作设备写“未验证”。

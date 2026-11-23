@@ -31,7 +31,7 @@
 | 朗读策略 | 仅耳机类路由；从句级 | 外放朗读 / 逐 volatile 读 | 外放会回灌麦克风；读半句体验差 |
 | 音频会话 | `.record/.measurement`；朗读时 `.playAndRecord/.default` | `.voiceChat` 全程 | measurement 保留干净 PCM；AEC 可能压掉对面 |
 | 存储 | SwiftData + `TaskStore` 协议 | Core Data 重栈 / JSON / UserDefaults | 类型映射自然、可注入内存实现 |
-| 总结 | FoundationModels，失败回退 digest | 云 LLM | 无网络依赖；13 不支持就明说 |
+| 总结 | FoundationModels，仅可用时生成 | 云 LLM / 本地 digest 回退 | 无网络依赖；13 不支持就明说 |
 | 导出 | Caches 文本 + `ShareLink` | 第三方 SDK / 深链 | 系统分享覆盖所有目标 App |
 | DI | 手动构造 + 协议注入 | TCA / RIBs / Swinject | 三个模块体量不值得引入框架 |
 | 本地化 | `Copy` 六语 `pick` + 少量 xcstrings | 全量 String Catalog（当前未完成） | 现场语言与界面语言共用一套枚举，迁移成本可控 |
@@ -108,9 +108,9 @@
 ## 4. 朗读：AVSpeechSynthesizer
 
 - 系统离线合成，六种语言都有系统 voice；不引入第三方 TTS。
-- 只读**已经切出的从句**：settled 全段；volatile 必须有终止标点且长度达标。
-- `speechSettleDelay = 380 ms` 合并 ASR 尾修；队列上限 10，超限先丢短确认语。
-- 语速固定 `default * 1.28`（上限钳制）；`prefersAssistiveTechnologySettings` 暂未设置。
+- 只读**已经 final 的从句**；volatile 不读，运行时不可达的 volatile 分支在 v1 删除。
+- `speechSettleDelay = 380 ms` 合并 ASR 尾修；队列硬上限 10，超限先丢短确认语，再丢最旧任务。
+- 语速以 `default * 1.28` 为基线（上限钳制）；设置 `prefersAssistiveTechnologySettings` 尊重辅助技术。
 - 无对应 voice → 关闭读出，字幕继续；不静默 fallback 成英语。
 
 ### 4.1 回声策略
@@ -145,7 +145,7 @@
 
 ### 6.1 为什么 SwiftData
 
-任务是「一条会话 + 多条文字 + 可选摘要」，需要筛选、删除、杀进程恢复。SwiftData 与 Swift 类型映射自然，`ModelContext` 可注入；测试可换 `InMemoryTaskStore`。
+任务是「一条会话 + 多条文字 + 可选总结」，需要筛选、删除、杀进程恢复。SwiftData 与 Swift 类型映射自然，`ModelContext` 可注入；测试可换 `InMemoryTaskStore`。
 
 不选：
 
@@ -159,7 +159,7 @@
 
 - `TaskEntity` + `TranscriptEntity` 分表，cascade 删除，`sortIndex` 保序。
 - `TaskStore` 协议隔离存储；Feature 不写 `@Query`。
-- `DeferredTaskStore` 把 `ModelContainer` 打开移出首帧；失败静默降级 `InMemoryTaskStore`（P0-3）。
+- `DeferredTaskStore` 把 `ModelContainer` 打开移出首帧；失败时 v1 显性降级：横幅 + 重试，允许继续但不保存，不静默切内存（P0-3）。
 - `SwiftDataTaskStore` 使用主线程 `ModelContext(autosaveEnabled: true)`；`append` 全量 upsert。
 - 尚无 `SchemaMigrationPlan`；`schemaVersion` 字段已预留。
 
@@ -180,13 +180,13 @@
 
 - `SystemLanguageModel.default.availability` 四态映射：available / deviceNotEligible / appleIntelligenceOff / modelNotReady。
 - 可用 → `LanguageModelSession` 生成，非空即返回 `usedAppleIntelligence: true`。
-- 不可用/失败/空结果 → `digest`：按「你 / 对方」分组拼接原文/译文，`usedAppleIntelligence: false`。
-- 不接云 LLM，不在 iPhone 13 上假装本机摘要。
+- 不可用/失败/空结果 → 只说明原因并保留导出；不生成 digest，不冒充 AI（v1）。
+- 不接云 LLM，不在 iPhone 13 上假装本机总结。
 
 ### 7.2 导出
 
 - Caches 写 UTF-8 文本；快照按 task UUID 与完整内容 SHA-256 命名，已准备快照不可变。
-- 内容含标题、时间、方向、文字稿、可选摘要；会议每行带语种。
+- 内容含标题、时间、方向、文字稿、可选总结；会议每行带语种。
 - `ShareLink` 分享；不内嵌第三方 SDK、不猜 URL Scheme。
 - 清理只回收本服务生成、mtime 严格超过 7 天且未被本进程准备的文件；真实 ShareSheet 外部读取仍按书面豁免未验证。
 
@@ -198,15 +198,15 @@
 - **模块注册**：`FeatureID` + `FeatureRegistry` + 独立 Feature 目录；`RootView` 仍有显式路由 switch。
 - **界面文案**：`Copy.swift` / `Copy+Platform.swift` 用 `AppLanguage.pick(zh:en:ja:ko:th:vi:)`，界面语言跟随「我看的语言」。
 - **String Catalog**：`Localizable.xcstrings` 只保留 SwiftUI 自动提取的少量字符串；**不是**主要文案源。新增界面语言目前需要扩展 `AppLanguage` 与 `pick` 调用。
-- **语言目录**：`StaticLanguageCatalog` 为静态桩，真实能力探测仍在 View/服务层；扩语言需改枚举、Tokens、脚本阈值、测试（P2）。
+- **语言目录**：生产注入 `SystemLanguageCatalog`，由系统探针填充缓存；当前只有首页设置消费，v1 扩展到所有语言入口；扩语言仍需改枚举、Tokens、脚本阈值、测试。
 
 ---
 
 ## 9. 测试与性能
 
-- 单元：Swift Testing，120 个；协议注入使 VM 可用假引擎/假 store/假合成器。
+- 单元：Swift Testing；协议注入使 VM 可用假引擎/假 store/假合成器；数量以当前测试结果为准。
 - UI：XCUITest，3 个；模拟器无 `SpeechTranscriber` 时语音用例 skip 是正确行为。
-- 真机：语音/翻译/TTS/持久化必须真机验证；统一走 `harness/tools/device-test.sh`（先预热 testmanagerd）。
+- 真机：语音/翻译/TTS/持久化必须真机验证；原 harness 脚本未随提取保留。
 - 启动优化：已暂停。`AppLaunchTracker` + `EarlyLaunchMark` 保留口径；`Order/App.order` 是 Release 二进制重排生成物，禁止手写，收益在当前包体下不可测量。
 
 ---
@@ -219,10 +219,10 @@
 | 双路资源 | 超限降级单路/去 Detector | 会丢一句，用户无提示 |
 | 翻译桥 | pending 单槽 + host 就绪后无界流 | volatile 高频时积压（P1-1） |
 | 持久化 | 主线程 ModelContext + 全量 upsert | 长会写放大（P0-3） |
-| 长会话 | Conversation 无上限 / SI 50 条 / Meeting 2 万字 | 内存/截断双极端（P0-2） |
+| 长会话 | Conversation 窗口 N=3、transcript 全量 / SI 50 条仅显示 / Meeting 2 万字续集 | 显示窗口有界，落盘全量（P0-2） |
 | 语言切换 | config 变化重建 task，旧译文靠字数丢弃 | 可能漏一句/串语言（P1-3） |
 | 语种融合 | 脚本纯度门禁较严 | 中英混读可能丢句（P1-4） |
-| 目录能力 | `StaticLanguageCatalog` 恒 true | 选到不支持的语言才失败（P2） |
+| 目录能力 | `SystemLanguageCatalog` 缓存；门禁仅首页（v1 扩展） | 选到不支持的语言才失败（P2） |
 | 界面本地化 | `pick` 六参 | 加界面语言要改多处（P2） |
 
 ---

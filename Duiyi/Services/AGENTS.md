@@ -1,7 +1,7 @@
 # AGENTS.md · Duiyi/Services
 
 > 触发：改 `Speech` / `Audio` / `Translation` / `SpeechSynthesis` / `Persistence` / `Export` / `Summary` / `Permissions` 前先读本页。
-> 本页只写 Services 的增量约束；项目规则见根 [`AGENTS.md`](../../AGENTS.md)，契约细则见 [`references/contracts.md`](../../references/contracts.md)，链路事实见 [`docs/02-architecture.md`](../../docs/02-architecture.md)。
+> 本页只写 Services 的增量约束；项目规则见根 [`AGENTS.md`](../../AGENTS.md)，任务与分层契约见 [`docs/02-architecture.md`](../../docs/02-architecture.md) §7，链路事实见 [`docs/02-architecture.md`](../../docs/02-architecture.md)。
 
 ## 1. 语音：单引擎，Gate 未实现
 
@@ -21,8 +21,8 @@
 
 - 实时字幕/`PaneState` 是内存事实；`TaskStore.append` 由 VM 以 250ms debounce 触发，不要在 Service 里同步写盘，也不要把调 debounce 当优化。
 - View/VM 不直读 SwiftData 当实时状态；历史详情只读，不复用现场字幕状态机。
-- 任务语义（显式新→结束、只有 ended 入历史、空稿结束删除、暂停只停麦克风）由 VM + Store 共同保证；改 Store 前读 [`references/contracts.md`](../../references/contracts.md) §4。
-- `DeferredTaskStore` 延迟开库、失败回退 `InMemoryTaskStore`：不要在 `AppEnvironment.init` 或首帧前同步 open container。
+- 任务语义（显式新→结束、只有 ended 入历史、空稿结束删除、暂停只停麦克风）由 VM + Store 共同保证；改 Store 前读 [`docs/02-architecture.md`](../../docs/02-architecture.md) §7。
+- `DeferredTaskStore` 延迟开库；失败时显性降级（横幅 + 重试，允许继续但不保存），不静默回退 `InMemoryTaskStore`：不要在 `AppEnvironment.init` 或首帧前同步 open container。
 - 改持久化/迁移前：先备份 store 样例（真机拷出或测试 fixture），再写迁移测试；不要用“删库重装”验证数据安全。
 
 ## 4. 测试替身与边界
@@ -30,13 +30,13 @@
 - 单测用假实现：假引擎（记录 start/stop、可手动 emit）、`InMemoryTaskStore`、假合成器、假 audio session；不得连真麦克风/真模型。
 - **不得 mock 能力检查**（如 `SpeechTranscriber.isAvailable`）来让模拟器用例变绿；语音/翻译/TTS/音频/持久化的最终验收在真机。
 - 新协议放 `ServiceProtocols.swift` 或所属目录，由 `AppEnvironment` 注入；预览替身放 `App/PreviewSupport.swift`。
-- 分层：Services 不引用 ViewModel；Domain 不 import SwiftUI/语音/翻译/SwiftData；`make check-arch` 会拦。
+- 分层：Services 不引用 ViewModel；Domain 不 import SwiftUI/语音/翻译/SwiftData；由 code review 与测试保证（原 `make check-arch` 未随提取保留）。
 
 ## 5. 导出与产物
 
 - 导出：快照按 task UUID + 完整内容 SHA-256 命名且不可变；只清理严格超过 7 天且未被本进程准备的本服务普通文件；不得删除全部 `Duiyi-*.txt`；不改共享语义。
-- 测试用临时目录；不写仓库内路径；不提交 build/trace/`harness/runs/`。
+- 测试用临时目录；不写仓库内路径；不提交 build/trace/测试产物。
 
 ## 6. 完成判据
 
-- Service 变更 = 对应单测（`make test`）+ `make verify-static`；涉及真机链路（语音/翻译/TTS/持久化）补 `make device-test` 结果；不能操作设备时写“未验证”+ 手动步骤。
+- Service 变更 = 对应单测（`DuiyiTests`）；涉及真机链路（语音/翻译/TTS/持久化）补真机验证结果；不能操作设备时写“未验证”+ 手动步骤。

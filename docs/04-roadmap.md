@@ -12,13 +12,13 @@
 | --- | --- |
 | 启动优化 | 已暂停；200 ms 目标判定不可达，见 [`case-startup-performance.md`](case-startup-performance.md) |
 | 已结束任务译文回填 | 已修复（历史修复记录见 git 历史） |
-| UI 测试“存在但不可点击” | 已闭环（结论并入 [`../references/verification.md`](../references/verification.md)） |
+| UI 测试“存在但不可点击” | 已闭环（回归测试在 `DuiyiUITests`） |
 | 文档整理 | 2026-11-02 合并 01–13 为 01–04；05–13 已退休 |
 | 死代码清理 | 2026-11-02 删除未引用函数/常量/本地化键（见 §5） |
-| 导出竞态与内容刷新 | 已修复（2026-11-17；P0 证据与回归范围见归档计划；计数见 `references/verification.md`） |
+| 导出竞态与内容刷新 | 已修复（2026-11-17；回归测试在仓库内；原归档证据未随提取保留） |
 | 语言切换清态 | 已修复；当前实现与回归覆盖见 Conversation/Interpretation ViewModel 测试 |
-| 语言目录实查 | 已修复并完成真机人工验收（2026-11-18；OpenSpec `cache-language-capabilities`，证据见 Change Record） |
-| 测试基线 | 只增不减；当前口径见 [`../references/verification.md`](../references/verification.md) |
+| 语言目录实查 | 生产注入 `SystemLanguageCatalog`（探针缓存）；当前仅首页设置消费，v1 扩展到所有语言入口 |
+| 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
 
 ---
 
@@ -51,17 +51,18 @@
 
 | 模块 | 当前 | 风险 |
 | --- | --- | --- |
-| 面对面 | `transcript` 无上限 | 长会话内存增长，`append` 全量 upsert 变慢 |
-| 同传 | `historyLimit = 50`，超出 `removeFirst` | 结束前早期内容已从内存消失，落盘也可能缺失 |
-| 会议 | 20,000 字符硬停 | 长会无法继续，只能结束重开 |
+| 面对面 | `pane.history` 无上限，`transcript` 无上限 | 长会话内存增长，`append` 全量 upsert 变慢 |
+| 同传 | `historyLimit = 50` 同时截断 pane 与 transcript | 结束前早期内容已从内存消失，落盘也可能缺失 |
+| 会议 | 20,000 字符硬停，计数按内存 transcript；清屏会复位 | 长会无法继续，只能结束重开；可绕过上限 |
 
-**目标**：
+**目标**（D5 / D7 / Q20 / Q23）：
 
-- 统一“内存近期窗口 + Store 全量”的策略；同传截断只影响 UI，不丢已 settled 的落盘内容。
-- 会议达到上限时提供“结束并新开续集任务”，用组 ID 关联，而不是硬停。
+- 面对面 pane 保留 `live` + 最多 3 条历史，transcript 全量。
+- 同传 50 条只裁显示，落盘与导出全量。
+- 会议 20,000 字符作为续集触发点，用组 ID 关联「结束并继续」；计数按任务累计，清屏不复位。
 - 历史详情分页加载，避免一次渲染全量。
 
-**验收**：模拟 1 小时文字稿，内存稳定；结束后历史能读回全部行；同传不再丢早期 settled 行。
+**验收**：模拟 1 小时文字稿，内存稳定；结束后历史能读回全部行；同传不再丢早期 settled 行；续集任务可在组内跳转。
 
 ### P0-3 持久化可靠性与写放大
 
@@ -73,7 +74,7 @@
 
 **目标**：
 
-- 降级显性化：首页/历史显示“本机存储不可用”，并打点；不静默丢历史。
+- 降级显性化：首页/历史显示“本机存储不可用”并提供重试；允许继续但不保存，明确标记；不静默丢历史。
 - 增量落盘：`append` 只传新增/变更行，或维护脏 ID 集合批量 flush；明确 autosave 与显式 save 二选一。
 - 加 v1→v2 迁移演练与自动化测试。
 
@@ -102,9 +103,9 @@
 
 - 快照按 task UUID 与完整导出内容 SHA-256 命名，已准备快照不可变；后续导出不得覆盖。
 - 清理仅匹配本服务普通文件，mtime 严格超过 7 天且未被本进程准备时才可回收。
-- 分享准备版本由完整导出内容和 language 计算；任务 ID 不变但译文、摘要或语言变化时重新准备。
+- 分享准备版本由完整导出内容和 language 计算；任务 ID 不变但译文、总结或语言变化时重新准备。
 
-**验收**：单元与 UI 回归证据 `20261117T230800Z-unit-tests-pass` / `20261117T230942Z-ui-tests-pass`；连续导出/分享与详情页译文更新后内容刷新由回归测试覆盖。真实 ShareSheet 读取按 P0 书面豁免保持未验证。
+**验收**：仓库内单元与 UI 回归覆盖连续导出/分享与详情页译文更新后的内容刷新；原运行证据未随提取保留。真实 ShareSheet 读取按 P0 书面豁免保持未验证。
 
 ### P1-3 切换语言后的旧翻译状态
 
@@ -136,14 +137,14 @@
 | P2-2 | 单路漂移丢句 | `restartSingle` 全量 reset | 切 locale 时保留最后 final，或提示用户 |
 | P2-3 | `BufferConverter` 非 float/int16 静默 nil | `copy` 双分支 | 加计数/日志 |
 | P2-4 | 双头管理 AudioSession | Capturer 与 Policy 都 `setActive` | 统一走 Policy gate |
-| P2-5 | TTS 参数写死 | `rate = default * 1.28` | 语速档/试听；补 `prefersAssistiveTechnologySettings` |
-| P2-6 | `StaticLanguageCatalog` 是桩 | `speech/translate/speak` 恒 true | 改为缓存型实查，`LanguageChipGrid` 读目录 |
+| P2-5 | TTS 参数写死 | `rate = default * 1.28` | v1 补 `prefersAssistiveTechnologySettings`；语速档/试听留 v1.x |
+| P2-6 | 语言门禁仅覆盖首页设置 | 生产已注入 `SystemLanguageCatalog` 缓存；其余入口仍可选到不可用语言 | v1 扩展到所有语言入口（单语言能力） |
 | P2-7 | 界面文案 `pick` 六参 | `Copy.swift` 遍布六参 | 迁移到 String Catalog，冻结新增 `pick` 参数 |
 | P2-8 | MainActor 上的 LCS/compact | `SpokenText.isRefinement` 等在 VM 主线程 | 下沉后台纯函数，缓存 compact 结果 |
-| P2-9 | 恢复任务不恢复语言对 | `restore(from:)` 只回放文本 | 恢复 `source/target`，或明确提示使用当前语言 |
+| P2-9 | 恢复任务不恢复语言对 | `restore(from:)` 只回放文本 | v1 修复：恢复 `source/target` 并提示；首页具体任务/启动对账留 v1.x |
 | P3-1 | 无迁移计划 | `TaskEntity.schemaVersion` 只写不读 | 加 `SchemaMigrationPlan` 与演练 |
 | P3-2 | 空稿/误触结束 | `TaskSessionController.finish` 删除空稿 | 已有确认弹窗，保持 |
-| P3-3 | 重复能力检查/摘要/胶囊样式 | 5 套能力检查、4 套摘要、10+ 处 chip | 先抽 `ChipStyle` 与 `ModelPreparation` 协调器，再逐项迁移 |
+| P3-3 | 重复能力检查/总结/胶囊样式 | 5 套能力检查、4 套总结、10+ 处 chip | 先抽 `ChipStyle` 与 `ModelPreparation` 协调器，再逐项迁移 |
 
 ---
 
@@ -156,6 +157,9 @@
 - **不做实时说话人分离**：当前以语种为路由键；声纹/分离只做技术 spike，不承诺 v1。
 - **不在会议记录里做实时同传朗读**：会议目标是全文稿与会后总结。
 - **不为了“实时感”无限提高翻译频率**：先解决 P1-1 的队列问题。
+- **不做本地 digest 回退总结**（D6）；Apple 智能不可用时不提供总结。
+- **不做历史自动清理**（D5）；**不做整组会议导出**（D7）。
+- **不做六语同等发布承诺 / 繁体中文市场**（D4）；**不做大陆首发**（D2，第二阶段）。
 
 ---
 
@@ -172,7 +176,7 @@
 
 ## 6. 建议排期
 
-> 本节是排期的唯一真源；[`decisions.md`](decisions.md) 的决策记录按同一顺序导航，不重复预估。
+> 本节是排期的唯一真源；[`decisions.md`](decisions.md) 的 D1–D7 已于 2026-11-23 确认，本表按同一顺序导航，不重复预估。
 
 | 顺序 | 事项 | 依赖 | 预估 |
 | --- | --- | --- | --- |
@@ -188,5 +192,5 @@
 
 ## 7. 交接前需要确认的产品/工程决策
 
-决策已合并到 [`decisions.md`](decisions.md) 的 **D1–D7**（唯一真源，含“启动目标/口径”与“长会策略”）；
-本文件不再保留重复列表，只在此留指针。未确认前，不按假设实现 P0-2/P0-3 的产品侧行为。
+决策已合并到 [`decisions.md`](decisions.md) 的 **D1–D7**（唯一真源，2026-11-23 已确认）；
+本文件不再保留重复列表，只在此留指针。P0-2/P0-3 的产品侧行为按 D5–D7 与「v1 冻结口径」实现。

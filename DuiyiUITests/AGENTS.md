@@ -1,13 +1,13 @@
 # AGENTS.md · DuiyiUITests
 
 > 触发：新增/修改 UI 测试或无障碍标识前先读本页。
-> 本页只写 UI 测试的增量约束；真机入口与坑见 [`references/verification.md`](../references/verification.md)。
+> 本页只写 UI 测试的增量约束；真机入口与坑见 [`README.md`](../../README.md) 与 [`docs/decisions.md`](../../docs/decisions.md)「v1 冻结口径」。
 
 ## 1. 基本事实
 
 - 用 XCTest（`XCTestCase`），不是 Swift Testing；`continueAfterFailure = false`。
 - 现有用例集中在 `LaunchPerformanceTests.swift` / `SimultaneousFlowTests.swift`；后者含需要真机 `SpeechTranscriber` 的压力用例。
-- 模拟器入口 `make test-ui`；真机入口 `harness/tools/device-test.sh`（`make device-test-ui`）。
+- 模拟器入口：Xcode Test action / `xcodebuild test`；真机入口：Xcode 真机运行或手动 `xcodebuild`（原 harness 脚本未随提取保留）。
 
 ## 2. 启动前置
 
@@ -24,7 +24,7 @@
 ## 4. 真机顺序与故障
 
 1. 手机亮屏解锁；首次跑 UI 需过一次“Enable UI Automation”密码弹窗。
-2. 先预热 `testmanagerd`（脚本 `warm`），顺序是 warm → 单元 → UI；不要手敲 xcodebuild UI 命令，否则易复现 exit 74。
+2. 先预热 `testmanagerd`（原 `warm` 脚本未随提取保留；可用 Xcode 先跑一次单元测试预热）；不要手敲 xcodebuild UI 命令，否则易复现 exit 74。
 3. `exit 74` / automation 超时 = 环境问题（预热/密码弹窗），不是代码失败；锁屏时脚本 exit 2。
 4. `mobilebuildmcp` 的设备 ID 与 Xcode/`devicectl` 的硬件 UDID 不同，别混用；本地设备信息写 `AGENTS.local.md`（如存在，不入库）。
 
@@ -37,9 +37,9 @@
 ## 6. 性能用例
 
 - `testColdLaunch` 用 `XCTApplicationLaunchMetric`，0.31–0.33s 是“到首页卡片可点”口径；`AppLaunchTracker` 240–280ms 是“进程创建 → 首帧提交”口径，两者不可混引。
-- 模拟器会把 pre-main 高估 20 倍以上；性能结论必须 Release 真机、n≥10、同口径（见 [`references/verification.md`](../references/verification.md)）。
+- 模拟器会把 pre-main 高估 20 倍以上；性能结论必须 Release 真机、n≥10、同口径（见 [`docs/decisions.md`](../../docs/decisions.md) D1 与 [`docs/case-startup-performance.md`](../../docs/case-startup-performance.md)）。
 
 ## 7. 完成判据
 
-- 导航/布局：模拟器 `make test-ui`；语音/真机行为：`make device-test-ui` 或 `make device-test`。
+- 导航/布局：模拟器 Xcode Test action；语音/真机行为：Xcode 真机测试或手动验证。
 - 不能操作设备时写“未验证”+ 手动步骤，不得声称已验证；测试产物（截图/trace）不提交。

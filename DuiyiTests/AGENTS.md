@@ -1,7 +1,7 @@
 # AGENTS.md · DuiyiTests
 
 > 触发：新增/修改单元测试、调整测试替身或测试计数前先读本页。
-> 本页只写单元测试的增量约束；验证矩阵见 [`references/verification.md`](../references/verification.md)，测试入口与真机坑见 [`CONTRIBUTING.md`](../CONTRIBUTING.md)。
+> 本页只写单元测试的增量约束；验证矩阵见 [`docs/decisions.md`](../../docs/decisions.md)「v1 冻结口径」与 [`docs/04-roadmap.md`](../../docs/04-roadmap.md)，测试入口见 [`README.md`](../../README.md)。
 
 ## 1. 框架与写法
 
@@ -24,8 +24,8 @@
 ## 4. 只增不减
 
 - 测试只增不减：不删除、不改既有测试与断言；不得改期望值让失败变绿。
-- 新增测试后同步 `harness/test-baseline.json` 的 unit floor（计数）与 skip 白名单；计数口径唯一源 [`references/verification.md`](../references/verification.md)。
-- `make check-tests` 比对 floor，删测试/计数下降会非 0 退出；`make test` 跑模拟器单元。
+- 新增测试后保持只增不减；计数以仓库当前测试结果为准（原 `harness/test-baseline.json` 未随提取保留）。
+- Xcode Test action 跑模拟器单元；原 `make check-tests` 计数门禁未随提取保留。
 - 方向性翻转（真·行为变更）必须在计划/PR 说明理由；修 bug 先补红测再修。
 
 ## 5. skip 与 flaky
@@ -36,8 +36,8 @@
 ## 6. 真实边界
 
 - 单测覆盖 Domain 纯逻辑、VM 策略、Store 行为；导航/布局走 UI 测试。
-- 语音/翻译/TTS/持久化跨进程重开必须在真机验证（`make device-test`）；不能操作设备时写“未验证”+ 手动步骤。
+- 语音/翻译/TTS/持久化跨进程重开必须在真机验证；不能操作设备时写“未验证”+ 手动步骤。
 
 ## 7. 命令
 
-- `make test` 全量单元；`make test-one TEST=DuiyiTests/ConversationViewModelTests` 单文件/单用例；`make check-tests` 计数门禁。
+- `xcodebuild test -project Duiyi.xcodeproj -scheme Duiyi -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max'` 跑全量单元；加 `-only-testing:DuiyiTests/ConversationViewModelTests` 跑单文件/单用例。

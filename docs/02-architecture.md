@@ -25,8 +25,8 @@ Duiyi/
   Domain/         纯模型、路由、任务语义、文案、错误
   Services/       Audio / Speech / SpeechSynthesis / Translation / Persistence / Summary / Export / Assets / Permissions / Diagnostics
   DesignSystem/   Tokens、通用卡片、历史行、安全区
-DuiyiTests/       120 个 Swift Testing 单元测试
-DuiyiUITests/     3 个 XCUITest 用例
+DuiyiTests/       Swift Testing 单元测试（数量以当前测试结果为准）
+DuiyiUITests/     XCUITest 用例（3 个）
 ```
 
 依赖方向严格单向：
@@ -59,12 +59,12 @@ DuiyiUITests/     3 个 XCUITest 用例
 | `SpeechModelPreparing` | `SpeechAssetPreparer` | 端侧听写模型安装 |
 | `TranslationAvailabilityChecking` | `TranslationAvailabilityService` | 语言对可用性 |
 | `SpeechRecognizing` | `BilingualSpeechEngine` | 双/单路听写 |
-| `ConversationSummarizing` | `FoundationModelsSummarizer` | Apple 智能摘要 + digest 回退 |
+| `ConversationSummarizing` | `FoundationModelsSummarizer` | Apple 智能总结（v1 不使用 digest 回退） |
 | `AudioSessionConfiguring` | `AudioSessionPolicy` | AVAudioSession 与路由 |
 | `SpeechSynthesizing` | `SystemSpeechSynthesizer` | 同传朗读 |
 | `TaskStore` | `DeferredTaskStore` | 任务持久化 |
 | `ExportSharing` | `TranscriptExportService` | 导出文本 |
-| `LanguageCataloging` | `StaticLanguageCatalog` | 语言目录（当前为静态桩） |
+| `LanguageCataloging` | `SystemLanguageCatalog` | 语言目录（系统探针缓存） |
 
 `DuiyiApp` 用 `@State` 持有 `AppEnvironment` 和 `AppCoordinator`，通过 `.environment()` 注入。
 
@@ -263,8 +263,9 @@ Utterance
 
 - `routedSideByUtterance` 固定同一句的去向，避免 partial 改语言导致左右跳。
 - `SpokenText.isContinuation` / `isDistinctGreeting` 处理 ASR 修订与「嗨 Jack / 嗨 Lucy」独立问候。
-- 暂停/后台 `persistNow()`；结束任务 `finish(entries:)` 全量落盘。
-- 清屏只清 pane/transcript/翻译状态，不停听、不结束任务。
+- 每侧 pane 只保留 `live` + 最多 3 条历史；更早行只进 transcript。
+- 暂停/后台 `persistNow()`；结束任务 `finish(entries:)` 全量落盘；清屏前先 flush 并 cancel 250ms pending persist。
+- 清屏只清 pane/transcript/翻译状态，不停听、不结束任务；任务数据、历史与导出以全量为准。
 
 ### 6.2 同声传译
 
@@ -277,9 +278,9 @@ Utterance
   → settled → ClauseSplitter.consume → TTS 队列
 ```
 
-- `historyLimit = 50`，超出 `removeFirst`。
-- 朗读只接受 settled；volatile 需终止标点 + 最小长度。`speechSettleDelay = 380 ms` 合并 ASR 尾修。
-- `pendingJobs` 上限 10；去重使用已读前缀、280 字 `spokenCompactTail` 和队列内 compact 拼接。
+- `historyLimit = 50` 仅裁 `pane.history` 显示；transcript、落盘与导出全量（v1 修复当前同时截断 transcript 的缺陷）。
+- 朗读只接受 final；volatile 分支运行时不可达，v1 删除。`speechSettleDelay = 380 ms` 合并 ASR 尾修。
+- `pendingJobs` 硬上限 10；超限先丢短确认语，再丢最旧任务；去重使用已读前缀、280 字 `spokenCompactTail` 和队列内 compact 拼接。
 - `speechGeneration` 令牌防止旧朗读任务在暂停/换方向后继续。
 - 方向/语言变化停听、清 live、清队列、重建配置；历史保留。
 
@@ -295,7 +296,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 ```
 
 - 多语言：`[display, display.defaultPeer]`；单语：只跑 pinned。
-- 达到字符上限：`isLengthLimited = true` 并停止；不自动续记。
+- 达到字符上限：`isLengthLimited = true` 并停止；提供「结束并继续」创建同组续集任务；不自动续记。计数按任务累计，清屏不复位。
 - 会议详情可逐条单向翻译并 `updateTranslations` 回填，不新增条目。
 
 ---
@@ -311,7 +312,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 `TaskSessionController` 封装一个 Feature 的当前任务：
 
 - `restore()` 恢复未结束任务。
-- `beginNew()` 自动结束上一个任务后新建。
+- `beginNew()` 只新建；三个 VM 的 `beginTask` 先停听写并 `finish()` 旧任务，再调用 `beginNew()`。
 - `persist()` upsert 文字稿。
 - `setListening()` 只改 running/pausedListening。
 - `finish()` 先 append，空稿 delete，否则 end。
@@ -322,14 +323,14 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 
 - `init` 不阻塞主线程，后台 `Task.detached(priority: .utility)` 打开 `ModelContainer`。
 - 第一次实际调用（首页未完成任务、历史、恢复）时 `resolved()` 等待容器。
-- 容器打开失败 → 静默降级 `InMemoryTaskStore`，仅日志，用户无感知（P0-3）。
+- 容器打开失败 → v1 显性降级：首页/历史显示「本机存储不可用」并提供重试；允许继续但不保存，不静默切内存（P0-3）。
 - `RootView` 首帧后再 `warm()`，通常用户导航时已就绪。
 
 ### 7.3 SwiftData
 
 `schema = [TaskEntity, TranscriptEntity]`：
 
-- `TaskEntity`：任务元数据、状态、摘要、`schemaVersion`。
+- `TaskEntity`：任务元数据、状态、总结、`schemaVersion`。
 - `TranscriptEntity`：按 `taskID` 关联、cascade 删除、`sortIndex` 保序。
 - `SwiftDataTaskStore` 使用主线程 `ModelContext(autosaveEnabled: true)`。
 - `append` 对传入 entries 全量 upsert 后 `save()`；`updateTranslations` 只回填已有条目的译文，允许已结束任务。
@@ -342,12 +343,12 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 
 ## 8. 总结、导出、资源、权限
 
-- **总结**：`FoundationModelsSummarizer` 按 `SystemLanguageModel.availability` 分支；可用则 `LanguageModelSession`，失败/不可用回退 `digest`（按 speaker 分组）。
+- **总结**：`FoundationModelsSummarizer` 按 `SystemLanguageModel.availability` 分支；仅在可用时生成；失败/不可用/空结果只说明原因，不生成本地 digest（v1）。
 - **导出**：`TranscriptExportService` 写 Caches，UTF-8 原子写；快照按 task UUID 与完整内容 SHA-256 命名且不可变，仅清理严格超过 7 天且未被本进程准备的普通文件；`ShareLink` 分享。
 - **模型准备**：`SpeechAssetPreparer` 用 `SpeechTranscriber(preset: .progressiveTranscription)` 占位模块创建 `AssetInventory` 安装请求，200 ms 轮询进度。
 - **翻译可用性**：`TranslationAvailabilityService` 双向查 `LanguageAvailability` 并合并状态。
 - **权限**：`PermissionService` 映射麦克风/语音识别四态；`requestAccess` 先麦后音后重查。
-- **语言目录**：`StaticLanguageCatalog` 目前恒 `speech/translate/speak = true`；真实能力探测仍散在 View。这是 P2 已知问题。
+- **语言目录**：生产注入 `SystemLanguageCatalog`，由 `SpeechTranscriber.supportedLocale`、`LanguageAvailability`、`AVSpeechSynthesizer` 探针填充缓存；当前只有首页设置消费，v1 扩展到所有语言入口。
 
 ---
 
@@ -373,13 +374,13 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 
 | 层级 | 覆盖 | 入口 |
 | --- | --- | --- |
-| Domain 纯逻辑 | 路由、assembler、spoken 合并、clause、任务映射、摘要 digest | `make test` |
-| ViewModel | 三模块状态机、翻译过期丢弃、清屏、任务恢复、TTS 队列 | `make test` |
-| 音频策略 | 路由快照/回声判定 | `make test` |
-| UI | 冷启动、首页导航、同传听写压力 | `make test-ui` / `make device-test` |
-| 真机 | 语音、翻译、TTS、持久化、长会话 | `harness/tools/device-test.sh` |
+| Domain 纯逻辑 | 路由、assembler、spoken 合并、clause、任务映射 | `DuiyiTests`（Swift Testing） |
+| ViewModel | 三模块状态机、翻译过期丢弃、清屏、任务恢复、TTS 队列 | `DuiyiTests` |
+| 音频策略 | 路由快照/回声判定 | `DuiyiTests` |
+| UI | 冷启动、首页导航、同传听写压力 | `DuiyiUITests`（XCTest） |
+| 真机 | 语音、翻译、TTS、持久化、长会话 | 真机手动验证（原 harness 脚本未随提取保留） |
 
-基线：120 个单元测试 + 3 个 UI 用例 = 真机 123。模拟器没有 `SpeechTranscriber`，`testSimultaneousListeningPressure` 会 skip，这是预期行为。精确口径见 [`references/verification.md`](../references/verification.md)。
+基线：以仓库当前 `DuiyiTests` / `DuiyiUITests` 结果为准；原 harness 的 120+3 计数未随提取保留。模拟器没有 `SpeechTranscriber`，`testSimultaneousListeningPressure` 会 skip，这是预期行为。
 
 ---
 
@@ -388,10 +389,10 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 完整问题、证据与排期见 [`04-roadmap.md`](04-roadmap.md)。
 
 - **P0-1 单引擎无仲裁**：三个常驻 VM 共享一个 `BilingualSpeechEngine`，快速切模块/前后台时 stop/start 可能互相掐断；`SpeechSessionGate` 尚未实现。
-- **P0-2 长会话留存**：Conversation transcript 无上限；Interpretation 50 条截断；Meeting 2 万字硬停。
-- **P0-3 持久化可靠性与写放大**：容器失败静默降级内存；`append` 全量 upsert；无迁移计划。
+- **P0-2 长会话留存**：Conversation pane 窗口 N=3、transcript 全量；Interpretation 50 条仅显示；Meeting 2 万字为续集触发点。
+- **P0-3 持久化可靠性与写放大**：容器失败需显性降级（v1），不得静默切内存；`append` 全量 upsert；无迁移计划。
 - **P1**：翻译桥积压、导出清理竞态、切语言旧翻译状态、中英混读丢弃、单路漂移丢句。
-- **P2/P3**：Detector 失败静默、`fail` 吞因、TTS 参数写死、`StaticLanguageCatalog` 为桩、MainActor 上的 LCS 计算、非音频格式静默丢包。
+- **P2/P3**：Detector 失败静默、`fail` 吞因、TTS 语速/音色设置、MainActor 上的 LCS 计算、非音频格式静默丢包。
 
 ---
 

@@ -110,12 +110,12 @@ candidate（当前首页）      n=20，p50=262.5ms，CV=8.3%，usable
 
 - **明确不要做**：不重启启动微优化；不用模拟器证明性能；不手写 `Order/App.order`（必须由脚本从 Release 二进制再生，且只在 Release 生效）。
 - **若要重启**：先改变一个架构级变量（例如把目标改成可达范围，或评估换掉 SwiftUI 场景机），再重建与 candidate 同口径的 control 测量；否则任何优化都无法验证。
-- **当前事实源**：排期与验收见 [`04-roadmap.md`](04-roadmap.md)；口径决策见 [`decisions.md`](decisions.md) D1；铁律见 [`../references/contracts.md`](../references/contracts.md) §7。
+- **当前事实源**：排期与验收见 [`04-roadmap.md`](04-roadmap.md)；口径决策见 [`decisions.md`](decisions.md) D1；铁律见 [`04-roadmap.md`](04-roadmap.md) §4（不重启启动微优化、不用模拟器证明性能）。
 
 ## 5. 可复核线索
 
 - **commit**：`64c70d7`（被验证的那轮启动优化）、对照 `a24038d`（优化前）、优化后 `1b2206d`。
-- **测量产物（不入库，需重跑）**：`harness/runs/` 下的可行性/control 运行目录（脚本与口径见正文）。
+- **测量产物（不入库，需重跑）**：原 `harness/runs/` 目录未随本仓库提取；口径见正文。
 - **机器结论**：可行性 JSON 随本批治理从树中移除，摘要即本文 §3.4；原始记录见 git 历史。
 - **埋点入口**：`EarlyLaunchMark.c`（C 构造函数测 pre-main）、`AppLaunchTracker`（分阶段 + 首帧日志）、`DeferredTaskStore`（`STORE open took Nms`）。
 - **测量口径**：Release / 真机 / warmup 3 / n=20（可行性）或 n≥5–8（A/B）/ 指标 `startup.cold.first_frame`；复测须保持同设备、同构建、同命令、同样本量。
