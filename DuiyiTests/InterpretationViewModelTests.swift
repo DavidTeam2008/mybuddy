@@ -908,6 +908,117 @@ struct InterpretationViewModelTests {
         #expect(store.startNewCalls == 2)
     }
 
+    @Test("Sixty settled lines stay in the transcript and export while the pane shows the last fifty")
+    func longTranscriptKeepsAllSettledLines() async {
+        let viewModel = makeViewModel()
+        await viewModel.beginTask()
+        let utterances = makeUtterances(count: 60)
+        for utterance in utterances {
+            viewModel.accept(utterance)
+        }
+        let ids = utterances.map(\.id)
+
+        #expect(viewModel.pane.history.count == InterpretationLayout.historyLimit)
+        #expect(viewModel.pane.live?.id == ids.last)
+        #expect(viewModel.pane.history.map(\.id) == Array(ids.dropLast().suffix(InterpretationLayout.historyLimit)))
+        #expect(viewModel.transcript.count == 60)
+        #expect(viewModel.transcript.map(\.id) == ids)
+        #expect(viewModel.exportableSession.entries.count == 60)
+        #expect(viewModel.exportableSession.entries.first?.sourceText == utterances.first?.text)
+        #expect(viewModel.exportableSession.entries.last?.sourceText == utterances.last?.text)
+    }
+
+    @Test("Restoring a long task fills the pane with the last fifty entries and keeps the full transcript")
+    func restoredLongTaskFillsPaneWindow() async {
+        let store = InMemoryTaskStore()
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let draft = TaskDraft(
+            feature: .simultaneous,
+            sourceLanguage: .english,
+            targetLanguage: .zhHans,
+            multilingual: false,
+            startedAt: startedAt,
+            title: TaskTitle.make(
+                feature: .simultaneous,
+                source: .english,
+                target: .zhHans,
+                startedAt: startedAt,
+                language: .zhHans
+            )
+        )
+        guard case let .persisted(seeded) = await store.startNew(draft) else {
+            Issue.record("Could not seed the running task")
+            return
+        }
+        let entries = makeUtterances(count: 60).map { utterance in
+            TranscriptEntry(
+                id: utterance.id,
+                speaker: .peer,
+                source: .english,
+                sourceText: utterance.text,
+                translatedText: "",
+                isFinal: true
+            )
+        }
+        _ = await store.append(entries, to: seeded.id)
+        _ = await store.setStatus(.pausedListening, for: seeded.id)
+
+        let viewModel = makeViewModel(store: store)
+        await viewModel.bootstrap()
+
+        #expect(viewModel.transcript.count == 60)
+        #expect(viewModel.pane.live == nil)
+        #expect(viewModel.pane.history.count == InterpretationLayout.historyLimit)
+        #expect(viewModel.pane.history.map(\.id) == Array(entries.suffix(InterpretationLayout.historyLimit).map(\.id)))
+        #expect(viewModel.exportableSession.entries.count == 60)
+    }
+
+    @Test("Clearing the display flushes pending captions and keeps the task, transcript, and summary")
+    func clearDisplayFlushesAndKeepsTaskData() async {
+        let store = ScriptedTaskStore()
+        let gate = InterpretationFakeGate(log: InterpretationEventLog())
+        let viewModel = makeViewModel(store: store, gate: gate)
+        await viewModel.beginTask()
+        await viewModel.start()
+        let utterance = Utterance(
+            language: .english,
+            text: "Clear me from the screen but keep me in the transcript",
+            isFinal: true
+        )
+        viewModel.accept(utterance)
+        #expect(store.appendCalls == 0)
+        let summary = ConversationSummary(text: "已保存的总结", usedAppleIntelligence: true)
+        viewModel.summary = summary
+        viewModel.isSummaryPresented = true
+
+        await viewModel.clearDisplay()
+
+        #expect(store.appendCalls == 1)
+        let active = await store.base.activeTask(for: .simultaneous)
+        #expect(active?.entries.map(\.sourceText) == [utterance.text])
+        #expect(viewModel.pane.history.isEmpty)
+        #expect(viewModel.pane.live == nil)
+        #expect(viewModel.pane.speakingHint == nil)
+        #expect(viewModel.isSummaryPresented == false)
+        #expect(viewModel.summary == summary)
+        #expect(viewModel.transcript.map(\.sourceText) == [utterance.text])
+        #expect(viewModel.exportableSession.entries.count == 1)
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.sessionState == .listening)
+        #expect(gate.stopCount == 0)
+        #expect(store.endCalls == 0)
+    }
+
+    private func makeUtterances(count: Int) -> [Utterance] {
+        (0..<count).map { _ in
+            Utterance(
+                language: .english,
+                text: "\(UUID().uuidString) \(UUID().uuidString)",
+                isFinal: true
+            )
+        }
+    }
+
     private func makeViewModel(
         speech: any SpeechRecognizing = MockSpeechEngine(),
         audioSession: MockAudioSession = MockAudioSession(),

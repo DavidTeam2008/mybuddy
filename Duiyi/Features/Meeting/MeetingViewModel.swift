@@ -285,6 +285,16 @@ final class MeetingViewModel {
         }
     }
 
+    /// Display-only clear: flushes pending captions first, then blanks the
+    /// panes, speaking hint, and summary presentation. The transcript, summary
+    /// data, cumulative 2万字 counter, and task/listening state stay intact.
+    func clearDisplay() async {
+        await lifecycle.flush()
+        pane.resetCaptions()
+        isSummaryPresented = false
+    }
+
+    /// Full caption reset, reserved for starting or ending a task.
     func resetCaptions() {
         pane.resetCaptions()
         transcript = []

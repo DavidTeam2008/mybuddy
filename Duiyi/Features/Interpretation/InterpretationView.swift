@@ -143,7 +143,9 @@ struct InterpretationView: View {
                         Task { await viewModel.setVoiceOutEnabled(enabled) }
                     },
                     onToggleSourceLine: viewModel.setShowsSourceLine,
-                    onClear: viewModel.resetCaptions,
+                    onClear: {
+                        Task { await viewModel.clearDisplay() }
+                    },
                     onSummarize: {
                         Task { await viewModel.requestSummary() }
                     },

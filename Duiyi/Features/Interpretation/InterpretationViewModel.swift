@@ -336,6 +336,18 @@ final class InterpretationViewModel {
         pane.speakingHint = nil
     }
 
+    /// Clears only what is on screen: pending captions are flushed first, then
+    /// the pane, speaking hint, and summary presentation are cleared. The task,
+    /// transcript, saved summary, listening session, and speech queue stay
+    /// untouched. Export always uses the full transcript.
+    func clearDisplay() async {
+        await lifecycle.flush()
+        pane.resetCaptions()
+        isSummaryPresented = false
+    }
+
+    /// Full reset for a new task, an ended task, or a direction/language
+    /// change; never for the display-only clear action.
     func resetCaptions() {
         pane.resetCaptions()
         transcript = []
@@ -965,9 +977,6 @@ final class InterpretationViewModel {
                 isFinal: line.phase == .settled
             )
         )
-        if transcript.count > InterpretationLayout.historyLimit {
-            transcript.removeFirst(transcript.count - InterpretationLayout.historyLimit)
-        }
         collapseTranscriptRefinements()
         if line.phase == .settled {
             lifecycle.persist(transcript)
@@ -1029,7 +1038,8 @@ final class InterpretationViewModel {
         transcript = session.entries
         summary = session.summary
         pane = .empty
-        for entry in session.entries {
+        // Restore only the on-screen window; the transcript stays full.
+        for entry in session.entries.suffix(InterpretationLayout.historyLimit) {
             pane.history.append(
                 CaptionLine(
                     id: entry.id,

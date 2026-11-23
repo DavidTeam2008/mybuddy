@@ -110,7 +110,7 @@ struct MeetingView: View {
                         }
                     },
                     onSelectFont: viewModel.setFontSize,
-                    onClear: viewModel.resetCaptions,
+                    onClear: { Task { await viewModel.clearDisplay() } },
                     onSummarize: { Task { await viewModel.requestSummary() } },
                     onRedownload: { Task { await redownloadModels() } },
                     onDone: {
