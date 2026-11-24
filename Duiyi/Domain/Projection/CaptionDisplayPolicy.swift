@@ -20,4 +20,11 @@ extension CaptionDisplayPolicy {
     /// Meeting notes render one pane and keep every row; the 2万字 task
     /// counter, not the display window, stops listening.
     static let meeting = CaptionDisplayPolicy(panes: [.user], historyLimit: nil)
+
+    /// Simultaneous interpretation renders one pane and keeps the newest 50
+    /// rows on screen; the transcript and export stay full.
+    static let interpretation = CaptionDisplayPolicy(
+        panes: [.user],
+        historyLimit: InterpretationLayout.historyLimit
+    )
 }

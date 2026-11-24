@@ -22,11 +22,11 @@ final class InterpretationViewModel {
     var sourceLanguage: AppLanguage
     var targetLanguage: AppLanguage
     var fontSize: CaptionFontSize
-    var pane = PaneState.empty
+    var pane: PaneState { projection.pane(.user) }
     var isSettingsPresented = false
     var isSummaryPresented = false
     var holdScreenAfterPause = false
-    var transcript: [TranscriptEntry] = []
+    var transcript: [TranscriptEntry] { projection.transcript }
     var summary: ConversationSummary?
     var summaryError: String?
     var summaryAvailability: SummaryAvailability = .unavailable
@@ -45,6 +45,7 @@ final class InterpretationViewModel {
     var resumePromptText: String?
 
     private let pipeline: TranslationPipeline
+    private var projection = CaptionProjection(policy: .interpretation)
 
     private var speechTask: Task<Void, Never>?
     private var idleRestoreTask: Task<Void, Never>?
@@ -341,7 +342,7 @@ final class InterpretationViewModel {
         stateOverride = nil
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
-        pane.speakingHint = nil
+        projection.setSpeakingHint(nil, pane: .user)
         switch outcome {
         case let .ended(session):
             resetCaptions()
@@ -408,7 +409,7 @@ final class InterpretationViewModel {
                 idleRestoreTask?.cancel()
             }
         }
-        pane.speakingHint = nil
+        projection.setSpeakingHint(nil, pane: .user)
     }
 
     /// Clears only what is on screen: pending captions are flushed first, then
@@ -417,7 +418,7 @@ final class InterpretationViewModel {
     /// untouched. Export always uses the full transcript.
     func clearDisplay() async {
         await lifecycle.flush()
-        pane.resetCaptions()
+        projection.clearDisplay()
         isSummaryPresented = false
         isExportThenContinuePending = false
     }
@@ -425,8 +426,7 @@ final class InterpretationViewModel {
     /// Full reset for a new task, an ended task, or a direction/language
     /// change; never for the display-only clear action.
     func resetCaptions() {
-        pane.resetCaptions()
-        transcript = []
+        projection.reset()
         pipeline.reset()
         spokenPrefixes.removeAll()
         lastSpokenTranslation = ""
@@ -544,64 +544,43 @@ final class InterpretationViewModel {
         let text = utterance.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        if utterance.isFinal {
-            pane.speakingHint = nil
-        } else {
-            pane.speakingHint = Copy.speaking(for: sourceLanguage)
-        }
-
-        let existing = pane.live
-        let captionID: UUID
-        let carriedTranslation: String
-        if let existing, existing.source == utterance.language,
-           SpokenText.isDistinctGreeting(
-            incomingSource: text,
-            incomingDisplay: text,
-            previousSource: existing.sourceText,
-            previousDisplay: existing.displayText
-           ) {
-            captionID = UUID()
-            carriedTranslation = ""
-            pipeline.registerAlias(utterance.id, to: captionID)
-        } else if let existing, existing.source == utterance.language,
-           SpokenText.isContinuation(text, of: existing.sourceText, language: utterance.language)
-            || SpokenText.isRefinement(text, of: existing.sourceText) {
-            captionID = existing.id
-            carriedTranslation = existing.translatedText
-            pipeline.registerAlias(utterance.id, to: existing.id)
-        } else {
-            captionID = utterance.id
-            carriedTranslation = existing?.id == utterance.id ? existing?.translatedText ?? "" : ""
-        }
-
-        let line = CaptionLine(
-            id: captionID,
-            side: .user,
-            source: utterance.language,
-            sourceText: text,
-            translatedText: carriedTranslation,
-            phase: utterance.isFinal ? .settled : .streaming
+        projection.setSpeakingHint(
+            utterance.isFinal ? nil : Copy.speaking(for: sourceLanguage),
+            pane: .user
         )
-        let applied = pane.applyLive(line)
-        pane.trimHistory(to: InterpretationLayout.historyLimit)
-        upsertTranscript(line: applied)
-        enqueueTranslation(applied, isFinal: utterance.isFinal)
+
+        let normalized = Utterance(
+            id: utterance.id,
+            language: utterance.language,
+            text: text,
+            isFinal: utterance.isFinal,
+            createdAt: utterance.createdAt
+        )
+        guard let line = projection.ingest(normalized, pane: .user, speaker: .peer) else {
+            return
+        }
+        if line.phase == .settled {
+            lifecycle.persist(projection.transcript)
+        }
+        enqueueTranslation(line, isFinal: utterance.isFinal)
     }
 
     func fulfill(job: TranslationJob, text: String) {
         guard let update = pipeline.accept(job: job, text: text) else { return }
-        let appliedCaption = applyTranslation(
+        let line = projection.applyTranslation(
             utteranceID: update.utteranceID,
             text: update.translatedText,
             settle: job.isFinal
         )
-        if appliedCaption {
-            scheduleSpeech(
-                utteranceID: update.utteranceID,
-                translated: displayedTranslation(for: update.utteranceID) ?? update.translatedText,
-                settle: job.isFinal
-            )
+        if job.isFinal {
+            lifecycle.persist(projection.transcript)
         }
+        guard let line else { return }
+        scheduleSpeech(
+            utteranceID: update.utteranceID,
+            translated: line.translatedText,
+            settle: job.isFinal
+        )
     }
 
     func failTranslation(job: TranslationJob, error: Error) {
@@ -728,8 +707,8 @@ final class InterpretationViewModel {
         await lifecycle.pauseListening()
         speechTask?.cancel()
         speechTask = nil
-        pane.archiveLive()
-        pane.speakingHint = nil
+        projection.archiveLive(pane: .user)
+        projection.setSpeakingHint(nil, pane: .user)
         pipeline.reset()
         spokenPrefixes.removeAll()
         lastSpokenTranslation = ""
@@ -754,35 +733,6 @@ final class InterpretationViewModel {
                 subsequentDelay: delays.subsequent
             )
         )
-    }
-
-    @discardableResult
-    private func applyTranslation(utteranceID: UUID, text: String, settle: Bool) -> Bool {
-        let applied = pane.applyTranslation(utteranceID: utteranceID, text: text, settle: settle)
-        if let index = transcript.firstIndex(where: { $0.id == utteranceID }) {
-            transcript[index].translatedText = SpokenText.preferredTranslation(
-                transcript[index].translatedText,
-                text
-            )
-            if settle {
-                transcript[index].isFinal = true
-                lifecycle.persist(transcript)
-            }
-        }
-        collapseTranscriptRefinements()
-        return applied
-    }
-
-    private func displayedTranslation(for utteranceID: UUID) -> String? {
-        if pane.live?.id == utteranceID {
-            let text = pane.live?.translatedText.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return text.isEmpty ? nil : text
-        }
-        if let line = pane.history.first(where: { $0.id == utteranceID }) {
-            let text = line.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
-            return text.isEmpty ? nil : text
-        }
-        return nil
     }
 
     /// Voice-out keeps its tighter 25/50 ms cadence; captions keep 40/90 ms.
@@ -958,95 +908,6 @@ final class InterpretationViewModel {
         await forceVoiceOutOff(reason: .voiceOutNeedsHeadphones)
     }
 
-    private func upsertTranscript(line: CaptionLine) {
-        if let index = transcript.firstIndex(where: { $0.id == line.id }) {
-            if SpokenText.isDistinctGreeting(
-                incomingSource: line.sourceText,
-                incomingDisplay: line.displayText,
-                previousSource: transcript[index].sourceText,
-                previousDisplay: transcript[index].translatedText.isEmpty
-                    ? transcript[index].sourceText
-                    : transcript[index].translatedText
-            ) {
-                transcript[index].isFinal = true
-            } else {
-                transcript[index].sourceText = SpokenText.preferredSource(transcript[index].sourceText, line.sourceText)
-                if !line.translatedText.isEmpty {
-                    transcript[index].translatedText = line.translatedText
-                }
-                transcript[index].isFinal = line.phase == .settled
-                if line.phase == .settled {
-                    lifecycle.persist(transcript)
-                }
-                return
-            }
-        }
-        if let last = transcript.last,
-           !SpokenText.isDistinctGreeting(
-            incomingSource: line.sourceText,
-            incomingDisplay: line.displayText,
-            previousSource: last.sourceText,
-            previousDisplay: last.translatedText.isEmpty ? last.sourceText : last.translatedText
-           ),
-           SpokenText.isContinuation(line.sourceText, of: last.sourceText, language: line.source)
-            || SpokenText.isRefinement(line.sourceText, of: last.sourceText)
-            || SpokenText.isRefinement(line.displayText, of: last.translatedText.isEmpty ? last.sourceText : last.translatedText) {
-            var updated = last
-            updated.sourceText = SpokenText.preferredSource(last.sourceText, line.sourceText)
-            if !line.translatedText.isEmpty {
-                updated.translatedText = line.translatedText
-            }
-            updated.isFinal = line.phase == .settled
-            transcript[transcript.count - 1] = updated
-            if line.phase == .settled {
-                lifecycle.persist(transcript)
-            }
-            return
-        }
-        transcript.append(
-            TranscriptEntry(
-                id: line.id,
-                speaker: .peer,
-                source: line.source,
-                sourceText: line.sourceText,
-                translatedText: line.translatedText,
-                isFinal: line.phase == .settled
-            )
-        )
-        collapseTranscriptRefinements()
-        if line.phase == .settled {
-            lifecycle.persist(transcript)
-        }
-    }
-
-    private func collapseTranscriptRefinements() {
-        while transcript.count >= 2 {
-            let last = transcript[transcript.count - 1]
-            let prior = transcript[transcript.count - 2]
-            if SpokenText.isDistinctGreeting(
-                incomingSource: last.sourceText,
-                incomingDisplay: last.translatedText.isEmpty ? last.sourceText : last.translatedText,
-                previousSource: prior.sourceText,
-                previousDisplay: prior.translatedText.isEmpty ? prior.sourceText : prior.translatedText
-            ) {
-                break
-            }
-            let related = SpokenText.isContinuation(last.sourceText, of: prior.sourceText, language: last.source)
-                || SpokenText.isRefinement(last.sourceText, of: prior.sourceText)
-                || SpokenText.isRefinement(last.translatedText, of: prior.translatedText)
-            guard related else { break }
-            var merged = last
-            merged.sourceText = SpokenText.preferredSource(prior.sourceText, last.sourceText)
-            merged.translatedText = SpokenText.preferredTranslation(
-                prior.translatedText,
-                last.translatedText
-            )
-            merged.isFinal = prior.isFinal || last.isFinal
-            transcript.removeLast()
-            transcript[transcript.count - 1] = merged
-        }
-    }
-
     /// A superseded stream ends silently (the gate's other owner took over);
     /// only a still-current stream is a real recognition interruption.
     private func streamEnded(_ handle: SpeechSessionHandle) async {
@@ -1054,7 +915,7 @@ final class InterpretationViewModel {
         guard interrupted else { return }
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
-        pane.speakingHint = nil
+        projection.setSpeakingHint(nil, pane: .user)
         await clearSpeechQueue()
     }
 
@@ -1067,22 +928,8 @@ final class InterpretationViewModel {
             targetLanguage = target
             preferences.targetLanguage = target
         }
-        transcript = session.entries
+        projection.restore(session.entries)
         summary = session.summary
-        pane = .empty
-        // Restore only the on-screen window; the transcript stays full.
-        for entry in session.entries.suffix(InterpretationLayout.historyLimit) {
-            pane.history.append(
-                CaptionLine(
-                    id: entry.id,
-                    side: .user,
-                    source: entry.source,
-                    sourceText: entry.sourceText,
-                    translatedText: entry.translatedText,
-                    phase: .settled
-                )
-            )
-        }
         resumePromptText = Copy.continueTask(session.title, for: interfaceLanguage)
     }
 
