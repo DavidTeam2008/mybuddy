@@ -350,37 +350,17 @@ struct TranslationPipelineTests {
         #expect(pipeline.outboundJob?.id == outbound.id)
     }
 
-    @Test("Registered aliases resolve to the canonical utterance ID")
-    func aliasResolvesToCanonicalID() throws {
+    @Test("An accepted update keeps the job's utterance id")
+    func updateKeepsJobID() throws {
         let (pipeline, _) = makePipeline()
-        let raw = UUID()
-        let canonical = UUID()
-        pipeline.registerAlias(raw, to: canonical)
-
+        let id = UUID()
         let job = TranslationJob(
-            utteranceID: raw, source: .english, target: .zhHans, text: "hello", isFinal: true
+            utteranceID: id, source: .english, target: .zhHans, text: "hello", isFinal: true
         )
+
         let update = try #require(pipeline.accept(job: job, text: "你好"))
-        #expect(update.utteranceID == canonical)
+        #expect(update.utteranceID == id)
         #expect(update.job == job)
-    }
-
-    @Test("Stale comparisons follow the alias to the canonical utterance")
-    func aliasSharesStaleState() {
-        let (pipeline, _) = makePipeline(.dropShorterAny)
-        let raw = UUID()
-        let canonical = UUID()
-        pipeline.registerAlias(raw, to: canonical)
-
-        let long = TranslationJob(
-            utteranceID: raw, source: .english, target: .zhHans, text: "hello world", isFinal: false
-        )
-        #expect(pipeline.accept(job: long, text: "你好世界") != nil)
-
-        let shorter = TranslationJob(
-            utteranceID: canonical, source: .english, target: .zhHans, text: "hello", isFinal: true
-        )
-        #expect(pipeline.accept(job: shorter, text: "你好") == nil)
     }
 
     @Test("reset cancels the debounce and clears the outbound job and sent text")
@@ -404,31 +384,20 @@ struct TranslationPipelineTests {
         #expect(pipeline.outboundJob?.text == "你好。")
     }
 
-    @Test("reset clears stale counts and aliases")
-    func resetClearsStaleStateAndAliases() {
+    @Test("reset clears stale counts")
+    func resetClearsStaleCounts() {
         let (pipeline, _) = makePipeline(.dropShorterAny)
-        let canonical = UUID()
-        let raw = UUID()
-        pipeline.registerAlias(raw, to: canonical)
-
+        let id = UUID()
         let long = TranslationJob(
-            utteranceID: canonical, source: .english, target: .zhHans, text: "hello world", isFinal: true
+            utteranceID: id, source: .english, target: .zhHans, text: "hello world", isFinal: true
         )
         #expect(pipeline.accept(job: long, text: "你好世界") != nil)
 
         pipeline.reset()
 
         let shorter = TranslationJob(
-            utteranceID: canonical, source: .english, target: .zhHans, text: "hello", isFinal: true
+            utteranceID: id, source: .english, target: .zhHans, text: "hello", isFinal: true
         )
         #expect(pipeline.accept(job: shorter, text: "你好") != nil)
-
-        pipeline.reset()
-
-        let rawJob = TranslationJob(
-            utteranceID: raw, source: .english, target: .zhHans, text: "hey", isFinal: true
-        )
-        let update = pipeline.accept(job: rawJob, text: "嘿")
-        #expect(update?.utteranceID == raw)
     }
 }

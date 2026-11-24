@@ -607,6 +607,92 @@ struct CaptionProjectionModuleTests {
         #expect(projection.transcript.count == 1)
     }
 
+    @Test("A short new final after a long final keeps its own source text")
+    func shortNewFinalAfterLongFinalKeepsText() {
+        var projection = makeProjection()
+        let longID = UUID()
+        let longText = "The translation pipeline, the speech session gate, the storage degradation policy, and the accessibility audit in considerable detail."
+        _ = projection.ingest(
+            makeUtterance(id: longID, text: longText, isFinal: true),
+            pane: .user,
+            speaker: .peer
+        )
+        let shortID = UUID()
+        _ = projection.ingest(
+            makeUtterance(id: shortID, text: "And"),
+            pane: .user,
+            speaker: .peer
+        )
+        _ = projection.ingest(
+            makeUtterance(id: shortID, text: "And the team"),
+            pane: .user,
+            speaker: .peer
+        )
+        let shortText = "And the team agreed to revisit the remaining items next week."
+        let applied = projection.ingest(
+            makeUtterance(id: shortID, text: shortText, isFinal: true),
+            pane: .user,
+            speaker: .peer
+        )
+
+        #expect(applied?.id == shortID)
+        #expect(applied?.sourceText == shortText)
+        #expect(projection.pane(.user).history.map(\.id) == [longID])
+    }
+
+    @Test("A comparable revision on a new id keeps its own source")
+    func comparableRevisionOnNewIDKeepsItsSource() {
+        var projection = makeProjection()
+        let firstID = UUID()
+        let secondID = UUID()
+        _ = projection.ingest(
+            makeUtterance(
+                id: firstID,
+                text: "Well we missed a movie called Lucky",
+                isFinal: true
+            ),
+            pane: .user,
+            speaker: .peer
+        )
+
+        let applied = projection.ingest(
+            makeUtterance(
+                id: secondID,
+                text: "Okay we missed a film called Lucky Day it",
+                isFinal: true
+            ),
+            pane: .user,
+            speaker: .peer
+        )
+
+        #expect(applied?.id == secondID)
+        #expect(applied?.sourceText.contains("Lucky Day") == true)
+        #expect(projection.pane(.user).live?.sourceText.contains("Lucky Day") == true)
+        #expect(projection.pane(.user).history.map(\.id) == [firstID])
+    }
+
+    @Test("A distinct greeting on a new id starts a new line")
+    func distinctGreetingWithNewIDStartsNewLine() {
+        var projection = makeProjection()
+        let firstID = UUID()
+        let secondID = UUID()
+        _ = projection.ingest(
+            makeUtterance(id: firstID, text: "Hi Jack"),
+            pane: .user,
+            speaker: .peer
+        )
+
+        let applied = projection.ingest(
+            makeUtterance(id: secondID, text: "Hi Lucy"),
+            pane: .user,
+            speaker: .peer
+        )
+
+        #expect(applied?.id == secondID)
+        #expect(projection.pane(.user).history.map(\.id) == [firstID])
+        #expect(projection.pane(.user).live?.id == secondID)
+    }
+
     @Test("Re-ingesting the same id keeps its existing translation")
     func ingestKeepsExistingTranslation() {
         var projection = makeProjection()
