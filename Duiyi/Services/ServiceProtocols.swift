@@ -57,9 +57,3 @@ enum PermissionStatus: Equatable, Sendable {
 protocol TranslationAvailabilityChecking: Sendable {
     func pairStatus(from: AppLanguage, to: AppLanguage) async -> TranslationPairStatus
 }
-
-enum TranslationPairStatus: Equatable, Sendable {
-    case installed
-    case supported
-    case unsupported
-}

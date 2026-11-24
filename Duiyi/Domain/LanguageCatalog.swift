@@ -1,5 +1,11 @@
 import Foundation
 
+enum TranslationPairStatus: Equatable, Sendable {
+    case installed
+    case supported
+    case unsupported
+}
+
 struct LanguageCapability: Sendable, Equatable {
     var speechLocale: String
     var translation: Locale.Language

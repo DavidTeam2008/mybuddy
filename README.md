@@ -36,6 +36,16 @@ Open Duiyi.xcodeproj in Xcode, or use xcodebuild:
 
 For device builds, set your own Team and a unique Bundle ID. The old repository's Makefile and harness gates are not part of this repository.
 
+For agent or CI runs, use the wrappers. They select and boot a simulator, parse the xcresult summary, print logical and expanded counts, and treat skips as failures except the known simulator speech skip:
+
+    tools/test-unit.sh
+    tools/test-ui.sh
+
+Fast static checks, plus the optional committed pre-commit hook:
+
+    tools/check-static.sh
+    tools/install-hooks.sh
+
 ## Structure
 
     Duiyi/
