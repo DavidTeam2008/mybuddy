@@ -20,11 +20,11 @@ final class MeetingViewModel {
     var sourceLanguage: AppLanguage
     var recognizesMultipleLanguages: Bool
     var fontSize: CaptionFontSize
-    var pane = PaneState.empty
+    var pane: PaneState { projection.pane(.user) }
     var isSettingsPresented = false
     var isSummaryPresented = false
     var holdScreenAfterPause = false
-    var transcript: [TranscriptEntry] = []
+    var transcript: [TranscriptEntry] { projection.transcript }
     var summary: ConversationSummary?
     var summaryError: String?
     var summaryAvailability: SummaryAvailability = .unavailable
@@ -41,7 +41,7 @@ final class MeetingViewModel {
 
     private var speechTask: Task<Void, Never>?
     private var idleRestoreTask: Task<Void, Never>?
-    private var utteranceAliases: [UUID: UUID] = [:]
+    private var projection = CaptionProjection(policy: .meeting)
     private let idleRestoreDelay: Duration
 
     init(
@@ -250,7 +250,7 @@ final class MeetingViewModel {
         stateOverride = nil
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
-        pane.speakingHint = nil
+        projection.setSpeakingHint(nil, pane: .user)
         switch outcome {
         case let .ended(session):
             resetCaptions()
@@ -295,7 +295,7 @@ final class MeetingViewModel {
             stateOverride = nil
         }
         await lifecycle.pauseListening()
-        pane.speakingHint = nil
+        projection.setSpeakingHint(nil, pane: .user)
         if wasListening {
             if restoreIdleTimerAfterDelay {
                 holdScreenAfterPause = true
@@ -312,16 +312,14 @@ final class MeetingViewModel {
     /// data, cumulative 2万字 counter, and task/listening state stay intact.
     func clearDisplay() async {
         await lifecycle.flush()
-        pane.resetCaptions()
+        projection.clearDisplay()
         isSummaryPresented = false
         isExportThenContinuePending = false
     }
 
     /// Full caption reset, reserved for starting or ending a task.
     func resetCaptions() {
-        pane.resetCaptions()
-        transcript = []
-        utteranceAliases.removeAll()
+        projection.reset()
         summary = nil
         summaryError = nil
         isLengthLimited = false
@@ -380,49 +378,27 @@ final class MeetingViewModel {
             return
         }
 
-        if utterance.isFinal {
-            pane.speakingHint = nil
-        } else {
-            pane.speakingHint = Copy.speaking(for: spoken)
-        }
-
-        let existing = pane.live
-        let captionID: UUID
-        if let existing, existing.source == spoken,
-           SpokenText.isDistinctGreeting(
-            incomingSource: text,
-            incomingDisplay: text,
-            previousSource: existing.sourceText,
-            previousDisplay: existing.displayText
-           ) {
-            captionID = UUID()
-            utteranceAliases[utterance.id] = captionID
-        } else if let existing, existing.source == spoken,
-                  SpokenText.isContinuation(text, of: existing.sourceText, language: existing.source)
-                    || SpokenText.isRefinement(text, of: existing.sourceText) {
-            captionID = existing.id
-            utteranceAliases[utterance.id] = existing.id
-        } else {
-            captionID = utterance.id
-        }
-
-        let line = CaptionLine(
-            id: captionID,
-            side: .user,
-            source: spoken,
-            sourceText: text,
-            translatedText: "",
-            phase: utterance.isFinal ? .settled : .streaming
+        projection.setSpeakingHint(
+            utterance.isFinal ? nil : Copy.speaking(for: spoken),
+            pane: .user
         )
-        let applied = pane.applyLive(line)
-        upsertTranscript(line: applied)
-        if applied.phase == .settled {
-            lifecycle.persist(transcript)
-            if transcriptCharacterCount() >= MeetingLayout.transcriptCharacterLimit {
-                isLengthLimited = true
-                Task { [weak self] in
-                    await self?.stop(restoreIdleTimerAfterDelay: false)
-                }
+
+        let normalized = Utterance(
+            id: utterance.id,
+            language: spoken,
+            text: text,
+            isFinal: utterance.isFinal,
+            createdAt: utterance.createdAt
+        )
+        guard let line = projection.ingest(normalized, pane: .user, speaker: .user) else {
+            return
+        }
+        guard line.phase == .settled else { return }
+        lifecycle.persist(projection.transcript)
+        if projection.transcriptCharacterCount >= MeetingLayout.transcriptCharacterLimit {
+            isLengthLimited = true
+            Task { [weak self] in
+                await self?.stop(restoreIdleTimerAfterDelay: false)
             }
         }
     }
@@ -487,22 +463,9 @@ final class MeetingViewModel {
     private func applyRestored(_ session: TaskSession) {
         sourceLanguage = session.sourceLanguage
         recognizesMultipleLanguages = Self.isMultilingualTitle(session.title)
-        transcript = session.entries
+        projection.restore(session.entries)
         summary = session.summary
-        isLengthLimited = transcriptCharacterCount() >= MeetingLayout.transcriptCharacterLimit
-        pane = .empty
-        for entry in session.entries {
-            pane.history.append(
-                CaptionLine(
-                    id: entry.id,
-                    side: .user,
-                    source: entry.source,
-                    sourceText: entry.sourceText,
-                    translatedText: entry.translatedText,
-                    phase: .settled
-                )
-            )
-        }
+        isLengthLimited = projection.transcriptCharacterCount >= MeetingLayout.transcriptCharacterLimit
         resumePromptText = Copy.continueTask(session.title, for: displayLanguage)
     }
 
@@ -513,42 +476,9 @@ final class MeetingViewModel {
         AppLanguage.allCases.contains { title.contains(Copy.meetingMultilingual(for: $0)) }
     }
 
-    private func upsertTranscript(line: CaptionLine) {
-        if let index = transcript.firstIndex(where: { $0.id == line.id }) {
-            transcript[index].source = line.source
-            transcript[index].sourceText = SpokenText.preferredSource(transcript[index].sourceText, line.sourceText)
-            transcript[index].isFinal = line.phase == .settled
-            return
-        }
-        if let last = transcript.last,
-           last.source == line.source,
-           SpokenText.isContinuation(line.sourceText, of: last.sourceText, language: line.source)
-            || SpokenText.isRefinement(line.sourceText, of: last.sourceText) {
-            var updated = last
-            updated.sourceText = SpokenText.preferredSource(last.sourceText, line.sourceText)
-            updated.isFinal = line.phase == .settled
-            transcript[transcript.count - 1] = updated
-            return
-        }
-        transcript.append(
-            TranscriptEntry(
-                id: line.id,
-                speaker: .user,
-                source: line.source,
-                sourceText: line.sourceText,
-                translatedText: line.translatedText,
-                isFinal: line.phase == .settled
-            )
-        )
-    }
-
-    private func transcriptCharacterCount() -> Int {
-        transcript.reduce(0) { $0 + $1.sourceText.count }
-    }
-
     private func pauseRecognitionForLanguageChange() {
-        pane.archiveLive()
-        pane.speakingHint = nil
+        projection.archiveLive(pane: .user)
+        projection.setSpeakingHint(nil, pane: .user)
         if sessionState == .listening || sessionState == .paused {
             stateOverride = .ready
         }
@@ -569,7 +499,7 @@ final class MeetingViewModel {
         guard interrupted else { return }
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
-        pane.speakingHint = nil
+        projection.setSpeakingHint(nil, pane: .user)
     }
 
     private func scheduleIdleRestore() {
