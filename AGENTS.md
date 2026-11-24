@@ -22,3 +22,7 @@ Five canonical triage roles, each label string equal to its role name: `needs-tr
 ### Domain docs
 
 Single-context: `GLOSSARY.md` at the repo root and the D-series decision record in `docs/decisions.md`. See `docs/agents/domain.md`.
+
+### Device testing
+
+Physical iPhone builds, signing, UI automation, and acoustic smoke: see `docs/agents/device-testing.md`.
