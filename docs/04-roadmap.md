@@ -19,6 +19,7 @@
 | 语言切换清态 | 已修复；当前实现与回归覆盖见 Conversation/Interpretation ViewModel 测试 |
 | 语言目录实查 | 生产注入 `SystemLanguageCatalog`（探针缓存）；当前仅首页设置消费，v1 扩展到所有语言入口 |
 | Wave 1 数据完整性 | 已合并到 `wave-1-data-integrity`（#2–#12，tip `fd820e4`）：TaskStoreV2、SpeechSessionGate、TaskLifecycle、显性存储降级、清屏/50 条/2 万字语义。iPhone 13 真机清单未验证 |
+| P1-1 翻译队列积压 | 自动化实现完成（#22–#25）；真机延迟/TTS/切向验收待 #26 |
 | 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
 
 ### Wave 1 测试调整说明（2026-11-23）
@@ -104,13 +105,22 @@
 
 ## 2. P1：识别/翻译质量与数据一致性
 
-### P1-1 翻译队列积压
+### P1-1 翻译队列积压（自动化实现完成，待真机验证）
 
-**现象**：`TranslationJobBridge.pending` 只有 1 个槽位，但 host 就绪后 `AsyncStream` 无界；高频 volatile 会排队。`TranslationPipeline.accept` 用 `lastAppliedSourceCount` 丢弃过期结果，但积压仍占 session、抬高延迟。同传 voiceOut 档防抖更激进（25/50 ms）。
+**状态**：自动化实现已完成并合并（#22–#25）：bridge 改为 per-`utteranceID` 合并队列 + final 优先 + generation-scoped consumer；pump 一次唤醒 drain 到空并处理取消/requeue。单测覆盖合并、顺序、final 优先级、pre-pump wakeup、generation、drain/取消。**真机验证未执行**，按 #26 清单验收后再关闭 #21。
 
-**目标**：Bridge 改为“每个 utteranceID 只保留最新 job”；`pump` 取最新后清空同 ID 积压；必要时按 session 繁忙度自适应防抖。
+**原现象（P1-1 前，保留历史）**：`TranslationJobBridge` 只有 1 个 pending 槽位，但 host 就绪后 `AsyncStream` 无界；高频 volatile 会排队。`TranslationPipeline.accept` 用 `lastAppliedSourceCount` 丢弃过期结果，但积压仍占 session、抬高延迟。同传 voiceOut 档防抖更激进（25/50 ms）。
 
-**验收**：连续快速说话时，最终译文延迟不随时间增长；无旧 job 在新句之后才返回。
+**已落地**（#22–#24）：
+
+- 同一 `utteranceID` 最多保留一条 pending job，替换保留该 ID 首次出现的位置；不同 ID 保持 FIFO。
+- 已排队 final 不被后续 non-final 覆盖；non-final 可互相覆盖；任何新 final 可覆盖旧 job。
+- Host 未就绪时也按 ID 合并；`makeConsumer()` 在队列非空时立即补一次 wakeup。
+- consumer generation-scoped：旧 `takeNext()` 返回 nil，旧 `onTermination` 不清新 continuation。
+- pump 每次唤醒 `takeNext()` 到空；取消时同 ID 有更新则丢弃，否则 requeue 到队首并退出；取消错误不触发 `onFailure`。
+- 时序不变：40/90 ms、voiceOut 25/50 ms、380 ms TTS settle、1.1 s 静音 final、crosstalk、emit 与单槽 `outboundJob`。
+
+**验收**：模拟器回归 `tools/test-unit.sh` 0 failed / 0 skipped，`tools/test-ui.sh` 仅既有模拟器语音 skip；连续快速说话时最终译文延迟不随会话增长、无旧 job 后到等真机口径**未验证**，按 #26 执行。
 
 ### P1-2 导出竞态与导出内容不刷新（已修复 2026-11-17）
 
@@ -178,7 +188,7 @@
 - **不做外放朗读**：回声自激，产品明确禁止。
 - **不做实时说话人分离**：当前以语种为路由键；声纹/分离只做技术 spike，不承诺 v1。
 - **不在会议记录里做实时同传朗读**：会议目标是全文稿与会后总结。
-- **不为了“实时感”无限提高翻译频率**：先解决 P1-1 的队列问题。
+- **不为了“实时感”无限提高翻译频率**：P1-1 的队列合并已实现（真机待 #26），仍不要用更高翻译频率换实时感。
 - **不做本地 digest 回退总结**（D6）；Apple 智能不可用时不提供总结。
 - **不做历史自动清理**（D5）；**不做整组会议导出**（D7）。
 - **不做六语同等发布承诺 / 繁体中文市场**（D4）；**不做大陆首发**（D2，第二阶段）。
@@ -205,7 +215,7 @@
 | 1 | P0-1 `SpeechSessionGate` + `TaskLifecycle` + 三模块接入 + 测试 | 无 | 已完成 Wave 1（#3/#4/#6–#8） |
 | 2 | P0-3 降级显性化 + 结果化接缝 + 显式 save | 无 | 已完成 Wave 1（#2/#5/#12）；增量落盘、迁移演练仍待后续（3–5 天） |
 | 3 | P0-2 长会话显示窗口 + 计数 | P0-3 已完成部分 | 已完成 Wave 1（#9/#10/#11）；D7 续集任务组仍待后续（1–2 周） |
-| 4 | P1-1 翻译队列合并 | 无 | 未开始（2–3 天） |
+| 4 | P1-1 翻译队列合并 | 无 | 自动化实现完成（#22–#25）；真机验证待 #26 |
 | 5 | P1-4 混读/短句质量 | 真机夹具 | 未开始（1–2 周） |
 
 同一失败检查修复 2 次仍失败，或同一子任务 3 轮修复-验证无进展时停止上报（团队规则）。

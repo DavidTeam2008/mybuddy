@@ -219,7 +219,7 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 翻译 job 的生命周期与 Host 执行分离：
 
 - `TranslationPipeline`（`Duiyi/Features/Shared/TranslationPipeline.swift`，`@MainActor @Observable`）拥有 job 形成、防抖/取消、重复抑制、过期判定、单槽 `outboundJob`，以及 `sentSourceText` / `lastAppliedSourceCount` / utterance aliases。
-- `TranslationHostView` / `OneWayTranslationHostView` 只是 `.translationTask` 的泵适配器：从 ViewModel 取得 `outboundJob`，串行 `session.translate`，成功/失败回调 ViewModel。
+- `TranslationHostView` / `OneWayTranslationHostView` 只是 `.translationTask` 的泵适配器：从 ViewModel 取得 `outboundJob` 后 `submit` 给共享 bridge，`TranslationJobPump` 每次唤醒逐条 `session.translate`，成功/失败回调 ViewModel。
 - 两个 ViewModel 只保留 feature 策略与副作用：Conversation 做语言路由与 crosstalk，并把结果写入两侧 pane/transcript；Interpretation 选目标语言、写单栏 pane/transcript 并调度 TTS。`fulfill` 是薄适配器：`pipeline.accept` 返回 `TranslationUpdate` 后写 UI。
 - `TranslationTrigger`（Domain 纯函数）只回答非 final 文本是否立即发送；final 旁路属于 pipeline。
 - 六语脚本计数与 scalar 判定放在 Domain 的 `ScriptCounts`；`TranslationTrigger` 与 Services 的 `UtteranceAssembler` 都复用它，Domain 不反向依赖 Services。
@@ -244,13 +244,17 @@ TranslationSession.Configuration(
 
 调用方用 `.id("<user>-<peer>")` / `.id("<source>-<target>")` 包住 Host（`ConversationView`、`InterpretationView`、`OnboardingView`），语言对变化时销毁并重建 View，两个 session 和 bridge 一起重建；旧 session 的失败（包括 14/20、`CancellationError`）只清空当前 job，不写入新语言对。`TaskDetailView` 的单向翻译按 `<source>-<utteranceID>` 逐条重建。
 
-### 5.2 TranslationJobBridge
+### 5.2 TranslationJobBridge 与 TranslationJobPump
 
-`NSLock` + `AsyncStream` + **一个 pending 槽位**：
+`TranslationJobBridge`（`@unchecked Sendable` + `NSLock`）是 per-`utteranceID` 合并的 job 队列；`TranslationJobPump`（`Duiyi/Features/Shared/TranslationJobPump.swift`）是 Host 的 drain 循环：
 
-- Host 未就绪（`translationTask` 还没启动）时，只保留最后一个 job。
-- Host 已就绪时直接 `yield` 到无界 `AsyncStream`，由 `pump` 串行 `session.translate`。
-- 因此高频 volatile 在 host 就绪后仍可能排队；过期判定在 `TranslationPipeline.accept`，按各自的 `StalePolicy` 丢弃源字数倒退的译文（P1-1）。
+- **每句合并**：同一 `utteranceID` 最多保留一条 pending job；替换时保留该 ID 首次出现的位置，不同 ID 之间保持 FIFO。
+- **final 优先**：已排队的 final 不会被后续 non-final 覆盖；non-final 可被新的 non-final 覆盖；任何新 final 可覆盖旧 job（final 被更新 final 取代）。
+- **Host 未就绪**：不设“单槽”特殊模式，未安装 consumer 时同样按 ID 合并；`makeConsumer()` 安装时若队列非空立即产生一次 wakeup，历史详情逐条翻译不会因为 `onAppear` 先于 `.translationTask` 而卡住。
+- **generation-scoped consumer**：`Consumer` 暴露 `wakeups`（`.bufferingNewest(1)` 的 `AsyncStream<Void>`）与 `takeNext()` / `requeue(_:)`。只有最新 generation 能取 job；旧 generation 的 `takeNext()` 返回 nil，旧 `onTermination` 不清新 continuation。`yield` / `finish` 在锁外执行，`submit` 多次可合并为一次唤醒。
+- **pump drain 与取消**：`for await` 每次 wakeup 后循环 `takeNext()` 直到空（一次唤醒 drain 多条，不按 submit 次数排队）。每取一条先检查任务取消；已取消时若有同 ID 更新则丢弃该 job，否则 `requeue` 到队首并退出。正常 in-flight 翻译不主动取消，结果仍经 `TranslationPipeline.accept` 由 `StalePolicy` 判定；`Task.isCancelled` / `CancellationError` 不调用 `onFailure`，真实错误仍走 `onFailure`；空白文本跳过。
+- **时序保持**：40/90 ms、voiceOut 25/50 ms、380 ms TTS settle、1.1 s 静音 final、crosstalk、emit 顺序与单槽 `outboundJob` 均不变。
+- **测试接缝**：bridge 接口同步验证合并、顺序、final 优先级、pre-pump wakeup 与 generation；pump 通过注入 `translate` / `onSuccess` / `onFailure` 验证 drain、取消、requeue 与 in-flight 完成。生产路径用 `TranslationSession.translate` 适配，不新增 session 替身。
 
 ### 5.3 TranslationPipeline
 
@@ -407,7 +411,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 | `LanguageRouter` / `UtteranceAssembler` / `SpokenText` / `ClauseSplitter` / `ScriptCounts` | `Sendable` 值语义 / 无状态纯函数 | 可重入、可单测 |
 | `SystemSpeechSynthesizer` | `@MainActor` + delegate | AVSpeechSynthesizer 代理回调 |
 | `TranslationPipeline` | `@MainActor` + `@Observable` | 翻译 job 生命周期与 UI 状态 |
-| `TranslationJobBridge` | `@unchecked Sendable` + `NSLock` | 跨 View 任务与流 |
+| `TranslationJobBridge` | `@unchecked Sendable` + `NSLock` | 跨 View 任务队列与 consumer 唤醒流 |
 
 `SendablePCMBuffer` 用 `@unchecked Sendable` 包装 `AVAudioPCMBuffer`，跨 actor 传递，责任在音频层。
 
@@ -419,6 +423,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 | --- | --- | --- |
 | Domain 纯逻辑 | 路由、assembler、spoken 合并、clause、翻译触发阈值、任务映射 | `DuiyiTests`（Swift Testing） |
 | 翻译管线 | job 形成、防抖/取消、重复抑制、两种过期策略、单槽 `outboundJob`、别名、`reset` | `DuiyiTests`（`TranslationPipelineTests`） |
+| 翻译 job bridge / pump | per-`utteranceID` 合并、final 优先、pre-pump wakeup、generation、drain/取消/requeue | `DuiyiTests`（`TranslationJobBridgeTests`、`TranslationJobPumpTests`） |
 | ViewModel / 生命周期 | 三模块状态机、pipeline 接线、清屏、任务恢复、TTS 队列、`TaskLifecycle`/`SpeechSessionGate` 接缝 | `DuiyiTests` |
 | 音频策略 | 路由快照/回声判定 | `DuiyiTests` |
 | UI | 冷启动、首页导航、同传听写压力、滑动返回 | `DuiyiUITests`（XCTest，4 个用例） |

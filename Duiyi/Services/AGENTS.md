@@ -14,7 +14,8 @@
 ## 2. 翻译：Session 只在 Host View
 
 - `TranslationSession` 只能出现在 `*TranslationHostView` 的 `.translationTask`：`Features/Shared/TranslationHostView.swift`（含 `OneWayTranslationHostView`）。Services 不持有、不调用 `TranslationSession`。
-- `TranslationJobBridge` 只负责单 pending 槽与 host 就绪后的无界流；job 形成、防抖、过期丢弃在 `Features/Shared/TranslationPipeline`，bridge 不做每句合并。P1-1 前不扩大缓冲、不改队列语义。
+- `TranslationJobBridge` 是共享 Host 模块的 per-`utteranceID` 合并队列：同一句最多保留一条 pending，替换保留首次位置；已排队 final 不被新 non-final 覆盖，任何新 final 可覆盖旧 job。consumer 是 generation-scoped（`wakeups` + `takeNext()` / `requeue(_:)`）；Host 未就绪时同样按 ID 合并，安装 consumer 时队列非空立即补 wakeup。job 形成、防抖与过期丢弃仍在 `Features/Shared/TranslationPipeline`，bridge 不复制这些策略。
+- `TranslationJobPump`（`Features/Shared/TranslationJobPump.swift`）是 Host 的 drain 循环：一次唤醒 `takeNext()` 到空；取消时同 ID 有更新就丢弃，否则 `requeue` 到队首并退出，取消错误不算失败。测试注入 `translate` / `onSuccess` / `onFailure`，不要 mock `TranslationSession`。
 - 语言对变化由 `.id` 重建 Host；Service 只提供 availability（`TranslationAvailabilityChecking`）。
 
 ## 3. 持久化：结果化接缝、内存为准
