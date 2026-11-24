@@ -41,6 +41,8 @@ For agent or CI runs, use the wrappers. They select and boot a simulator, parse 
     tools/test-unit.sh
     tools/test-ui.sh
 
+Physical iPhone verification (signing, UI automation, acoustic smoke) is documented in `docs/agents/device-testing.md`.
+
 Fast static checks, plus the optional committed pre-commit hook:
 
     tools/check-static.sh
