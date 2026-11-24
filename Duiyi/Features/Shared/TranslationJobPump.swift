@@ -15,6 +15,10 @@ struct TranslationJobPump {
     func run(_ consumer: TranslationJobBridge.Consumer) async {
         for await _ in consumer.wakeups {
             while let job = consumer.takeNext() {
+                if Task.isCancelled {
+                    consumer.requeue(job)
+                    return
+                }
                 let text = job.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { continue }
                 do {

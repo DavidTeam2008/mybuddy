@@ -165,6 +165,56 @@ struct TranslationJobPumpTests {
         #expect(recorder.failures.isEmpty)
     }
 
+    @Test("Cancellation between jobs requeues the remaining job and exits")
+    func cancellationBetweenJobsRequeuesRemaining() async {
+        let recorder = PumpRecorder()
+        let bridge = TranslationJobBridge()
+        let first = TranslationJob(
+            utteranceID: UUID(),
+            source: .english,
+            target: .zhHans,
+            text: "first",
+            isFinal: true
+        )
+        let second = TranslationJob(
+            utteranceID: UUID(),
+            source: .english,
+            target: .zhHans,
+            text: "second",
+            isFinal: true
+        )
+        bridge.submit(first)
+        bridge.submit(second)
+
+        let task = Task { @MainActor in
+            let pump = TranslationJobPump(
+                translate: { @Sendable text in
+                    recorder.record(translated: text)
+                    return text.uppercased()
+                },
+                onSuccess: { job, text in
+                    recorder.record(success: job, text: text)
+                    if recorder.successes.count == 1 {
+                        withUnsafeCurrentTask { $0?.cancel() }
+                    }
+                },
+                onFailure: { job, error in
+                    recorder.record(failure: job, error: error)
+                }
+            )
+            await pump.run(bridge.makeConsumer())
+        }
+        await task.value
+
+        #expect(recorder.translatedTexts == ["first"])
+        #expect(recorder.successes.map(\.job) == [first])
+        #expect(recorder.failures.isEmpty)
+
+        let nextConsumer = bridge.makeConsumer()
+        #expect(nextConsumer.takeNext() == second)
+        #expect(nextConsumer.takeNext() == nil)
+    }
+
     @Test("A failed translation is reported through onFailure and not onSuccess")
     func translationFailureIsReported() async {
         let recorder = PumpRecorder()
