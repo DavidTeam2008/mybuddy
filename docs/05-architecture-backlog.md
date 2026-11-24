@@ -32,7 +32,7 @@
 
 | # | 候选 | 状态 | 建议强度 | 证据 / 剩余摩擦 | 04 映射 |
 | --- | --- | --- | --- | --- | --- |
-| C04 | 字幕/文字稿投影有 4 份实现 | 部分 | 强·合并 | 50 条上限导致的 transcript 丢失已修；跨 utterance id 的短句误合并已修（2026-11-24，含 PaneState/三模块语音流回归）；但 `PaneState.history` 仍可变；仍有 3 处 `upsertTranscript`（Conversation/Interpretation/Meeting），且各 VM 恢复时各自重新投影。 | Wave 3 — 已覆盖 |
+| C04 | 字幕/文字稿投影有 4 份实现 | 部分 | 强·合并 | 50 条上限导致的 transcript 丢失已修；跨 utterance id 的短句误合并已修（2026-11-24，含 PaneState/三模块语音流回归）；spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27) / D8 已确认（identity=A、单一 record store、子票 #28–#32），代码未开始；但 `PaneState.history` 仍可变；仍有 3 处 `upsertTranscript`（Conversation/Interpretation/Meeting），且各 VM 恢复时各自重新投影。 | Wave 3 — 已覆盖 |
 | C06 | 能力门禁与资产准备没有 module | 未做 | 强·合并 | 仅 `HomeSettingsSheet` 消费 `unavailableLanguages`；5 条 `speechModels.prepare` 流程（Home/Onboarding/Conversation/Interpretation/Meeting）；无 gate module。 | P2-6 + P3-3 — 部分覆盖 |
 | C08 | 总结用例没有 module | 未做 | 强·合并 | 4 条独立 summarize 路径（3 个 VM + `TaskDetailViewModel`）；2 处可用性横幅。 | P3-3（4 个总结）— 部分覆盖 |
 | C09 | 组合根有两个组装点 | 未做 | 值得探索·合并 | `AppEnvironment` 仍有 12 个 let；`RootView.make*` + route switch；VM 默认使用 `InMemoryTaskStore`。 | 不在列表 |
@@ -65,7 +65,7 @@
 - **部分覆盖（4）**：C06（P2-6 / P3-3）、C08（P3-3）、C16（P2-4）、C17（P2-3）。
 - **已覆盖（1）**：C04（Wave 3）。
 
-注意：覆盖状态只说明 `04-roadmap.md` 是否已有对应条目，与代码完成状态是两个维度。C04 已在 `04` 立项为 Wave 3，但代码上仍是“部分完成”；其余 7 项尚未进入 `04` 待办。
+注意：覆盖状态只说明 `04-roadmap.md` 是否已有对应条目，与代码完成状态是两个维度。C04 已在 `04` 立项为 Wave 3，spec #27 / D8 已确认，但代码上仍是“部分完成”；其余 7 项尚未进入 `04` 待办。
 
 ---
 

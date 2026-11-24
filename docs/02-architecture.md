@@ -286,6 +286,8 @@ TranslationSession.Configuration(
 
 ## 6. 三个 Feature 的流水线
 
+> C04 计划（spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27)，D8）：用单一 `CaptionProjection` record store 取代 `PaneState.applyLive` / 三份 `upsertTranscript` / 跨 ID 文本合并。以下 §6.1–§6.3 描述 C04 前的现状；C04e 完成后再改写流程图。
+
 ### 6.1 面对面
 
 ```

@@ -3,7 +3,7 @@
 > 本文是**当前**的工程待办与风险清单，替代早期的 04/08/12 路线图与 13 的问题清单。
 > 架构见 [`02-architecture.md`](02-architecture.md)，选型见 [`03-tech-choices.md`](03-tech-choices.md)。
 > 每条都尽量给出代码依据；行号会漂移，以类型/函数名为准。
-> **真源声明**：本文件的 P0/P1 验收判据与排期是唯一真源；[`decisions.md`](decisions.md) 的 D1–D7 / D-B* / D-AI* 只是决策记录，不影响排期判定；
+> **真源声明**：本文件的 P0/P1 验收判据与排期是唯一真源；[`decisions.md`](decisions.md) 的 D1–D8 / D-B* / D-AI* 只是决策记录，不影响排期判定；
 > 所有待确认决策统一见 [`decisions.md`](decisions.md)（本文件 §7 只保留指针）。
 
 ## 0. 状态
@@ -20,7 +20,7 @@
 | 语言目录实查 | 生产注入 `SystemLanguageCatalog`（探针缓存）；当前仅首页设置消费，v1 扩展到所有语言入口 |
 | Wave 1 数据完整性 | 已合并到 `wave-1-data-integrity`（#2–#12，tip `fd820e4`）：TaskStoreV2、SpeechSessionGate、TaskLifecycle、显性存储降级、清屏/50 条/2 万字语义。iPhone 13 真机清单未验证 |
 | P1-1 翻译队列积压 | 已完成（#22–#25，main `37f0a50`）；真机验证 2026-11-24 通过（用户确认）；#21/#26 已关闭 |
-| Wave 3 C04 字幕/文字稿投影 | 部分修复（跨 utterance id 短句误合并已修）；完整 module 未开始；候选台账见 [05-architecture-backlog.md](05-architecture-backlog.md) |
+| Wave 3 C04 字幕/文字稿投影 | 部分修复（跨 utterance id 短句误合并已修）；spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27) 与 D8 已确认，代码未开始；候选台账见 [05-architecture-backlog.md](05-architecture-backlog.md) |
 | 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
 
 ### Wave 1 测试调整说明（2026-11-23）
@@ -160,7 +160,7 @@
 
 **验收**：中英混读夹具命中率提升且不增加串音；快速切换说话人不丢整句。
 
-### Wave 3：C04 字幕/文字稿投影（已立项，未开始）
+### Wave 3：C04 字幕/文字稿投影（spec 已确认，代码未开始）
 
 **来源**：2026-11-23 架构审查候选 C04；完整台账见 [`05-architecture-backlog.md`](05-architecture-backlog.md)。
 
@@ -170,7 +170,7 @@
 
 **验收**：现有三模块字幕/恢复/清屏/导出测试保持通过；新增投影 module 的边界测试；真机回归字幕窗口、恢复、清屏与导出。范围与拆分在立项时另写 spec，不直接复用现场字幕状态机。
 
-**进展**：2026-11-24 已修跨 utterance id 的短句投影丢失，并补 PaneState / 面对面 / 同传 / 会议语音流回归；完整 projection module 与 3 处 `upsertTranscript` 收敛仍未开始。
+**进展**：2026-11-24 已修跨 utterance id 的短句投影丢失，并补 PaneState / 面对面 / 同传 / 会议语音流回归；spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27) 与 D8 已确认，子票 #28–#32；完整 projection module 与 3 处 `upsertTranscript` 收敛仍未开始。
 
 ---
 
@@ -221,7 +221,7 @@
 
 ## 6. 建议排期
 
-> 本节是排期的唯一真源；[`decisions.md`](decisions.md) 的 D1–D7 已于 2026-11-23 确认，本表按同一顺序导航，不重复预估。
+> 本节是排期的唯一真源；[`decisions.md`](decisions.md) 的 D1–D7 已于 2026-11-23 确认，D8 于 2026-11-24 补充，本表按同一顺序导航，不重复预估。
 > 架构候选台账见 [05-architecture-backlog.md](05-architecture-backlog.md)。
 
 | 顺序 | 事项 | 依赖 | 状态 / 预估 |
@@ -231,7 +231,7 @@
 | 3 | P0-2 长会话显示窗口 + 计数 | P0-3 已完成部分 | 已完成 Wave 1（#9/#10/#11）；D7 续集任务组仍待后续（1–2 周） |
 | 4 | P1-1 翻译队列合并 | 无 | 已完成（#22–#25，main `37f0a50`）；真机验证 2026-11-24 通过（用户确认） |
 | 5 | P1-4 混读/短句质量 | 真机夹具 | 未开始（1–2 周） |
-| 6 | Wave 3 C04 字幕/文字稿投影 | 无（建议 P1-4 后） | 部分修复；完整 module 未开始（架构 wave） |
+| 6 | Wave 3 C04 字幕/文字稿投影 | 无（建议 P1-4 后） | 部分修复；spec #27 已确认，代码未开始（架构 wave） |
 
 同一失败检查修复 2 次仍失败，或同一子任务 3 轮修复-验证无进展时停止上报（团队规则）。
 
@@ -239,5 +239,5 @@
 
 ## 7. 交接前需要确认的产品/工程决策
 
-决策已合并到 [`decisions.md`](decisions.md) 的 **D1–D7**（唯一真源，2026-11-23 已确认）；
+决策已合并到 [`decisions.md`](decisions.md) 的 **D1–D8**（唯一真源，D8 于 2026-11-24 补充）；
 本文件不再保留重复列表，只在此留指针。P0-2/P0-3 的产品侧行为按 D5–D7 与「v1 冻结口径」实现。

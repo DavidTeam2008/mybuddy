@@ -2,9 +2,9 @@
 
 > **唯一决策表**：其他文档只引用 D 编号，不复制内容。确认后更新本表并标注日期；未确认前不按假设实现。
 > 排期与验收见 [`04-roadmap.md`](04-roadmap.md)；工程论证见相关案例文档，不在此复述。
-> 状态：**D1–D7 已于 2026-11-23 确认**；D1–D7 之外的产品口径见文末「v1 冻结口径」。
+> 状态：**D1–D7 已于 2026-11-23 确认；D8 已于 2026-11-24 确认**；D1–D8 之外的产品口径见文末「v1 冻结口径」。
 
-## D1–D7（产品 / 工程，状态：已确认 2026-11-23）
+## D1–D8（产品 / 工程，状态：已确认 2026-11-23；D8 于 2026-11-24 确认）
 
 | ID | 决策点 | 当前事实 / 已实现 | 已确认决策 | 验收影响 |
 | --- | --- | --- | --- | --- |
@@ -15,10 +15,11 @@
 | D5 | 数据保留策略 | 历史默认永久保留；同传 `historyLimit=50` 同时截断 pane 与 transcript；会议 2 万字硬停；无自动清理 | **历史永久保留，v1 不做自动清理**；同传 50 条仅显示窗口，任务文字稿保存全部已 settled 行，导出取全量；v1 修复「50 条同时截断 transcript」的缺陷（P0-2） | 1 小时模拟文字稿内存稳定；结束后历史能读回全部行；同传不因显示窗口丢早期 settled 行 |
 | D6 | Apple 智能范围 | 代码只在 `availability == .available` 时调用 summarizer；不可用时无总结、无 digest；可用但失败时 digest 可能被误标为 Apple 智能生成 | **总结仅在 Apple Intelligence 可用时提供**；不可用三态（`deviceNotEligible` / `appleIntelligenceOff` / `modelNotReady`）只说明原因，仍可导出；生成失败/空结果说明本次暂不可用，不展示 digest、不冒充 AI；iPhone 13 无总结但可导出；Apple 智能只用于总结；删除 01/03 的 digest 回退表述 | iPhone 13 明确「本机不支持总结」；任何非 AI 结果不得显示「由 Apple 智能生成」 |
 | D7 | 长会策略 | 会议 2 万字符按内存 transcript 累计；达到上限停听并标记 `isLengthLimited`；清屏会复位计数；无续集关联 | **2 万字是分段边界，不是产品上限**；v1 实现「结束并继续」，用组 ID 关联续集任务；计数按任务累计（含清屏前内容），清屏不复位；单段导出 + 组内跳转，整组合并导出留 v1.x。该续集关联是 Q1 功能冻结中唯一**新增产品行为**的例外 | 长会不丢内容；续集任务可在历史中组内跳转；达到 2 万后不静默截断 |
+| D8 | 字幕/文字稿的 utterance identity | C04 前：`Utterance.id` 由 `UtteranceAssembler` 维护；投影层仍有跨 ID 文本相似度合并（`PaneState` + 三份 `upsertTranscript` + `TranslationPipeline` alias） | **`Utterance.id` 即 caption 行与 transcript 条目的唯一身份；assembler 独占新 ID 判定；同一 ID 同一行，新 ID 新行；不引入 `continuesFrom` / `groupID`；跨 ID 文本相似度只保留在 assembler 内部；投影 module 用单一有序 record store 派生显示窗口与全量 transcript**（C04 spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27)） | C04 Wave 3；assembler 认不出的修订成为独立行，各自翻译；删除 alias 与跨 ID 合并；行为变更测试按 spec 记录 |
 
 ## v1 冻结口径（非 D 编号）
 
-> 本节只记录 D1–D7 之外、本次冻结的产品口径；涉及 D 的内容只引用编号，不复制。冻结日期：2026-11-23。
+> 本节只记录 D1–D8 之外、本次冻结的产品口径；涉及 D 的内容只引用编号，不复制。冻结日期：2026-11-23。
 
 ### 目标与范围
 
