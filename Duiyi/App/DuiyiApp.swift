@@ -17,10 +17,27 @@ struct DuiyiApp: App {
     var body: some Scene {
         let _ = AppLaunchTracker.shared.beginOnce(.appBody)
         WindowGroup {
-            RootView()
-                .environment(environment)
-                .environment(coordinator)
-                .preferredColorScheme(.dark)
+            rootContent
         }
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-liquidGlassPrototype") {
+            LiquidGlassPrototypeView()
+        } else {
+            mainRoot
+        }
+        #else
+        mainRoot
+        #endif
+    }
+
+    private var mainRoot: some View {
+        RootView()
+            .environment(environment)
+            .environment(coordinator)
+            .preferredColorScheme(.dark)
     }
 }
