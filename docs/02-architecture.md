@@ -286,44 +286,44 @@ TranslationSession.Configuration(
 
 ## 6. 三个 Feature 的流水线
 
-> C04 计划（spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27)，D8）：用单一 `CaptionProjection` record store 取代 `PaneState.applyLive` / 三份 `upsertTranscript` / 跨 ID 文本合并。以下 §6.1–§6.3 描述 C04 前的现状；C04e 完成后再改写流程图。
+> C04（spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27)，D8）已完成代码收敛：字幕/文字稿投影统一为 `Domain/Projection/CaptionProjection` 的单一有序 record store。每行以 `Utterance.id` 为唯一身份；显示窗口（live / history）与全量 transcript 都由 record 派生；清屏移动显示代次而不删 record，`PaneState` 只是派生快照。
 
 ### 6.1 面对面
 
 ```
 Utterance
   → shouldIgnoreCrosstalk（final 后 1s、异语、非自信 → 丢弃）
-  → LanguageRouter.targetSide(detected, userLanguage)
+  → LanguageRouter.targetSide(detected, userLanguage) + routedSideByUtterance pin
   → 确定 listener / speaker
-  → PaneState.applyLive（续句/问候/新句）
-  → upsertTranscript
-  → enqueueTranslation → TranslationPipeline.submit → TranslationHostView
-  → fulfill → TranslationPipeline.accept → PaneState.applyTranslation + transcript
-  → settled 时 TaskLifecycle.persist（250ms 防抖）
+  → projection.ingest(utterance, pane: listener, speaker: speaker)
+  → enqueueTranslation（用返回行）→ TranslationPipeline.submit → TranslationHostView
+  → fulfill → TranslationPipeline.accept → projection.applyTranslation
+  → settled 时 TaskLifecycle.persist(projection.transcript)（250ms 防抖）
 ```
 
 - `routedSideByUtterance` 固定同一句的去向，避免 partial 改语言导致左右跳。
-- `SpokenText.isContinuation` / `isDistinctGreeting` 处理 ASR 修订与「嗨 Jack / 嗨 Lucy」独立问候。
-- 每侧 pane 只保留 `live` + 最多 3 条历史（`ConversationLayout.paneHistoryLimit`）；更早行只进 transcript。恢复任务也只回填每侧最近 3 条，transcript 全量。
-- 暂停/后台 `flush()`；结束任务走 `TaskLifecycle.endTask`（flush + 原子 `TaskStoreV2.end`）；清屏前先 `flush()` 并取消 pending 防抖。
-- 清屏只清显示（两侧 pane、翻译与总结呈现），不停听、不结束任务；transcript、任务数据、历史与导出以全量为准。
+- 身份与文本选择在投影模块内：同一 ID 只有一行；`UtteranceAssembler` 独占新 ID 判定（含 volatile greeting name swap）。
+- 每侧 pane 只保留 `live` + 最多 3 条历史（`CaptionDisplayPolicy.conversation`）；更早行只进 transcript。恢复任务也只回填每侧最近 3 条，transcript 全量。
+- 暂停/后台 `flush()`；结束任务走 `TaskLifecycle.endTask`（flush + 原子 `TaskStoreV2.end`）；清屏前先 `flush()`。
+- 清屏只清显示（`projection.clearDisplay()`），不停听、不结束任务；transcript、任务数据、历史与导出以全量为准。
 
 ### 6.2 同声传译
 
 ```
 Utterance
   → guard utterance.language == sourceLanguage
-  → PaneState.applyLive + transcript
+  → projection.ingest(utterance, pane: .user, speaker: .peer)
   → TranslationPipeline.submit（单向 source→target）
-  → fulfill → TranslationPipeline.accept → 字幕
+  → fulfill → TranslationPipeline.accept → projection.applyTranslation
+       返回行 → 字幕 / TTS；nil（清屏 floor 或 50 条窗口外）→ 只更新 transcript，不朗读
   → settled → ClauseSplitter.consume → TTS 队列
 ```
 
-- `historyLimit = 50` 只裁 `pane.history` 显示与恢复回填（`suffix(50)`）；transcript、落盘与导出全量（Wave 1 #10 已删除同时截断 transcript 的逻辑）。
-- 朗读只接受 final；volatile 分支运行时不可达，v1 删除。`speechSettleDelay = 380 ms` 合并 ASR 尾修。
+- `CaptionDisplayPolicy.interpretation` 的 `historyLimit = 50` 只裁 pane 显示与恢复回填；transcript、落盘与导出全量。
+- 朗读只接受 final；`speechSettleDelay = 380 ms` 合并 ASR 尾修；TTS 直接使用投影返回行的 `translatedText`，不再回查 pane。
 - `pendingJobs` 硬上限 10；超限先丢短确认语，再丢最旧任务；去重使用已读前缀、280 字 `spokenCompactTail` 和队列内 compact 拼接。
 - `speechGeneration` 令牌防止旧朗读任务在暂停/换方向后继续。
-- 方向/语言变化停听、清 live、清队列、重建配置；历史保留。
+- 方向/语言变化停听、`projection.archiveLive(pane: .user)`、清队列、重建配置；历史保留。
 
 ### 6.3 会议记录
 
@@ -332,13 +332,13 @@ MeetingRecognition.languages(multilingual:pinned:display:)
   → start(languages:..., fallback:..., style: .meetingNotes)
   → accept: 非多语时丢弃非 sourceLanguage
   → UtteranceAssembler.resolvedLanguage 给每行定实际语种
-  → PaneState + transcript（无翻译）
-  → settled 时 20,000 字符检查
+  → projection.ingest(..., pane: .user, speaker: .user)（无翻译）
+  → settled 时 20,000 字符检查（projection.transcriptCharacterCount）
 ```
 
 - 多语言：`[display, display.defaultPeer]`；单语：只跑 pinned。
 - 达到字符上限：`isLengthLimited = true` 并自动停听，任务保持进行中；计数按任务累计（含清屏前内容），清屏不复位。D7 的续集任务组（组 ID、「结束并继续」、组内跳转）**不在 Wave 1**，仍是后续 wave；当前只能结束并手动新建。
-- 清屏只清 pane / 总结显示，保留 transcript、`isLengthLimited` 与计数器；清屏后继续记录追加到同一 transcript。
+- 清屏只清 pane / 总结显示（`projection.clearDisplay()`），保留 transcript、`isLengthLimited` 与计数器；清屏后继续记录追加到同一 transcript。
 - 会议详情可逐条单向翻译并 `updateTranslations` 回填，不新增条目。
 
 ---

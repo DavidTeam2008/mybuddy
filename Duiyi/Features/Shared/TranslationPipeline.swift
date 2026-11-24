@@ -20,8 +20,8 @@ struct TranslationSubmission: Equatable, Sendable {
     var subsequentDelay: Duration
 }
 
-/// An accepted translation result. `utteranceID` is resolved through the
-/// pipeline's alias table and is the ID the feature should write to.
+/// An accepted translation result. `utteranceID` is the job's id and is the
+/// identity the feature should write to.
 struct TranslationUpdate: Equatable, Sendable {
     let job: TranslationJob
     let utteranceID: UUID
@@ -87,7 +87,6 @@ final class TranslationPipeline {
     private var scheduled: (any TranslationScheduledTask)?
     private var sentSourceText: [UUID: String] = [:]
     private var lastAppliedSourceCount: [UUID: Int] = [:]
-    private var utteranceAliases: [UUID: UUID] = [:]
 
     init(stalePolicy: StalePolicy) {
         self.stalePolicy = stalePolicy
@@ -139,15 +138,14 @@ final class TranslationPipeline {
         }
     }
 
-    /// Resolves the job's utterance through the alias table and applies the
-    /// stale policy. Empty or stale text returns `nil` without touching the
-    /// outbound slot; an accepted result clears the slot only when it belongs
-    /// to the matching job.
+    /// Applies the stale policy to the job's utterance. Empty or stale text
+    /// returns `nil` without touching the outbound slot; an accepted result
+    /// clears the slot only when it belongs to the matching job.
     func accept(job: TranslationJob, text: String) -> TranslationUpdate? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        let utteranceID = canonicalID(job.utteranceID)
+        let utteranceID = job.utteranceID
         if let applied = lastAppliedSourceCount[utteranceID] {
             let isStale: Bool
             switch stalePolicy {
@@ -186,16 +184,5 @@ final class TranslationPipeline {
         outboundJob = nil
         sentSourceText.removeAll()
         lastAppliedSourceCount.removeAll()
-        utteranceAliases.removeAll()
-    }
-
-    /// Registers a transcript line alias (for example a continuation packet)
-    /// so later results land on the canonical caption ID.
-    func registerAlias(_ alias: UUID, to canonical: UUID) {
-        utteranceAliases[alias] = canonical
-    }
-
-    private func canonicalID(_ id: UUID) -> UUID {
-        utteranceAliases[id] ?? id
     }
 }

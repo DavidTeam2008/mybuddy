@@ -115,23 +115,6 @@ enum SpokenText {
         return true
     }
 
-    static func isDistinctGreeting(
-        incomingSource: String,
-        incomingDisplay: String,
-        previousSource: String,
-        previousDisplay: String
-    ) -> Bool {
-        if covers(incomingSource, of: previousSource) || covers(previousSource, of: incomingSource) {
-            return false
-        }
-        if !incomingDisplay.isEmpty, !previousDisplay.isEmpty,
-           covers(incomingDisplay, of: previousDisplay) || covers(previousDisplay, of: incomingDisplay) {
-            return false
-        }
-        return isNameSwap(incomingSource, of: previousSource)
-            || isNameSwap(incomingDisplay, of: previousDisplay)
-    }
-
     static func joinDistinctUtterances(_ current: String, _ incoming: String) -> String {
         if covers(incoming, of: current) { return incoming }
         if covers(current, of: incoming) { return current }

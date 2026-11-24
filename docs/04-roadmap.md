@@ -20,7 +20,7 @@
 | 语言目录实查 | 生产注入 `SystemLanguageCatalog`（探针缓存）；当前仅首页设置消费，v1 扩展到所有语言入口 |
 | Wave 1 数据完整性 | 已合并到 `wave-1-data-integrity`（#2–#12，tip `fd820e4`）：TaskStoreV2、SpeechSessionGate、TaskLifecycle、显性存储降级、清屏/50 条/2 万字语义。iPhone 13 真机清单未验证 |
 | P1-1 翻译队列积压 | 已完成（#22–#25，main `37f0a50`）；真机验证 2026-11-24 通过（用户确认）；#21/#26 已关闭 |
-| Wave 3 C04 字幕/文字稿投影 | 部分修复（跨 utterance id 短句误合并已修）；spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27) 与 D8 已确认，代码未开始；候选台账见 [05-architecture-backlog.md](05-architecture-backlog.md) |
+| Wave 3 C04 字幕/文字稿投影 | 代码收敛完成（#28–#31，PR #33–#36；#32 清理+文档已回填）；iPhone 13 完整真机矩阵未验证，#32 保持 open；候选台账见 [05-architecture-backlog.md](05-architecture-backlog.md) |
 | 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
 
 ### Wave 1 测试调整说明（2026-11-23）
@@ -160,17 +160,17 @@
 
 **验收**：中英混读夹具命中率提升且不增加串音；快速切换说话人不丢整句。
 
-### Wave 3：C04 字幕/文字稿投影（spec 已确认，代码未开始）
+### Wave 3：C04 字幕/文字稿投影（代码收敛完成；真机矩阵待验证）
 
 **来源**：2026-11-23 架构审查候选 C04；完整台账见 [`05-architecture-backlog.md`](05-architecture-backlog.md)。
 
-**现象**：字幕/文字稿投影仍有 3 处 `upsertTranscript`（Conversation / Interpretation / Meeting），`PaneState.history` 仍可变，各 ViewModel 恢复时各自重新投影；显示窗口与文字稿全集的边界仍分散。
+**原现象（C04 前）**：字幕/文字稿投影有 3 处 `upsertTranscript`（Conversation / Interpretation / Meeting），`PaneState.history` 可变，各 ViewModel 恢复时各自重新投影；显示窗口与文字稿全集的边界分散。
 
-**目标**：把 live / history / archive / merge / restore 投影收敛到一个 module，保持显示窗口（面对面 3 条/侧、同传 50 条仅显示、会议 2 万字累计）与 transcript 全集分离；不改变 P1-1 的 40/90、25/50、voiceOut、crosstalk 与单槽 `outboundJob`。
+**目标**：把 live / history / archive / merge / restore 投影收敛到一个 module，保持显示窗口（面对面 3 条/侧、同传 50 条仅显示、会议 2 万字累计）与 transcript 全集分离；不改变 P1-1 的 40/90、25/50、voiceOut、crosstalk 与单槽 `outboundJob`。**已达成**：`CaptionProjection` + `CaptionDisplayPolicy` 单一 record store，三 VM 全部迁移。
 
-**验收**：现有三模块字幕/恢复/清屏/导出测试保持通过；新增投影 module 的边界测试；真机回归字幕窗口、恢复、清屏与导出。范围与拆分在立项时另写 spec，不直接复用现场字幕状态机。
+**验收**：现有三模块字幕/恢复/清屏/导出测试保持通过；新增投影 module 的边界测试；真机回归字幕窗口、恢复、清屏与导出。
 
-**进展**：2026-11-24 已修跨 utterance id 的短句投影丢失，并补 PaneState / 面对面 / 同传 / 会议语音流回归；spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27) 与 D8 已确认，子票 #28–#32；完整 projection module 与 3 处 `upsertTranscript` 收敛仍未开始。
+**进展**：2026-11-24 完成 C04a–d（#28–#31，PR #33–#36）：新增投影模块与 28 条契约测试，三 VM 迁移，删除三份 `upsertTranscript` / alias / 跨 ID 文本合并；补齐 `UtteranceAssembler` 的 volatile greeting name swap 新 ID。C04e（#32）的清理与文档已回填：`PaneState` 仅保留派生快照，`TranslationPipeline` alias API 与 `SpokenText.isDistinctGreeting` 删除。完整 iPhone 13 真机矩阵尚未验证，#32 保持 open，C04 待真机通过后收口。
 
 ---
 
