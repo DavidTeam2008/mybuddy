@@ -20,8 +20,8 @@
 - 需要翻译时由 VM 调 `Shared/TranslationPipeline.submit(TranslationSubmission)`：行、`isFinal`、目标语言与首包/后续延迟在提交时算好。pipeline 负责 job 形成、防抖/取消、重复抑制、过期判定、单槽 `outboundJob` 与 aliases；VM 不再自持防抖 Task、`sentSourceText`、`lastAppliedSourceCount` 或 `utteranceAliases`。
 - VM 自建 `TranslationPipeline` 并固定自己的 `StalePolicy`（面对面 `.dropShorterNonFinal`、同传 `.dropShorterAny`）。调用方构造器不接收 pipeline 或 scheduler；测试只通过 internal 的 `scheduler:` 初始化器注入调度器。
 - `fulfill` 只把 `pipeline.accept` 返回的 `TranslationUpdate` 写入 pane/transcript；同传再按既有 380 ms 结算调度 TTS。View 从 VM 的 `outboundJob` 计算属性取 job，交给 `TranslationHostView` / `OneWayTranslationHostView` 的 `.translationTask`；VM 不持有 `TranslationSession`。
-- Host 共享 `TranslationJobBridge` + `TranslationJobPump`：bridge 按 `utteranceID` 每句最多保留一条 pending，替换保留首次位置；已排队 final 不被新 non-final 覆盖，任何新 final 可覆盖旧 job。consumer 是 generation-scoped（`wakeups` + `takeNext()` / `requeue(_:)`）；`makeConsumer()` 时队列非空立即补 wakeup，Host 未就绪时也按 ID 合并。`TranslationJobPump` 每次唤醒 drain 到空；取消时同 ID 有更新就丢弃，否则 requeue 到队首并退出，取消不触发 `onFailure`。
-- 测试接缝：bridge 接口（同步验证合并、顺序、final 优先级、pre-pump wakeup、generation）与 pump 注入的 `translate` / `onSuccess` / `onFailure`（验证 drain、取消、requeue、in-flight 完成）；不要为生产路径新增 `TranslationSession` 替身，也不要用 sleep 驱动。
+- Host 共享 `TranslationJobBridge` + `TranslationJobPump`：bridge 按 `utteranceID` 每句最多保留一条 pending，替换保留首次位置；已排队 final 不被新 non-final 覆盖，任何新 final 可覆盖旧 job。consumer 的 `takeNext()` 是 generation-scoped；`requeue` 接受任意 generation，只要该 job 仍是该句最新提交且无同 ID pending，插入队首并 wake 当前 consumer；`makeConsumer()` 时队列非空立即补 wakeup，Host 未就绪时也按 ID 合并。`TranslationJobPump` 每次唤醒 drain 到空；取消时该 job 已被同 ID 更新取代就丢弃，否则 requeue 到队首并退出，取消不触发 `onFailure`；非任务取消的 `CancellationError` 由下一次 `.translationTask` 重启的新 consumer drain。
+- 测试接缝：bridge 接口（同步验证合并、顺序、final 优先级、pre-pump wakeup、generation-scoped takeNext、latest-job requeue 与唤醒已等待 consumer）与 pump 注入的 `translate` / `onSuccess` / `onFailure`（验证 drain、取消、requeue、in-flight 完成、非任务取消后的新 consumer 接管）；不要为生产路径新增 `TranslationSession` 替身，也不要用 sleep 驱动。
 - 现场字幕读 VM 的 `PaneState`/内存数组，不读 SwiftData；落盘异步，View 不等待落盘再更新。
 
 ## 4. 任务语义（交互必须保持）

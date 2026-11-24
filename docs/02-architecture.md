@@ -251,10 +251,10 @@ TranslationSession.Configuration(
 - **每句合并**：同一 `utteranceID` 最多保留一条 pending job；替换时保留该 ID 首次出现的位置，不同 ID 之间保持 FIFO。
 - **final 优先**：已排队的 final 不会被后续 non-final 覆盖；non-final 可被新的 non-final 覆盖；任何新 final 可覆盖旧 job（final 被更新 final 取代）。
 - **Host 未就绪**：不设“单槽”特殊模式，未安装 consumer 时同样按 ID 合并；`makeConsumer()` 安装时若队列非空立即产生一次 wakeup，历史详情逐条翻译不会因为 `onAppear` 先于 `.translationTask` 而卡住。
-- **generation-scoped consumer**：`Consumer` 暴露 `wakeups`（`.bufferingNewest(1)` 的 `AsyncStream<Void>`）与 `takeNext()` / `requeue(_:)`。只有最新 generation 能取 job；旧 generation 的 `takeNext()` 返回 nil，旧 `onTermination` 不清新 continuation。`yield` / `finish` 在锁外执行，`submit` 多次可合并为一次唤醒。
-- **pump drain 与取消**：`for await` 每次 wakeup 后循环 `takeNext()` 直到空（一次唤醒 drain 多条，不按 submit 次数排队）。每取一条先检查任务取消；已取消时若有同 ID 更新则丢弃该 job，否则 `requeue` 到队首并退出。正常 in-flight 翻译不主动取消，结果仍经 `TranslationPipeline.accept` 由 `StalePolicy` 判定；`Task.isCancelled` / `CancellationError` 不调用 `onFailure`，真实错误仍走 `onFailure`；空白文本跳过。
+- **generation-scoped consumer**：`Consumer` 暴露 `wakeups`（`.bufferingNewest(1)` 的 `AsyncStream<Void>`）与 `takeNext()` / `requeue(_:)`。只有最新 generation 能取 job；旧 generation 的 `takeNext()` 返回 nil，旧 `onTermination` 不清新 continuation。`requeue` 不受 generation 限制：bridge 记录每个 `utteranceID` 最新入队 job 的 ID，只有该 job 仍是该句最新提交且队列中没有同 ID job 时才接受 requeue，插入队首并在锁外 wake 当前 consumer——旧 pump 取消的 final 仍能被新 consumer 翻译。`yield` / `finish` 在锁外执行，`submit` 多次可合并为一次唤醒。
+- **pump drain 与取消**：`for await` 每次 wakeup 后循环 `takeNext()` 直到空（一次唤醒 drain 多条，不按 submit 次数排队）。每取一条先检查任务取消；已取消时若该 job 已被同 ID 新提交取代则丢弃，否则 `requeue` 到队首并退出。正常 in-flight 翻译不主动取消，结果仍经 `TranslationPipeline.accept` 由 `StalePolicy` 判定；`Task.isCancelled` / `CancellationError` 不调用 `onFailure`，真实错误仍走 `onFailure`；空白文本由 bridge 在 `submit` 时过滤（pump 只做 trim）。非任务取消的 `CancellationError` 同样让当前 pump 退出；随后 Host 的 `.translationTask` 重启安装新 consumer，drain 已 requeue 的 job（单测覆盖，无 sleep）。
 - **时序保持**：40/90 ms、voiceOut 25/50 ms、380 ms TTS settle、1.1 s 静音 final、crosstalk、emit 顺序与单槽 `outboundJob` 均不变。
-- **测试接缝**：bridge 接口同步验证合并、顺序、final 优先级、pre-pump wakeup 与 generation；pump 通过注入 `translate` / `onSuccess` / `onFailure` 验证 drain、取消、requeue 与 in-flight 完成。生产路径用 `TranslationSession.translate` 适配，不新增 session 替身。
+- **测试接缝**：bridge 接口同步验证合并、顺序、final 优先级、pre-pump wakeup、generation-scoped takeNext 与 latest-job requeue（含唤醒已等待的新 consumer）；pump 通过注入 `translate` / `onSuccess` / `onFailure` 验证 drain、取消、requeue、in-flight 完成与非任务取消后的新 consumer 接管。生产路径用 `TranslationSession.translate` 适配，不新增 session 替身。
 
 ### 5.3 TranslationPipeline
 
@@ -423,7 +423,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 | --- | --- | --- |
 | Domain 纯逻辑 | 路由、assembler、spoken 合并、clause、翻译触发阈值、任务映射 | `DuiyiTests`（Swift Testing） |
 | 翻译管线 | job 形成、防抖/取消、重复抑制、两种过期策略、单槽 `outboundJob`、别名、`reset` | `DuiyiTests`（`TranslationPipelineTests`） |
-| 翻译 job bridge / pump | per-`utteranceID` 合并、final 优先、pre-pump wakeup、generation、drain/取消/requeue | `DuiyiTests`（`TranslationJobBridgeTests`、`TranslationJobPumpTests`） |
+| 翻译 job bridge / pump | per-`utteranceID` 合并、final 优先、pre-pump wakeup、generation-scoped takeNext、latest-job requeue、drain/取消 | `DuiyiTests`（`TranslationJobBridgeTests`、`TranslationJobPumpTests`） |
 | ViewModel / 生命周期 | 三模块状态机、pipeline 接线、清屏、任务恢复、TTS 队列、`TaskLifecycle`/`SpeechSessionGate` 接缝 | `DuiyiTests` |
 | 音频策略 | 路由快照/回声判定 | `DuiyiTests` |
 | UI | 冷启动、首页导航、同传听写压力、滑动返回 | `DuiyiUITests`（XCTest，4 个用例） |
