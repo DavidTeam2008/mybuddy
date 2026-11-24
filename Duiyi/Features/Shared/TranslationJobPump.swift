@@ -19,8 +19,10 @@ struct TranslationJobPump {
                     consumer.requeue(job)
                     return
                 }
+                // Empty-text filtering lives in the bridge, the only
+                // production producer; trimming here only normalizes the
+                // text handed to the session.
                 let text = job.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { continue }
                 do {
                     let translatedText = try await translate(text)
                     await onSuccess(job, translatedText)

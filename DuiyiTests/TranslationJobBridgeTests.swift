@@ -2,22 +2,6 @@ import Foundation
 import Testing
 @testable import Duiyi
 
-private func makeJob(
-    utteranceID: UUID,
-    text: String,
-    isFinal: Bool = false,
-    id: UUID = UUID()
-) -> TranslationJob {
-    TranslationJob(
-        id: id,
-        utteranceID: utteranceID,
-        source: .english,
-        target: .zhHans,
-        text: text,
-        isFinal: isFinal
-    )
-}
-
 /// Waits for one buffered wakeup. The sleep is only a failure watchdog so a
 /// regression cannot hang the suite; the passing path resolves immediately.
 private func receivesWakeup(
@@ -46,9 +30,9 @@ struct TranslationJobBridgeTests {
     func sameUtteranceCoalescesToNewest() {
         let bridge = TranslationJobBridge()
         let utteranceID = UUID()
-        let first = makeJob(utteranceID: utteranceID, text: "A1")
-        let second = makeJob(utteranceID: utteranceID, text: "A2")
-        let third = makeJob(utteranceID: utteranceID, text: "A3")
+        let first = makeTranslationJob(utteranceID: utteranceID, text: "A1")
+        let second = makeTranslationJob(utteranceID: utteranceID, text: "A2")
+        let third = makeTranslationJob(utteranceID: utteranceID, text: "A3")
 
         bridge.submit(first)
         bridge.submit(second)
@@ -65,10 +49,10 @@ struct TranslationJobBridgeTests {
         let firstID = UUID()
         let secondID = UUID()
         let thirdID = UUID()
-        let first = makeJob(utteranceID: firstID, text: "A1")
-        let second = makeJob(utteranceID: secondID, text: "B1")
-        let firstUpdate = makeJob(utteranceID: firstID, text: "A2")
-        let third = makeJob(utteranceID: thirdID, text: "C1")
+        let first = makeTranslationJob(utteranceID: firstID, text: "A1")
+        let second = makeTranslationJob(utteranceID: secondID, text: "B1")
+        let firstUpdate = makeTranslationJob(utteranceID: firstID, text: "A2")
+        let third = makeTranslationJob(utteranceID: thirdID, text: "C1")
 
         bridge.submit(first)
         bridge.submit(second)
@@ -86,8 +70,8 @@ struct TranslationJobBridgeTests {
     func queuedFinalSurvivesNonFinalUpdate() {
         let bridge = TranslationJobBridge()
         let utteranceID = UUID()
-        let final = makeJob(utteranceID: utteranceID, text: "final text", isFinal: true)
-        let trailingVolatile = makeJob(utteranceID: utteranceID, text: "volatile tail", isFinal: false)
+        let final = makeTranslationJob(utteranceID: utteranceID, text: "final text", isFinal: true)
+        let trailingVolatile = makeTranslationJob(utteranceID: utteranceID, text: "volatile tail", isFinal: false)
 
         bridge.submit(final)
         bridge.submit(trailingVolatile)
@@ -102,10 +86,10 @@ struct TranslationJobBridgeTests {
         let bridge = TranslationJobBridge()
         let volatileID = UUID()
         let finalID = UUID()
-        let volatile = makeJob(utteranceID: volatileID, text: "partial", isFinal: false)
-        let firstFinal = makeJob(utteranceID: volatileID, text: "complete", isFinal: true)
-        let olderFinal = makeJob(utteranceID: finalID, text: "old final", isFinal: true)
-        let newerFinal = makeJob(utteranceID: finalID, text: "new final", isFinal: true)
+        let volatile = makeTranslationJob(utteranceID: volatileID, text: "partial", isFinal: false)
+        let firstFinal = makeTranslationJob(utteranceID: volatileID, text: "complete", isFinal: true)
+        let olderFinal = makeTranslationJob(utteranceID: finalID, text: "old final", isFinal: true)
+        let newerFinal = makeTranslationJob(utteranceID: finalID, text: "new final", isFinal: true)
 
         bridge.submit(volatile)
         bridge.submit(firstFinal)
@@ -121,8 +105,8 @@ struct TranslationJobBridgeTests {
     @Test("Jobs queued before a consumer installs wake it and drain in order")
     func queuedJobsWakeNewConsumer() async {
         let bridge = TranslationJobBridge()
-        let first = makeJob(utteranceID: UUID(), text: "A1")
-        let second = makeJob(utteranceID: UUID(), text: "B1")
+        let first = makeTranslationJob(utteranceID: UUID(), text: "A1")
+        let second = makeTranslationJob(utteranceID: UUID(), text: "B1")
 
         bridge.submit(first)
         bridge.submit(second)
@@ -138,8 +122,8 @@ struct TranslationJobBridgeTests {
     func oneWakeupDrainsMultipleJobs() async {
         let bridge = TranslationJobBridge()
         let consumer = bridge.makeConsumer()
-        let first = makeJob(utteranceID: UUID(), text: "A1")
-        let second = makeJob(utteranceID: UUID(), text: "B1")
+        let first = makeTranslationJob(utteranceID: UUID(), text: "A1")
+        let second = makeTranslationJob(utteranceID: UUID(), text: "B1")
 
         bridge.submit(first)
         bridge.submit(second)
@@ -153,7 +137,7 @@ struct TranslationJobBridgeTests {
     @Test("A superseded consumer can no longer take jobs")
     func supersededConsumerCannotTakeJobs() {
         let bridge = TranslationJobBridge()
-        let job = makeJob(utteranceID: UUID(), text: "hello", isFinal: true)
+        let job = makeTranslationJob(utteranceID: UUID(), text: "hello", isFinal: true)
         bridge.submit(job)
 
         let superseded = bridge.makeConsumer()
@@ -168,7 +152,7 @@ struct TranslationJobBridgeTests {
         let bridge = TranslationJobBridge()
         let superseded = bridge.makeConsumer()
         let current = bridge.makeConsumer()
-        let job = makeJob(utteranceID: UUID(), text: "hello", isFinal: true)
+        let job = makeTranslationJob(utteranceID: UUID(), text: "hello", isFinal: true)
 
         bridge.submit(job)
 
@@ -180,8 +164,8 @@ struct TranslationJobBridgeTests {
     @Test("A requeued job returns to the front of the queue")
     func requeuedJobGoesToFront() {
         let bridge = TranslationJobBridge()
-        let first = makeJob(utteranceID: UUID(), text: "A1")
-        let second = makeJob(utteranceID: UUID(), text: "B1")
+        let first = makeTranslationJob(utteranceID: UUID(), text: "A1")
+        let second = makeTranslationJob(utteranceID: UUID(), text: "B1")
         bridge.submit(first)
         bridge.submit(second)
 
@@ -198,9 +182,9 @@ struct TranslationJobBridgeTests {
     func requeueDiscardsWhenNewerSameUtterancePending() {
         let bridge = TranslationJobBridge()
         let utteranceID = UUID()
-        let original = makeJob(utteranceID: utteranceID, text: "A1")
-        let other = makeJob(utteranceID: UUID(), text: "B1")
-        let newer = makeJob(utteranceID: utteranceID, text: "A2")
+        let original = makeTranslationJob(utteranceID: utteranceID, text: "A1")
+        let other = makeTranslationJob(utteranceID: UUID(), text: "B1")
+        let newer = makeTranslationJob(utteranceID: utteranceID, text: "A2")
         bridge.submit(original)
         bridge.submit(other)
 
@@ -219,7 +203,7 @@ struct TranslationJobBridgeTests {
         let bridge = TranslationJobBridge()
         let superseded = bridge.makeConsumer()
         let current = bridge.makeConsumer()
-        let job = makeJob(utteranceID: UUID(), text: "hello", isFinal: true)
+        let job = makeTranslationJob(utteranceID: UUID(), text: "hello", isFinal: true)
 
         superseded.requeue(job)
         #expect(current.takeNext() == nil)
@@ -232,7 +216,7 @@ struct TranslationJobBridgeTests {
     @Test("A whitespace-only job never enters the queue")
     func whitespaceOnlyJobIsIgnored() {
         let bridge = TranslationJobBridge()
-        bridge.submit(makeJob(utteranceID: UUID(), text: " \n\t ", isFinal: true))
+        bridge.submit(makeTranslationJob(utteranceID: UUID(), text: " \n\t ", isFinal: true))
 
         let consumer = bridge.makeConsumer()
         #expect(consumer.takeNext() == nil)
@@ -242,9 +226,9 @@ struct TranslationJobBridgeTests {
     func whitespaceUpdateDoesNotEvictQueuedJob() {
         let bridge = TranslationJobBridge()
         let utteranceID = UUID()
-        let queued = makeJob(utteranceID: utteranceID, text: "hello", isFinal: true)
+        let queued = makeTranslationJob(utteranceID: utteranceID, text: "hello", isFinal: true)
         bridge.submit(queued)
-        bridge.submit(makeJob(utteranceID: utteranceID, text: "   ", isFinal: false))
+        bridge.submit(makeTranslationJob(utteranceID: utteranceID, text: "   ", isFinal: false))
 
         let consumer = bridge.makeConsumer()
         #expect(consumer.takeNext() == queued)
