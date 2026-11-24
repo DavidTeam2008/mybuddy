@@ -34,10 +34,12 @@ struct TranslationHostView: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
             .translationTask(userToPeer) { session in
-                await pump(session: session, jobs: userJobs)
+                await TranslationJobPump(session: session, onSuccess: onSuccess, onFailure: onFailure)
+                    .run(userJobs.stream())
             }
             .translationTask(peerToUser) { session in
-                await pump(session: session, jobs: peerJobs)
+                await TranslationJobPump(session: session, onSuccess: onSuccess, onFailure: onFailure)
+                    .run(peerJobs.stream())
             }
             .onChange(of: job) { _, newJob in
                 submit(newJob)
@@ -53,19 +55,6 @@ struct TranslationHostView: View {
             userJobs.yield(job)
         } else if job.source == peerLanguage {
             peerJobs.yield(job)
-        }
-    }
-
-    private func pump(session: TranslationSession, jobs: TranslationJobBridge) async {
-        for await job in jobs.stream() {
-            let text = job.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { continue }
-            do {
-                let response = try await session.translate(text)
-                await onSuccess(job, response.targetText)
-            } catch {
-                await onFailure(job, error)
-            }
         }
     }
 }
@@ -100,16 +89,8 @@ struct OneWayTranslationHostView: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
             .translationTask(configuration) { session in
-                for await job in jobs.stream() {
-                    let text = job.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !text.isEmpty else { continue }
-                    do {
-                        let response = try await session.translate(text)
-                        await onSuccess(job, response.targetText)
-                    } catch {
-                        await onFailure(job, error)
-                    }
-                }
+                await TranslationJobPump(session: session, onSuccess: onSuccess, onFailure: onFailure)
+                    .run(jobs.stream())
             }
             .onChange(of: job) { _, newJob in
                 submit(newJob)
@@ -123,6 +104,20 @@ struct OneWayTranslationHostView: View {
         guard let job else { return }
         guard job.source == sourceLanguage, job.target == targetLanguage else { return }
         jobs.yield(job)
+    }
+}
+
+private extension TranslationJobPump {
+    init(
+        session: TranslationSession,
+        onSuccess: @escaping @MainActor (TranslationJob, String) -> Void,
+        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void
+    ) {
+        self.init(
+            translate: { try await session.translate($0).targetText },
+            onSuccess: onSuccess,
+            onFailure: onFailure
+        )
     }
 }
 
