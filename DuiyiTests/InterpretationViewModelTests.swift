@@ -240,32 +240,73 @@ struct InterpretationViewModelTests {
         #expect(viewModel.outboundJob?.text.contains("And the team agreed") == true)
     }
 
-    @Test("Continuation aliases are registered through the pipeline")
-    func continuationAliasResolvesThroughPipeline() {
+    @Test("A growing sentence on one utterance id keeps one line")
+    func growingSentenceKeepsOneLine() {
         let viewModel = makeViewModel(scheduler: ManualTranslationScheduler())
-        let first = Utterance(language: .english, text: "Like everyone else", isFinal: false)
-        viewModel.accept(first)
-        let continuation = Utterance(
+        let id = UUID()
+        viewModel.accept(Utterance(id: id, language: .english, text: "Like everyone else", isFinal: false))
+        let grown = Utterance(
+            id: id,
             language: .english,
             text: "Like everyone else, when I started out",
             isFinal: false
         )
-        viewModel.accept(continuation)
-        #expect(viewModel.pane.live?.id == first.id)
+        viewModel.accept(grown)
+
+        #expect(viewModel.pane.live?.id == id)
+        #expect(viewModel.pane.history.isEmpty)
+        #expect(viewModel.transcript.count == 1)
 
         viewModel.fulfill(
             job: TranslationJob(
-                utteranceID: continuation.id,
+                utteranceID: id,
                 source: .english,
                 target: .zhHans,
-                text: continuation.text,
+                text: grown.text,
                 isFinal: false
             ),
             text: "和其他人一样，当我开始"
         )
 
-        #expect(viewModel.pane.live?.id == first.id)
         #expect(viewModel.pane.live?.translatedText == "和其他人一样，当我开始")
+        #expect(viewModel.transcript.first?.translatedText == "和其他人一样，当我开始")
+    }
+
+    @Test("A new utterance id gets its own line and its own translation")
+    func newIDGetsItsOwnLineAndTranslation() {
+        let viewModel = makeViewModel(scheduler: ManualTranslationScheduler())
+        let first = Utterance(language: .english, text: "Like everyone else", isFinal: true)
+        viewModel.accept(first)
+        #expect(viewModel.outboundJob?.utteranceID == first.id)
+        let second = Utterance(
+            language: .english,
+            text: "Like everyone else, when I started out",
+            isFinal: true
+        )
+        viewModel.accept(second)
+        #expect(viewModel.outboundJob?.utteranceID == second.id)
+
+        #expect(viewModel.pane.live?.id == second.id)
+        #expect(viewModel.pane.history.map(\.id) == [first.id])
+        #expect(viewModel.transcript.map(\.id) == [first.id, second.id])
+
+        viewModel.fulfill(
+            job: TranslationJob(
+                utteranceID: second.id,
+                source: .english,
+                target: .zhHans,
+                text: second.text,
+                isFinal: true
+            ),
+            text: "和其他人一样，当我开始"
+        )
+
+        #expect(viewModel.pane.live?.translatedText == "和其他人一样，当我开始")
+        #expect(viewModel.pane.history.first?.translatedText.isEmpty == true)
+        #expect(
+            viewModel.transcript.first(where: { $0.id == second.id })?.translatedText
+                == "和其他人一样，当我开始"
+        )
     }
 
     @Test("Voice out cannot enable on speaker-only routes")
@@ -691,8 +732,8 @@ struct InterpretationViewModelTests {
         #expect(movieMentions.count == 1)
     }
 
-    @Test("Movie-title revisions on new utterance ids still become one caption")
-    func movieRevisionsOnNewIdsCollapseToOneCaption() {
+    @Test("Movie-title revisions on new utterance ids keep separate lines")
+    func movieRevisionsOnNewIDsKeepSeparateLines() {
         let viewModel = makeViewModel()
         let fragments = [
             "好吧，我们已经",
@@ -702,6 +743,7 @@ struct InterpretationViewModelTests {
             "好吧，我们错过了一部叫《幸运的日子》的电影，我想看，但另一部叫《船》的电影就在这上面",
             "好吧，我们错过了一部叫《幸运的日子》的电影，我想看，但另一部叫《船》的电影本周上映。"
         ]
+        var utterances: [Utterance] = []
         for (index, chinese) in fragments.enumerated() {
             let source: String
             switch index {
@@ -719,6 +761,7 @@ struct InterpretationViewModelTests {
                 source = "Well we missed a movie called Lucky Days I want to see but another movie called The Ship is released this week"
             }
             let utterance = Utterance(language: .english, text: source, isFinal: index == fragments.count - 1)
+            utterances.append(utterance)
             viewModel.accept(utterance)
             viewModel.fulfill(
                 job: TranslationJob(
@@ -731,12 +774,12 @@ struct InterpretationViewModelTests {
                 text: chinese
             )
         }
-        #expect(viewModel.pane.history.isEmpty)
-        #expect(viewModel.pane.live?.translatedText.contains("幸运的日子") == true)
-        #expect(viewModel.pane.live?.translatedText.contains("本周上映") == true)
-        let movieMentions = ([viewModel.pane.live?.translatedText].compactMap { $0 } + viewModel.pane.history.map(\.translatedText))
-            .filter { $0.contains("幸运") }
-        #expect(movieMentions.count == 1)
+        let shown = viewModel.pane.history.map(\.translatedText)
+            + [viewModel.pane.live?.translatedText].compactMap { $0 }
+        #expect(shown == fragments)
+        #expect(viewModel.pane.live?.id == utterances.last?.id)
+        #expect(viewModel.pane.history.count == fragments.count - 1)
+        #expect(viewModel.transcript.count == fragments.count)
     }
 
     @Test("Settled refinements wait and are spoken once")
@@ -1249,6 +1292,60 @@ struct InterpretationViewModelTests {
         #expect(viewModel.sessionState == .listening)
         #expect(gate.stopCount == 0)
         #expect(store.endCalls == 0)
+    }
+
+    @Test("A translation after a display clear updates the transcript without speaking")
+    func translationAfterClearUpdatesTranscriptWithoutSpeech() async {
+        let synthesizer = MockSpeechSynthesizer()
+        let viewModel = makeViewModel(synthesizer: synthesizer, speechSettleDelay: .milliseconds(0))
+        await viewModel.setVoiceOutEnabled(true)
+        let utterance = Utterance(language: .english, text: "Clear me now", isFinal: true)
+        viewModel.accept(utterance)
+
+        await viewModel.clearDisplay()
+        viewModel.fulfill(
+            job: TranslationJob(
+                utteranceID: utterance.id,
+                source: .english,
+                target: .zhHans,
+                text: utterance.text,
+                isFinal: true
+            ),
+            text: "现在清屏"
+        )
+
+        #expect(viewModel.pane.live == nil)
+        #expect(viewModel.transcript.first?.translatedText == "现在清屏")
+        #expect(synthesizer.spoken.isEmpty)
+    }
+
+    @Test("A translation outside the display window updates the transcript without speaking")
+    func translationOutsideWindowUpdatesTranscriptWithoutSpeech() async {
+        let synthesizer = MockSpeechSynthesizer()
+        let viewModel = makeViewModel(synthesizer: synthesizer, speechSettleDelay: .milliseconds(0))
+        await viewModel.setVoiceOutEnabled(true)
+        let utterances = makeUtterances(count: 60)
+        for utterance in utterances {
+            viewModel.accept(utterance)
+        }
+        let evicted = utterances[0]
+
+        viewModel.fulfill(
+            job: TranslationJob(
+                utteranceID: evicted.id,
+                source: .english,
+                target: .zhHans,
+                text: evicted.text,
+                isFinal: true
+            ),
+            text: "被窗口淘汰的译文"
+        )
+
+        #expect(
+            viewModel.transcript.first(where: { $0.id == evicted.id })?.translatedText
+                == "被窗口淘汰的译文"
+        )
+        #expect(synthesizer.spoken.isEmpty)
     }
 
     private func makeUtterances(count: Int) -> [Utterance] {
