@@ -1,0 +1,6 @@
+// Copy to Local.xcconfig (gitignored), then replace the placeholders.
+//
+// Team id:   security find-identity -v -p codesigning
+// Device id: xcrun devicectl list devices
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+DEVICE_UDID = YOUR_DEVICE_UDID

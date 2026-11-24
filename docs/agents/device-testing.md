@@ -14,6 +14,7 @@
 | 连接方式 | `xcrun xcdevice list` | 目标设备 `interface: usb`；Wi-Fi 会出现 “IDE disconnection” |
 | Xcode | `pgrep -x Xcode` | 跑 runner 前完全退出（⌘Q）；开着 GUI 时 runner 可能直接 code 74 |
 | 签名 | `security find-identity -v -p codesigning` | 有 Apple Development 身份 |
+| 本地签名配置 | `Config/Local.xcconfig` | 含 `DEVELOPMENT_TEAM` 与 `DEVICE_UDID`；`tools/device.sh check` 会读 |
 
 设备、UDID 与应用清单：
 
@@ -23,14 +24,25 @@ xcrun xcdevice list
 xcrun devicectl device info apps --device <DEVICE_UDID>
 ```
 
-## 2. 签名与免费账号槽位
+## 2. 签名、设备与免费账号槽位
 
-- 本仓库不提交 `DEVELOPMENT_TEAM`（`tools/check-static.sh` 会拦截）。真机构建时用命令行或环境变量传入，不改工程文件。
+签名与设备信息只放在本机、不进仓库：
+
+```bash
+cp Config/Local.xcconfig.example Config/Local.xcconfig
+# 编辑 Config/Local.xcconfig：
+#   DEVELOPMENT_TEAM = <team id>
+#   DEVICE_UDID = <device udid>
+```
+
+- `Config/Shared.xcconfig` 是工程的 base configuration；`Config/Local.xcconfig` 被它可选包含，并已加入 `.gitignore`。**Xcode 手动真机调试与 `tools/device.sh` 读取的是同一份本地配置**，不需要每次在 Signing & Capabilities 里重设 Team。
+- 本仓库不提交 `DEVELOPMENT_TEAM`（`tools/check-static.sh` 会拦截）；`project.pbxproj` 不再保存空 Team 设置。
 - 从本机证书取 Team ID（`OU=`）：
 
 ```bash
 security find-certificate -c "Apple Development" -p \
   | openssl x509 -noout -subject -nameopt RFC2253
+xcrun devicectl list devices   # 取 DEVICE_UDID
 ```
 
 - 免费开发者账号每台设备最多安装 3 个 App。装不下 agent-device / XCUITest runner 时，先卸载可再生的测试 runner：
@@ -39,33 +51,37 @@ security find-certificate -c "Apple Development" -p \
 xcrun devicectl device uninstall app --device <DEVICE_UDID> com.david.DuiyiUITests.xctrunner
 ```
 
-- Xcode 可能自动把 `DEVELOPMENT_TEAM` 写回 `project.pbxproj`，或在 `Localizable.xcstrings` 里加空 key；提交前用 `tools/check-static.sh` 检查并还原这两类噪音。
+- Xcode 仍可能把 `DEVELOPMENT_TEAM` 写回 `project.pbxproj`，或在 `Localizable.xcstrings` 里加空 key；提交前用 `tools/check-static.sh` 检查并还原这两类噪音。
 
 ## 3. 路径 A：agent-device（物理设备推荐）
 
-Maestro 的 `list_devices` 只列模拟器；物理 iPhone 用 agent-device。第一次会为设备构建并签名一个 runner，耗时几分钟。
+Maestro 的 `list_devices` 只列模拟器；物理 iPhone 用 agent-device。仓库把它收敛到 `tools/device.sh`：
+
+- **版本固定**：`agent-device@0.21.13`（通过 `npx --yes` 运行；首次下载到 npx 缓存）。
+- **签名/设备固定**：读 `Config/Local.xcconfig` 的 `DEVELOPMENT_TEAM` / `DEVICE_UDID`。
+- **状态目录固定**：`.device-state/`（gitignored），session 默认 `mybuddy-device`。
+- **runner bundle**：`com.david.agentdevice.runner`（可用 `AGENT_DEVICE_IOS_BUNDLE_ID` 覆盖）。
 
 ```bash
-export AGENT_DEVICE_IOS_TEAM_ID=<TEAM_ID>
-export AGENT_DEVICE_STATE_DIR=/tmp/agent-device-<task>
-export AGENT_DEVICE_IOS_BUNDLE_ID=com.<name>.agentdevice.runner
-
-agent-device open com.david.Duiyi --udid <DEVICE_UDID> \
-  --foreground --relaunch --session <session> --json
-agent-device snapshot -i --session <session> --json
-agent-device click @eN --session <session> --settle
-agent-device press <x> <y> --session <session> --settle
-agent-device wait <ms> --session <session>
-agent-device screenshot /tmp/<name>.png --session <session> --json
-agent-device close --session <session>
+tools/device.sh check          # DevToolsSecurity / 设备 / USB / Xcode 状态
+tools/device.sh open           # 打开 com.david.Duiyi
+tools/device.sh snapshot
+tools/device.sh click @eN
+tools/device.sh press <x> <y>
+tools/device.sh wait 4000
+tools/device.sh screenshot /tmp/<name>.png
+tools/device.sh close
+tools/device.sh ui-tests       # 设备上的 XCUITest（已知 code 74 风险）
+tools/device.sh agent <args>   # 直通 agent-device
 ```
 
 要点：
 
-- `DEVICE_IN_USE` 表示设备被另一个 session 持有：复用它的 `--session`，或先 `agent-device close`。
-- mutation 后 ref 会重排；下一步目标从新的 `snapshot -i` 取，不沿用旧 ref。
+- `DEVICE_IN_USE` 表示设备被另一个 session 持有：复用它的 `--session`（`DEVICE_SESSION=...`），或先 `tools/device.sh close`。
+- mutation 后 ref 会重排；下一步目标从新的 `snapshot` 取，不沿用旧 ref。
 - 面对面倒字侧对无障碍隐藏，快照里没有；用 `screenshot` 后读图（文字旋转 180°）。
-- runner 签名失败时先设 `AGENT_DEVICE_IOS_TEAM_ID` / `AGENT_DEVICE_IOS_BUNDLE_ID`；仍失败再按 §6 排查。
+- 第一次 `open` 会构建/签名 runner，耗时几分钟；之后再开会复用。
+- 需要绕过脚本调试时，等价环境变量是 `AGENT_DEVICE_IOS_TEAM_ID` / `AGENT_DEVICE_STATE_DIR` / `AGENT_DEVICE_IOS_BUNDLE_ID`，值来自 `Config/Local.xcconfig`。
 
 ## 4. 路径 B：设备上的 XCUITest
 
@@ -127,4 +143,5 @@ say -v Tingting "<中文句子>"
 - 先在模拟器跑 `tools/test-unit.sh` 与 `tools/check-static.sh`；真机矩阵只补模拟器覆盖不到的部分。
 - 环境、通过项、未验证项与证据路径写回对应票（本轮见 [#32](https://github.com/DavidTeam2008/mybuddy/issues/32)）；证据是本机截图时注明“未上传”。
 - 矩阵未完整通过前不要标“已完成”；跳过项要写“未验证”+原因/手动步骤。
-- 结束后：`agent-device close`；需要时卸载 runner 释放槽位；把自动锁定改回用户偏好；确认 `git status` 没有 Xcode 噪音。
+- 结束后：`tools/device.sh close`；需要时卸载 runner 释放槽位；把自动锁定改回用户偏好；确认 `git status` 没有 Xcode 噪音。
+- `.device-state/` 与 `.device-derived/` 都是本机产物，已 gitignore；不要提交 `Config/Local.xcconfig`。
