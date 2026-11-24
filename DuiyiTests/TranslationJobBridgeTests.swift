@@ -198,17 +198,76 @@ struct TranslationJobBridgeTests {
         #expect(consumer.takeNext() == nil)
     }
 
-    @Test("A superseded consumer cannot requeue a job")
-    func supersededConsumerCannotRequeue() {
+    @Test("A requeue is discarded when the job is no longer the latest submission")
+    func requeueDiscardsJobThatIsNoLongerLatest() {
         let bridge = TranslationJobBridge()
+        let utteranceID = UUID()
+        let older = makeTranslationJob(utteranceID: utteranceID, text: "older")
+        let newer = makeTranslationJob(utteranceID: utteranceID, text: "newer", isFinal: true)
+        bridge.submit(older)
+
         let superseded = bridge.makeConsumer()
+        #expect(superseded.takeNext() == older)
+
+        bridge.submit(newer)
         let current = bridge.makeConsumer()
+        #expect(current.takeNext() == newer)
+
+        superseded.requeue(older)
+        #expect(current.takeNext() == nil)
+    }
+
+    @Test("A superseded consumer requeues a job that is still the latest for its utterance")
+    func supersededConsumerRequeuesLatestJob() {
+        let bridge = TranslationJobBridge()
         let job = makeTranslationJob(utteranceID: UUID(), text: "hello", isFinal: true)
+        bridge.submit(job)
+
+        let superseded = bridge.makeConsumer()
+        #expect(superseded.takeNext() == job)
+        let current = bridge.makeConsumer()
 
         superseded.requeue(job)
-        #expect(current.takeNext() == nil)
 
-        current.requeue(job)
+        #expect(current.takeNext() == job)
+        #expect(current.takeNext() == nil)
+    }
+
+    @Test("A superseded requeue is discarded when a newer same-utterance job is pending")
+    func supersededRequeueDiscardsWhenNewerSameUtteranceJobPending() {
+        let bridge = TranslationJobBridge()
+        let utteranceID = UUID()
+        let original = makeTranslationJob(utteranceID: utteranceID, text: "old")
+        bridge.submit(original)
+
+        let superseded = bridge.makeConsumer()
+        #expect(superseded.takeNext() == original)
+
+        let newer = makeTranslationJob(utteranceID: utteranceID, text: "new", isFinal: true)
+        bridge.submit(newer)
+        let current = bridge.makeConsumer()
+
+        superseded.requeue(original)
+
+        #expect(current.takeNext() == newer)
+        #expect(current.takeNext() == nil)
+    }
+
+    @Test("A requeue wakes an already-waiting new consumer")
+    func requeueWakesWaitingNewConsumer() async {
+        let bridge = TranslationJobBridge()
+        let job = makeTranslationJob(utteranceID: UUID(), text: "hello", isFinal: true)
+        bridge.submit(job)
+
+        let superseded = bridge.makeConsumer()
+        #expect(superseded.takeNext() == job)
+        let current = bridge.makeConsumer()
+
+        let waiting = Task { await receivesWakeup(current) }
+        await Task.yield()
+        superseded.requeue(job)
+
+        #expect(await waiting.value)
         #expect(current.takeNext() == job)
         #expect(current.takeNext() == nil)
     }

@@ -125,8 +125,10 @@ private extension TranslationJobPump {
 ///
 /// Producers `submit` jobs; the queue keeps at most one pending job per
 /// `utteranceID` while preserving that ID's first-appearance slot. Consumers
-/// are generation-scoped: only the newest `makeConsumer()` can drain jobs, and
-/// installing a replacement finishes the superseded stream outside the lock.
+/// are generation-scoped for draining: only the newest `makeConsumer()` can
+/// take jobs, and installing a replacement finishes the superseded stream
+/// outside the lock. A superseded consumer can still requeue a job that
+/// remains the latest submission for its utterance.
 final class TranslationJobBridge: @unchecked Sendable {
     final class Consumer: @unchecked Sendable {
         let wakeups: AsyncStream<Void>
@@ -148,9 +150,10 @@ final class TranslationJobBridge: @unchecked Sendable {
         }
 
         /// Returns a job that was already taken but not translated. The job is
-        /// discarded when a newer job for the same utterance is pending, so a
-        /// cancelled pump never resurrects superseded text. Superseded
-        /// consumers cannot requeue into a newer generation.
+        /// discarded when a newer job for the same utterance was submitted or
+        /// is still pending, so a cancelled pump never resurrects superseded
+        /// text. A superseded consumer may still requeue the latest job; the
+        /// bridge inserts it at the front and wakes the current consumer.
         func requeue(_ job: TranslationJob) {
             requeueJob(job)
         }
@@ -160,6 +163,10 @@ final class TranslationJobBridge: @unchecked Sendable {
     private var generation = 0
     private var continuation: AsyncStream<Void>.Continuation?
     private var queue: [TranslationJob] = []
+    /// The newest job actually admitted for each utterance. Final precedence
+    /// can reject a non-final update, in which case the queued final stays the
+    /// latest job and may still be requeued after cancellation.
+    private var latestJobIDByUtterance: [UUID: UUID] = [:]
 
     func submit(_ job: TranslationJob) {
         guard !job.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -169,9 +176,11 @@ final class TranslationJobBridge: @unchecked Sendable {
             let queued = queue[index]
             if !queued.isFinal || job.isFinal {
                 queue[index] = job
+                latestJobIDByUtterance[job.utteranceID] = job.id
             }
         } else {
             queue.append(job)
+            latestJobIDByUtterance[job.utteranceID] = job.id
         }
         let continuation = self.continuation
         lock.unlock()
@@ -204,7 +213,7 @@ final class TranslationJobBridge: @unchecked Sendable {
                 self?.takeNext(for: consumerGeneration)
             },
             requeue: { [weak self] job in
-                self?.requeue(job, for: consumerGeneration)
+                self?.requeue(job)
             }
         )
     }
@@ -216,12 +225,20 @@ final class TranslationJobBridge: @unchecked Sendable {
         return queue.removeFirst()
     }
 
-    private func requeue(_ job: TranslationJob, for generation: Int) {
+    private func requeue(_ job: TranslationJob) {
         lock.lock()
-        defer { lock.unlock() }
-        guard generation == self.generation else { return }
-        guard !queue.contains(where: { $0.utteranceID == job.utteranceID }) else { return }
+        guard latestJobIDByUtterance[job.utteranceID] == job.id else {
+            lock.unlock()
+            return
+        }
+        guard !queue.contains(where: { $0.utteranceID == job.utteranceID }) else {
+            lock.unlock()
+            return
+        }
         queue.insert(job, at: 0)
+        let continuation = self.continuation
+        lock.unlock()
+        continuation?.yield(())
     }
 
     private func clearContinuation(for generation: Int) {

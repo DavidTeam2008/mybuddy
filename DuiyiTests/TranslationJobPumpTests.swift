@@ -368,8 +368,37 @@ struct TranslationJobPumpTests {
         #expect(nextConsumer.takeNext() == nil)
     }
 
-    @Test("A superseded pump cannot requeue a job into the new consumer")
-    func supersededPumpCannotRequeueIntoNewConsumer() async {
+    @Test("After a non-task CancellationError, the next consumer's pump drains the requeued job")
+    func nextPumpDrainsJobAfterCancellationError() async {
+        let recorder = FakePumpRecorder()
+        let bridge = TranslationJobBridge()
+        let job = makeTranslationJob(utteranceID: UUID(), text: "hello", isFinal: true)
+        bridge.submit(job)
+
+        await runPump(
+            on: bridge.makeConsumer(),
+            recorder: recorder,
+            translate: { @Sendable _ in throw CancellationError() }
+        )
+
+        #expect(recorder.translatedTexts == ["hello"])
+        #expect(recorder.successes.isEmpty)
+        #expect(recorder.failures.isEmpty)
+
+        await runPump(
+            on: bridge.makeConsumer(),
+            recorder: recorder,
+            translate: { @Sendable text in text.uppercased() },
+            onSuccess: { _, _ in withUnsafeCurrentTask { $0?.cancel() } }
+        )
+
+        #expect(recorder.translatedTexts == ["hello", "hello"])
+        #expect(recorder.successes == [FakePumpRecorder.Success(job: job, text: "HELLO")])
+        #expect(recorder.failures.isEmpty)
+    }
+
+    @Test("A superseded pump requeues a still-latest job into the new consumer")
+    func supersededPumpRequeuesLatestJobIntoNewConsumer() async {
         let recorder = FakePumpRecorder()
         let bridge = TranslationJobBridge()
         let job = makeTranslationJob(utteranceID: UUID(), text: "hello", isFinal: true)
@@ -391,6 +420,7 @@ struct TranslationJobPumpTests {
         await task.value
 
         #expect(recorder.failures.isEmpty)
+        #expect(currentConsumer.takeNext() == job)
         #expect(currentConsumer.takeNext() == nil)
     }
 

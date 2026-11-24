@@ -28,6 +28,11 @@ struct TranslationJobPump {
                     await onSuccess(job, translatedText)
                 } catch {
                     if Task.isCancelled || error is CancellationError {
+                        // A CancellationError that arrives without task
+                        // cancellation still ends this pump. The bridge keeps
+                        // the job when it is still the latest submission, and
+                        // the host's next `.translationTask` restart installs
+                        // a new consumer whose pump drains it.
                         consumer.requeue(job)
                         return
                     }
