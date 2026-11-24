@@ -84,10 +84,53 @@ struct TranslationJobPumpTests {
             }
         )
 
-        await pump.run(Self.stream(of: [job]))
+        await pump.run(Self.consumer(of: [job]))
 
         #expect(recorder.translatedTexts == ["hello"])
         #expect(recorder.successes == [PumpRecorder.Success(job: job, text: "你好")])
+        #expect(recorder.failures.isEmpty)
+    }
+
+    @Test("One wakeup drains every job the consumer still holds")
+    func oneWakeupDrainsEveryQueuedJob() async {
+        let recorder = PumpRecorder()
+        let first = TranslationJob(
+            utteranceID: UUID(),
+            source: .english,
+            target: .zhHans,
+            text: "first",
+            isFinal: false
+        )
+        let second = TranslationJob(
+            utteranceID: UUID(),
+            source: .english,
+            target: .zhHans,
+            text: "second",
+            isFinal: true
+        )
+
+        let pump = TranslationJobPump(
+            translate: { @Sendable text in
+                recorder.record(translated: text)
+                return text.uppercased()
+            },
+            onSuccess: { job, text in
+                recorder.record(success: job, text: text)
+            },
+            onFailure: { job, error in
+                recorder.record(failure: job, error: error)
+            }
+        )
+
+        await pump.run(Self.consumer(of: [first, second]))
+
+        #expect(recorder.translatedTexts == ["first", "second"])
+        #expect(
+            recorder.successes == [
+                PumpRecorder.Success(job: first, text: "FIRST"),
+                PumpRecorder.Success(job: second, text: "SECOND"),
+            ]
+        )
         #expect(recorder.failures.isEmpty)
     }
 
@@ -115,7 +158,7 @@ struct TranslationJobPumpTests {
             }
         )
 
-        await pump.run(Self.stream(of: [job]))
+        await pump.run(Self.consumer(of: [job]))
 
         #expect(recorder.translatedTexts.isEmpty)
         #expect(recorder.successes.isEmpty)
@@ -146,7 +189,7 @@ struct TranslationJobPumpTests {
             }
         )
 
-        await pump.run(Self.stream(of: [job]))
+        await pump.run(Self.consumer(of: [job]))
 
         #expect(recorder.translatedTexts == ["hello"])
         #expect(recorder.successes.isEmpty)
@@ -155,12 +198,18 @@ struct TranslationJobPumpTests {
         #expect(recorder.failures.first?.error is TranslationFailure)
     }
 
-    private static func stream(of jobs: [TranslationJob]) -> AsyncStream<TranslationJob> {
-        AsyncStream { continuation in
-            for job in jobs {
-                continuation.yield(job)
-            }
-            continuation.finish()
+    /// A consumer with a scripted queue and a stream that finishes after one
+    /// wakeup, so the pump returns once the queue is drained.
+    private static func consumer(of jobs: [TranslationJob]) -> TranslationJobBridge.Consumer {
+        var remaining = jobs
+        let (wakeups, continuation) = AsyncStream<Void>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        continuation.yield(())
+        continuation.finish()
+        return TranslationJobBridge.Consumer(wakeups: wakeups) {
+            guard !remaining.isEmpty else { return nil }
+            return remaining.removeFirst()
         }
     }
 }

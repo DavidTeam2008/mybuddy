@@ -35,11 +35,11 @@ struct TranslationHostView: View {
             .accessibilityHidden(true)
             .translationTask(userToPeer) { session in
                 await TranslationJobPump(session: session, onSuccess: onSuccess, onFailure: onFailure)
-                    .run(userJobs.stream())
+                    .run(userJobs.makeConsumer())
             }
             .translationTask(peerToUser) { session in
                 await TranslationJobPump(session: session, onSuccess: onSuccess, onFailure: onFailure)
-                    .run(peerJobs.stream())
+                    .run(peerJobs.makeConsumer())
             }
             .onChange(of: job) { _, newJob in
                 submit(newJob)
@@ -52,9 +52,9 @@ struct TranslationHostView: View {
     private func submit(_ job: TranslationJob?) {
         guard let job else { return }
         if job.source == userLanguage {
-            userJobs.yield(job)
+            userJobs.submit(job)
         } else if job.source == peerLanguage {
-            peerJobs.yield(job)
+            peerJobs.submit(job)
         }
     }
 }
@@ -90,7 +90,7 @@ struct OneWayTranslationHostView: View {
             .accessibilityHidden(true)
             .translationTask(configuration) { session in
                 await TranslationJobPump(session: session, onSuccess: onSuccess, onFailure: onFailure)
-                    .run(jobs.stream())
+                    .run(jobs.makeConsumer())
             }
             .onChange(of: job) { _, newJob in
                 submit(newJob)
@@ -103,7 +103,7 @@ struct OneWayTranslationHostView: View {
     private func submit(_ job: TranslationJob?) {
         guard let job else { return }
         guard job.source == sourceLanguage, job.target == targetLanguage else { return }
-        jobs.yield(job)
+        jobs.submit(job)
     }
 }
 
@@ -121,36 +121,87 @@ private extension TranslationJobPump {
     }
 }
 
+/// Coalescing translation-job queue shared by both translation hosts.
+///
+/// Producers `submit` jobs; the queue keeps at most one pending job per
+/// `utteranceID` while preserving that ID's first-appearance slot. Consumers
+/// are generation-scoped: only the newest `makeConsumer()` can drain jobs, and
+/// installing a replacement finishes the superseded stream outside the lock.
 final class TranslationJobBridge: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: AsyncStream<TranslationJob>.Continuation?
-    private var pending: TranslationJob?
+    final class Consumer: @unchecked Sendable {
+        let wakeups: AsyncStream<Void>
+        private let takeNextJob: () -> TranslationJob?
 
-    func stream() -> AsyncStream<TranslationJob> {
-        AsyncStream { continuation in
-            lock.lock()
-            self.continuation = continuation
-            if let pending {
-                continuation.yield(pending)
-                self.pending = nil
-            }
-            lock.unlock()
-            continuation.onTermination = { [weak self] _ in
-                self?.lock.lock()
-                self?.continuation = nil
-                self?.lock.unlock()
-            }
+        init(wakeups: AsyncStream<Void>, takeNext: @escaping () -> TranslationJob?) {
+            self.wakeups = wakeups
+            self.takeNextJob = takeNext
+        }
+
+        func takeNext() -> TranslationJob? {
+            takeNextJob()
         }
     }
 
-    func yield(_ job: TranslationJob) {
+    private let lock = NSLock()
+    private var generation = 0
+    private var continuation: AsyncStream<Void>.Continuation?
+    private var queue: [TranslationJob] = []
+
+    func submit(_ job: TranslationJob) {
+        guard !job.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        lock.lock()
+        if let index = queue.firstIndex(where: { $0.utteranceID == job.utteranceID }) {
+            let queued = queue[index]
+            if !queued.isFinal || job.isFinal {
+                queue[index] = job
+            }
+        } else {
+            queue.append(job)
+        }
+        let continuation = self.continuation
+        lock.unlock()
+        continuation?.yield(())
+    }
+
+    func makeConsumer() -> Consumer {
+        let (wakeups, continuation) = AsyncStream<Void>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        lock.lock()
+        generation += 1
+        let consumerGeneration = generation
+        let previousContinuation = self.continuation
+        self.continuation = continuation
+        let hasPendingJobs = !queue.isEmpty
+        lock.unlock()
+
+        continuation.onTermination = { [weak self] _ in
+            self?.clearContinuation(for: consumerGeneration)
+        }
+        previousContinuation?.finish()
+        if hasPendingJobs {
+            continuation.yield(())
+        }
+
+        return Consumer(wakeups: wakeups) { [weak self] in
+            self?.takeNext(for: consumerGeneration)
+        }
+    }
+
+    private func takeNext(for generation: Int) -> TranslationJob? {
         lock.lock()
         defer { lock.unlock() }
-        if let continuation {
-            continuation.yield(job)
-        } else {
-            pending = job
+        guard generation == self.generation, !queue.isEmpty else { return nil }
+        return queue.removeFirst()
+    }
+
+    private func clearContinuation(for generation: Int) {
+        lock.lock()
+        if generation == self.generation {
+            continuation = nil
         }
+        lock.unlock()
     }
 }
 
