@@ -107,7 +107,7 @@
 
 ### P1-1 翻译队列积压（自动化实现完成，待真机验证）
 
-**状态**：自动化实现已完成并合并（#22–#25）：bridge 改为 per-`utteranceID` 合并队列 + final 优先 + generation-scoped consumer；pump 一次唤醒 drain 到空并处理取消/requeue。单测覆盖合并、顺序、final 优先级、pre-pump wakeup、generation、drain/取消。**真机验证未执行**，按 #26 清单验收后再关闭 #21。
+**状态**：自动化实现已完成并合并（#22–#25）：bridge 改为 per-`utteranceID` 合并队列 + final 优先 + generation-scoped `takeNext`；pump 一次唤醒 drain 到空并处理取消/requeue。单测覆盖合并、顺序、final 优先级、pre-pump wakeup、generation、latest-job requeue、drain/取消。**真机验证未执行**，按 #26 清单验收后再关闭 #21。
 
 **原现象（P1-1 前，保留历史）**：`TranslationJobBridge` 只有 1 个 pending 槽位，但 host 就绪后 `AsyncStream` 无界；高频 volatile 会排队。`TranslationPipeline.accept` 用 `lastAppliedSourceCount` 丢弃过期结果，但积压仍占 session、抬高延迟。同传 voiceOut 档防抖更激进（25/50 ms）。
 
@@ -116,8 +116,8 @@
 - 同一 `utteranceID` 最多保留一条 pending job，替换保留该 ID 首次出现的位置；不同 ID 保持 FIFO。
 - 已排队 final 不被后续 non-final 覆盖；non-final 可互相覆盖；任何新 final 可覆盖旧 job。
 - Host 未就绪时也按 ID 合并；`makeConsumer()` 在队列非空时立即补一次 wakeup。
-- consumer generation-scoped：旧 `takeNext()` 返回 nil，旧 `onTermination` 不清新 continuation。
-- pump 每次唤醒 `takeNext()` 到空；取消时同 ID 有更新则丢弃，否则 requeue 到队首并退出；取消错误不触发 `onFailure`。
+- consumer generation-scoped `takeNext()`：旧 generation 返回 nil，旧 `onTermination` 不清新 continuation；`requeue` 接受任意 generation，只要该 job 仍是该句最新提交且无同 ID pending，插入队首并 wake 当前 consumer。
+- pump 每次唤醒 `takeNext()` 到空；取消时该 job 已被同 ID 更新取代则丢弃，否则 requeue 到队首并退出；取消错误不触发 `onFailure`。非任务取消的 `CancellationError` 由下一次 `.translationTask` 重启的新 consumer drain。
 - 时序不变：40/90 ms、voiceOut 25/50 ms、380 ms TTS settle、1.1 s 静音 final、crosstalk、emit 与单槽 `outboundJob`。
 
 **验收**：模拟器回归 `tools/test-unit.sh` 0 failed / 0 skipped，`tools/test-ui.sh` 仅既有模拟器语音 skip；连续快速说话时最终译文延迟不随会话增长、无旧 job 后到等真机口径**未验证**，按 #26 执行。

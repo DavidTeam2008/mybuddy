@@ -1,6 +1,25 @@
 import Foundation
 @testable import Duiyi
 
+/// Builds a translation job for bridge/pump tests. Tests that care about a
+/// specific ID or finality pass it explicitly; everything else gets a fresh
+/// utterance and a stable English → 简中 pair.
+func makeTranslationJob(
+    utteranceID: UUID,
+    text: String,
+    isFinal: Bool = false,
+    id: UUID = UUID()
+) -> TranslationJob {
+    TranslationJob(
+        id: id,
+        utteranceID: utteranceID,
+        source: .english,
+        target: .zhHans,
+        text: text,
+        isFinal: isFinal
+    )
+}
+
 /// Deterministic `TranslationScheduler` for tests: time only moves when the
 /// test advances it, and every requested delay is recorded so wiring tests can
 /// assert what a ViewModel submitted without driving the debounce themselves.

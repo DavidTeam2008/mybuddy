@@ -19,13 +19,20 @@ struct TranslationJobPump {
                     consumer.requeue(job)
                     return
                 }
+                // Empty-text filtering lives in the bridge, the only
+                // production producer; trimming here only normalizes the
+                // text handed to the session.
                 let text = job.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { continue }
                 do {
                     let translatedText = try await translate(text)
                     await onSuccess(job, translatedText)
                 } catch {
                     if Task.isCancelled || error is CancellationError {
+                        // A CancellationError that arrives without task
+                        // cancellation still ends this pump. The bridge keeps
+                        // the job when it is still the latest submission, and
+                        // the host's next `.translationTask` restart installs
+                        // a new consumer whose pump drains it.
                         consumer.requeue(job)
                         return
                     }
