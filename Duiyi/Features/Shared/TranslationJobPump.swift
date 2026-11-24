@@ -25,6 +25,10 @@ struct TranslationJobPump {
                     let translatedText = try await translate(text)
                     await onSuccess(job, translatedText)
                 } catch {
+                    if Task.isCancelled || error is CancellationError {
+                        consumer.requeue(job)
+                        return
+                    }
                     await onFailure(job, error)
                 }
             }
