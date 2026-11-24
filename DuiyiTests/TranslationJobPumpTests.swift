@@ -201,15 +201,39 @@ struct TranslationJobPumpTests {
     /// A consumer with a scripted queue and a stream that finishes after one
     /// wakeup, so the pump returns once the queue is drained.
     private static func consumer(of jobs: [TranslationJob]) -> TranslationJobBridge.Consumer {
-        var remaining = jobs
+        let queue = ScriptedJobQueue(jobs)
         let (wakeups, continuation) = AsyncStream<Void>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
         continuation.yield(())
         continuation.finish()
-        return TranslationJobBridge.Consumer(wakeups: wakeups) {
-            guard !remaining.isEmpty else { return nil }
-            return remaining.removeFirst()
-        }
+        return TranslationJobBridge.Consumer(
+            wakeups: wakeups,
+            takeNext: { queue.takeNext() },
+            requeue: { queue.requeue($0) }
+        )
+    }
+}
+
+private final class ScriptedJobQueue: @unchecked Sendable {
+    private let lock = NSLock()
+    private var jobs: [TranslationJob]
+
+    init(_ jobs: [TranslationJob]) {
+        self.jobs = jobs
+    }
+
+    func takeNext() -> TranslationJob? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !jobs.isEmpty else { return nil }
+        return jobs.removeFirst()
+    }
+
+    func requeue(_ job: TranslationJob) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !jobs.contains(where: { $0.utteranceID == job.utteranceID }) else { return }
+        jobs.insert(job, at: 0)
     }
 }
