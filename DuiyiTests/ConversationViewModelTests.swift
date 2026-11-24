@@ -897,6 +897,22 @@ struct ConversationViewModelTests {
         #expect(viewModel.transcript.count == 1)
     }
 
+    @Test("A long final followed by a short continuation keeps the new source and job")
+    func longFinalThenShortContinuationKeepsNewText() {
+        let viewModel = makeScheduledViewModel(scheduler: ManualTranslationScheduler())
+        let longText = "The translation pipeline, the speech session gate, the storage degradation policy, and the accessibility audit in considerable detail."
+        let shortText = "And the team agreed to revisit the remaining items next week."
+
+        viewModel.accept(Utterance(language: .english, text: longText, isFinal: true))
+        let id = UUID()
+        viewModel.accept(Utterance(id: id, language: .english, text: "And", isFinal: false))
+        viewModel.accept(Utterance(id: id, language: .english, text: "And the team", isFinal: false))
+        viewModel.accept(Utterance(id: id, language: .english, text: shortText, isFinal: true))
+
+        #expect(viewModel.userPane.live?.sourceText == shortText)
+        #expect(viewModel.outboundJob?.text == shortText)
+    }
+
     private func makeScheduledViewModel(
         scheduler: ManualTranslationScheduler
     ) -> ConversationViewModel {
