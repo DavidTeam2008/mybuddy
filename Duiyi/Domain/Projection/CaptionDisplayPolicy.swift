@@ -27,4 +27,11 @@ extension CaptionDisplayPolicy {
         panes: [.user],
         historyLimit: InterpretationLayout.historyLimit
     )
+
+    /// Face-to-face renders both panes and keeps the live line plus three
+    /// history rows per side; older lines remain in the full transcript.
+    static let conversation = CaptionDisplayPolicy(
+        panes: [.user, .peer],
+        historyLimit: ConversationLayout.paneHistoryLimit
+    )
 }
