@@ -9,8 +9,9 @@ struct MeetingViewModelTests {
         let store = InMemoryTaskStore()
         let viewModel = makeViewModel(store: store)
         await viewModel.beginTask()
-        viewModel.accept(Utterance(language: .zhHans, text: "接下来把预算确认一下", isFinal: false))
-        viewModel.accept(Utterance(language: .zhHans, text: "接下来把预算确认一下，本周内发给设计组。", isFinal: true))
+        let firstID = UUID()
+        viewModel.accept(Utterance(id: firstID, language: .zhHans, text: "接下来把预算确认一下", isFinal: false))
+        viewModel.accept(Utterance(id: firstID, language: .zhHans, text: "接下来把预算确认一下，本周内发给设计组。", isFinal: true))
         viewModel.accept(Utterance(language: .zhHans, text: "大家同意六点集合。", isFinal: true))
         #expect(viewModel.transcript.count == 2)
         #expect(viewModel.pane.history.count + (viewModel.pane.live == nil ? 0 : 1) <= 2)
@@ -20,6 +21,56 @@ struct MeetingViewModelTests {
         #expect(saved?.entries.contains { $0.sourceText.contains("六点") } == true)
         let listed = await store.list(filter: .meeting)
         #expect(listed.count == 1)
+    }
+
+    @Test("The same utterance id stays one line from volatile to final")
+    func sameIDVolatileToFinalKeepsOneLine() async {
+        let viewModel = makeViewModel()
+        await viewModel.beginTask()
+        let id = UUID()
+
+        viewModel.accept(Utterance(id: id, language: .zhHans, text: "把预算确认", isFinal: false))
+        viewModel.accept(Utterance(id: id, language: .zhHans, text: "把预算确认一下。", isFinal: true))
+
+        #expect(viewModel.transcript.count == 1)
+        #expect(viewModel.transcript.first?.id == id)
+        #expect(viewModel.transcript.first?.sourceText == "把预算确认一下。")
+        #expect(viewModel.pane.live?.id == id)
+    }
+
+    @Test("Different utterance ids keep separate lines even for similar text")
+    func differentIDsKeepSeparateLines() async {
+        let viewModel = makeViewModel()
+        await viewModel.beginTask()
+
+        viewModel.accept(Utterance(language: .zhHans, text: "把预算确认一下", isFinal: true))
+        viewModel.accept(
+            Utterance(language: .zhHans, text: "把预算确认一下，本周内发给设计组。", isFinal: true)
+        )
+
+        #expect(viewModel.transcript.map(\.sourceText) == [
+            "把预算确认一下",
+            "把预算确认一下，本周内发给设计组。",
+        ])
+        #expect(viewModel.pane.history.map(\.sourceText) == ["把预算确认一下"])
+        #expect(viewModel.pane.live?.sourceText == "把预算确认一下，本周内发给设计组。")
+    }
+
+    @Test("A volatile greeting name swap becomes two lines through the assembler")
+    func volatileGreetingNameSwapKeepsSeparateLines() async throws {
+        let viewModel = makeViewModel(meetingLanguage: .english)
+        await viewModel.beginTask()
+        var assembler = UtteranceAssembler()
+
+        let firstValue = assembler.ingest(language: .english, text: "Hi, Jack", isFinal: false)
+        let first = try #require(firstValue)
+        viewModel.accept(first)
+        let secondValue = assembler.ingest(language: .english, text: "Hi, Lucy", isFinal: false)
+        let second = try #require(secondValue)
+        viewModel.accept(second)
+
+        #expect(second.id != first.id)
+        #expect(viewModel.transcript.map(\.sourceText) == ["Hi, Jack", "Hi, Lucy"])
     }
 
     @Test("A long final followed by a short continuation keeps the new transcript line")
@@ -286,6 +337,42 @@ struct MeetingViewModelTests {
         #expect(viewModel.resumePromptText?.contains("继续任务") == true)
         #expect(viewModel.resumePromptText?.contains(title) == true)
         #expect(viewModel.sessionState == .ready)
+    }
+
+    @Test("Restoring fills the meeting window with every entry and keeps the full transcript")
+    func restoreFillsMeetingWindow() async {
+        let store = InMemoryTaskStore()
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let title = TaskTitle.make(
+            feature: .meeting,
+            source: .zhHans,
+            target: nil,
+            startedAt: startedAt,
+            language: .zhHans,
+            multilingual: false
+        )
+        let draft = TaskDraft(
+            feature: .meeting,
+            sourceLanguage: .zhHans,
+            targetLanguage: nil,
+            multilingual: false,
+            startedAt: startedAt,
+            title: title
+        )
+        guard case let .persisted(seeded) = await store.startNew(draft) else {
+            Issue.record("Could not seed the running task")
+            return
+        }
+        let texts = (0..<5).map { "恢复行 \($0)" }
+        _ = await store.append(texts.map { makeEntry($0) }, to: seeded.id)
+        _ = await store.setStatus(.pausedListening, for: seeded.id)
+
+        let viewModel = makeViewModel(store: store)
+        await viewModel.bootstrap()
+
+        #expect(viewModel.pane.live == nil)
+        #expect(viewModel.pane.history.map(\.sourceText) == texts)
+        #expect(viewModel.transcript.map(\.sourceText) == texts)
     }
 
     @Test("Restoring a multilingual task keeps both recognition languages")

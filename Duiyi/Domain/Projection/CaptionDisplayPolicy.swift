@@ -15,3 +15,9 @@ struct CaptionDisplayPolicy: Equatable, Sendable {
         self.historyLimit = historyLimit
     }
 }
+
+extension CaptionDisplayPolicy {
+    /// Meeting notes render one pane and keep every row; the 2万字 task
+    /// counter, not the display window, stops listening.
+    static let meeting = CaptionDisplayPolicy(panes: [.user], historyLimit: nil)
+}
