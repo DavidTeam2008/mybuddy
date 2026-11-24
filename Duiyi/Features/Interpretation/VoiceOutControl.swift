@@ -22,12 +22,12 @@ struct VoiceOutControl: View {
 
     private var foreground: Color {
         if isBlocked { return Tokens.danger }
-        if isEnabled { return Color(hex: 0x1C1915) }
+        if isEnabled { return Tokens.onAccent }
         return Tokens.textPrimary
     }
 
     private var background: Color {
-        if isBlocked { return Color(hex: 0x2A2424) }
+        if isBlocked { return Tokens.blockedBackground }
         if isEnabled { return Tokens.listen }
         return Tokens.controlIdle
     }

@@ -54,7 +54,7 @@ struct DirectionBar: View {
             VStack(spacing: 2) {
                 Text(caption)
                     .font(.system(size: 10, weight: .medium))
-                    .opacity(0.7)
+                    .foregroundStyle(Tokens.textSecondary)
                 HStack(spacing: 4) {
                     Text(language.badge)
                         .font(CaptionTypography.badgeFont())
@@ -62,8 +62,8 @@ struct DirectionBar: View {
                     Image(systemName: isPicking ? "chevron.up" : "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
                 }
+                .foregroundStyle(Tokens.languageBadge(language))
             }
-            .foregroundStyle(Tokens.languageBadge(language))
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .overlay(

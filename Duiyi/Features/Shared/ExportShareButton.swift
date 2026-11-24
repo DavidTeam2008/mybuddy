@@ -37,7 +37,7 @@ struct ExportShareButton: View {
     private var label: some View {
         Text(title ?? Copy.exportShare(for: language))
             .font(.subheadline.weight(.bold))
-            .foregroundStyle(Color(hex: 0x1C1915))
+            .foregroundStyle(Tokens.onAccent)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
             .background(Tokens.listen, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

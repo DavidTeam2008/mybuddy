@@ -23,7 +23,7 @@ struct PermissionRequestView: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol)
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Tokens.listen)
+                .foregroundStyle(Tokens.accentText)
                 .frame(width: 28, height: 28)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {

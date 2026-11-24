@@ -70,8 +70,8 @@ struct ListeningControl: View {
             return Tokens.controlIdle
         }()
         let symbolColor: Color = {
-            if sessionState.isFailed { return Color.white }
-            if isListening { return Color(hex: 0x1C1915) }
+            if sessionState.isFailed { return Tokens.onDanger }
+            if isListening { return Tokens.onAccent }
             return Tokens.textPrimary
         }()
 

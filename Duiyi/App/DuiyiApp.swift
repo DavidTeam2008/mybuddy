@@ -20,7 +20,6 @@ struct DuiyiApp: App {
             RootView()
                 .environment(environment)
                 .environment(coordinator)
-                .preferredColorScheme(.dark)
         }
     }
 }

@@ -21,7 +21,7 @@ struct LanguageChipGrid: View {
                 } label: {
                     Text(language.nativeName)
                         .font(.subheadline.weight(selected == language ? .semibold : .regular))
-                        .foregroundStyle(selected == language ? Color(hex: 0x1C1915) : Tokens.textPrimary)
+                        .foregroundStyle(selected == language ? Tokens.onAccent : Tokens.textPrimary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
                         .background(

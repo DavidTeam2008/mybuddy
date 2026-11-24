@@ -40,7 +40,7 @@ struct HomeView: View {
                 if let viewModel, !viewModel.unfinished.isEmpty {
                     Text(Copy.unfinishedTasks(for: language))
                         .font(.footnote)
-                        .foregroundStyle(Tokens.listen)
+                        .foregroundStyle(Tokens.accentText)
                     ForEach(viewModel.unfinished) { task in
                         Button {
                             environment.preferences.appMode = task.feature.appMode
@@ -101,7 +101,6 @@ struct HomeView: View {
         .sheet(isPresented: $isSettingsPresented) {
             HomeSettingsSheet()
         }
-        .preferredColorScheme(.dark)
     }
 }
 

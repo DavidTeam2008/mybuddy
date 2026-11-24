@@ -62,21 +62,19 @@ struct HomeSettingsSheet: View {
                             UIApplication.shared.open(url)
                         }
                     }
-                    .foregroundStyle(Tokens.listen)
+                    .foregroundStyle(Tokens.accentText)
                 }
                 .padding(20)
             }
-            .background(Tokens.canvas)
             .navigationTitle(Copy.settingsTitle(for: language))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(Copy.done(for: language)) { dismiss() }
-                        .foregroundStyle(Tokens.listen)
+                        .foregroundStyle(Tokens.accentText)
                 }
             }
         }
-        .preferredColorScheme(.dark)
         .presentationDetents([.medium, .large])
         .task {
             await environment.languageCatalog.refreshCapabilities()
@@ -91,7 +89,7 @@ struct HomeSettingsSheet: View {
         } label: {
             Text(title)
                 .font(.subheadline.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Color(hex: 0x1C1915) : Tokens.textPrimary)
+                .foregroundStyle(selected ? Tokens.onAccent : Tokens.textPrimary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
                 .background(selected ? Tokens.listen : Tokens.sheetChip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

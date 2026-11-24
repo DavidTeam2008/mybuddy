@@ -78,7 +78,7 @@ struct MeetingSettingsSheet: View {
                         .foregroundStyle(Tokens.textPrimary)
                     Spacer()
                     Button(Copy.summarize(for: language), action: onSummarize)
-                        .foregroundStyle(canSummarize ? Tokens.listen : Tokens.textSecondary)
+                        .foregroundStyle(canSummarize ? Tokens.accentText : Tokens.textSecondary)
                         .disabled(!canSummarize)
                 }
                 .font(.subheadline)
@@ -90,7 +90,7 @@ struct MeetingSettingsSheet: View {
                     Spacer()
                     Button(Copy.done(for: language), action: onDone)
                         .fontWeight(.semibold)
-                        .foregroundStyle(Color(hex: 0x1C1915))
+                        .foregroundStyle(Tokens.onAccent)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(Tokens.listen, in: Capsule())
@@ -110,7 +110,7 @@ struct MeetingSettingsSheet: View {
         Button(action: action) {
             Text(title)
                 .font(.subheadline.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Color(hex: 0x1C1915) : Tokens.textPrimary)
+                .foregroundStyle(selected ? Tokens.onAccent : Tokens.textPrimary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
                 .background(selected ? Tokens.listen : Tokens.sheetChip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

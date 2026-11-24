@@ -9,7 +9,7 @@ struct OnboardingView: View {
             Text("DUIYI")
                 .font(.caption.weight(.semibold))
                 .tracking(2)
-                .foregroundStyle(Tokens.listen)
+                .foregroundStyle(Tokens.accentText)
 
             Text(viewModel.title)
                 .font(.system(size: 32, weight: .semibold))
@@ -57,7 +57,7 @@ struct OnboardingView: View {
                                     UIApplication.shared.open(url)
                                 }
                             }
-                            .foregroundStyle(Tokens.listen)
+                            .foregroundStyle(Tokens.accentText)
                         }
                     }
                 }
@@ -71,7 +71,7 @@ struct OnboardingView: View {
             } label: {
                 Text(viewModel.primaryButtonTitle)
                     .font(.headline)
-                    .foregroundStyle(Color(hex: 0x1C1915))
+                    .foregroundStyle(Tokens.onAccent)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
                     .background(Tokens.listen, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -92,7 +92,6 @@ struct OnboardingView: View {
             )
             .id("\(viewModel.selectedLanguage.rawValue)-\(viewModel.selectedPeerLanguage.rawValue)")
         }
-        .preferredColorScheme(.dark)
     }
 
     private func handlePrimary() async {
