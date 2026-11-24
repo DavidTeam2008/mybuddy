@@ -138,6 +138,18 @@ struct UtteranceAssemblerTests {
         #expect(second?.text == "Hi, Lucy")
     }
 
+    @Test("A greeting name swap while still volatile gets a new utterance id")
+    func greetingNameSwapWhileVolatileGetsNewIdentity() throws {
+        var assembler = UtteranceAssembler()
+        let firstValue = assembler.ingest(language: .english, text: "Hi, Jack", isFinal: false)
+        let first = try #require(firstValue)
+        let secondValue = assembler.ingest(language: .english, text: "Hi, Lucy", isFinal: false)
+        let second = try #require(secondValue)
+
+        #expect(second.id != first.id)
+        #expect(second.text == "Hi, Lucy")
+    }
+
     @Test("A new sentence after a final gets a new utterance id")
     func unrelatedSentenceAfterFinalGetsNewIdentity() {
         var assembler = UtteranceAssembler()

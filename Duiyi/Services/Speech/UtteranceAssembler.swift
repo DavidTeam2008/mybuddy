@@ -20,6 +20,15 @@ struct UtteranceAssembler: Equatable, Sendable {
             lockedLanguage = nil
         }
 
+        // A greeting name swap is a different person speaking and must start a
+        // new utterance even while both greetings are still volatile. Compute
+        // it before a language preemption can replace the lock, so a losing
+        // language's stale text can never look like the current greeting.
+        let previousInLanguage = textFor(language)
+        let isGreetingNameSwap = (lockedLanguage == nil || lockedLanguage == language)
+            && !previousInLanguage.isEmpty
+            && SpokenText.isNameSwap(trimmed, of: previousInLanguage)
+
         if let locked = lockedLanguage, language != locked {
             let incumbent = textFor(locked)
             guard Self.shouldPreempt(
@@ -34,15 +43,15 @@ struct UtteranceAssembler: Equatable, Sendable {
             lockedLanguage = language
         }
 
-        if let locked = lockedLanguage, language == locked {
+        if isGreetingNameSwap {
+            beginNextUtterance(keeping: language)
+            lockedLanguage = language
+        } else if let locked = lockedLanguage, language == locked {
             let previous = textFor(locked)
             if !previous.isEmpty,
                isWinnerFinal(locked),
-               SpokenText.isNameSwap(trimmed, of: previous)
-                || (
-                    !SpokenText.isContinuation(trimmed, of: previous, language: language)
-                    && !SpokenText.isRefinement(trimmed, of: previous)
-                ) {
+               !SpokenText.isContinuation(trimmed, of: previous, language: language)
+                && !SpokenText.isRefinement(trimmed, of: previous) {
                 beginNextUtterance(keeping: locked)
                 lockedLanguage = language
             }
