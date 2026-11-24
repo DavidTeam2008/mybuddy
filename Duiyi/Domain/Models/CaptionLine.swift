@@ -70,7 +70,11 @@ struct PaneState: Equatable, Sendable {
             live = next
             return next
         }
-        if live?.id == line.id || shouldMerge(line, into: live) {
+        // A new utterance id is a new caption line. Text heuristics may
+        // classify a short new phrase as a continuation of a long previous
+        // line; merging those ids lets preferredSource keep the longer old
+        // source and silently drops the new phrase from translation.
+        if live?.id == line.id {
             mergeLive(line)
         } else {
             archiveLive()
@@ -188,6 +192,19 @@ struct PaneState: Equatable, Sendable {
     }
 
     private func shouldCollapse(_ older: CaptionLine, into newer: CaptionLine) -> Bool {
+        if older.id != newer.id {
+            // Fuzzy refinement can match a short new phrase as a subsequence of
+            // a much longer previous line. Different utterance ids only merge
+            // when the two texts are comparable in size; otherwise the new
+            // phrase would be swallowed and never translated.
+            let olderCount = SpokenText.compact(older.sourceText).count
+            let newerCount = SpokenText.compact(newer.sourceText).count
+            let shorter = min(olderCount, newerCount)
+            let longer = max(olderCount, newerCount)
+            guard longer > 0, Double(shorter) / Double(longer) >= 0.55 else {
+                return false
+            }
+        }
         guard older.source == newer.source, older.side == newer.side else {
             return false
         }

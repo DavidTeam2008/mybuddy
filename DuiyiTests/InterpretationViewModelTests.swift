@@ -210,6 +210,36 @@ struct InterpretationViewModelTests {
         #expect(viewModel.outboundJob == nil)
     }
 
+    @Test("A new final continuation keeps its own source text and translation job")
+    func newFinalContinuationKeepsOwnText() {
+        let viewModel = makeViewModel()
+        let first = Utterance(
+            language: .english,
+            text: "Calibration. The Quarterly Engineering Review covered the migration plan.",
+            isFinal: true
+        )
+        viewModel.accept(first)
+        let second = Utterance(
+            language: .english,
+            text: "The translation pipeline, the speech session gate, the storage degradation policy, and the accessibility audit in considerable detail.",
+            isFinal: true
+        )
+        viewModel.accept(second)
+        let thirdID = UUID()
+        viewModel.accept(Utterance(id: thirdID, language: .english, text: "And", isFinal: false))
+        viewModel.accept(Utterance(id: thirdID, language: .english, text: "And the team", isFinal: false))
+        let third = Utterance(
+            id: thirdID,
+            language: .english,
+            text: "And the team agreed to revisit the remaining items next week.",
+            isFinal: true
+        )
+        viewModel.accept(third)
+
+        #expect(viewModel.pane.live?.sourceText.contains("And the team agreed") == true)
+        #expect(viewModel.outboundJob?.text.contains("And the team agreed") == true)
+    }
+
     @Test("Continuation aliases are registered through the pipeline")
     func continuationAliasResolvesThroughPipeline() {
         let viewModel = makeViewModel(scheduler: ManualTranslationScheduler())
