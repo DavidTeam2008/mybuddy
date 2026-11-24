@@ -32,7 +32,7 @@
 
 | # | 候选 | 状态 | 建议强度 | 证据 / 剩余摩擦 | 04 映射 |
 | --- | --- | --- | --- | --- | --- |
-| C04 | 字幕/文字稿投影有 4 份实现 | 已完成（代码） | 强·合并 | spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27) / D8 已落地：`CaptionProjection` 单一有序 record store；三 VM 全部迁移（#29–#31，PR #34–#36）；清理与文档回填（#32 非设备部分）：`PaneState` 仅保留派生快照、`TranslationPipeline` alias API 与 `SpokenText.isDistinctGreeting` 删除。遗留：完整 iPhone 13 真机矩阵未验证，#32 保持 open。 | Wave 3 — 已覆盖 |
+| C04 | 字幕/文字稿投影有 4 份实现 | 已完成 | 强·合并 | spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27) / D8 已落地：`CaptionProjection` 单一有序 record store；三 VM 全部迁移（#29–#31，PR #34–#36）；清理与文档回填（#32 非设备部分）：`PaneState` 仅保留派生快照、`TranslationPipeline` alias API 与 `SpokenText.isDistinctGreeting` 删除；iPhone 13 真机矩阵 2026-11-25 用户确认通过，#32 与 #27 已关闭。 | Wave 3 — 已覆盖 |
 | C06 | 能力门禁与资产准备没有 module | 未做 | 强·合并 | 仅 `HomeSettingsSheet` 消费 `unavailableLanguages`；5 条 `speechModels.prepare` 流程（Home/Onboarding/Conversation/Interpretation/Meeting）；无 gate module。 | P2-6 + P3-3 — 部分覆盖 |
 | C08 | 总结用例没有 module | 未做 | 强·合并 | 4 条独立 summarize 路径（3 个 VM + `TaskDetailViewModel`）；2 处可用性横幅。 | P3-3（4 个总结）— 部分覆盖 |
 | C09 | 组合根有两个组装点 | 未做 | 值得探索·合并 | `AppEnvironment` 仍有 12 个 let；`RootView.make*` + route switch；VM 默认使用 `InMemoryTaskStore`。 | 不在列表 |
@@ -65,7 +65,7 @@
 - **部分覆盖（4）**：C06（P2-6 / P3-3）、C08（P3-3）、C16（P2-4）、C17（P2-3）。
 - **已覆盖（1）**：C04（Wave 3）。
 
-注意：覆盖状态只说明 `04-roadmap.md` 是否已有对应条目，与代码完成状态是两个维度。C04 已在 `04` 立项为 Wave 3，代码收敛完成（#28–#31），#32 的完整真机矩阵仍待验证；其余 7 项尚未进入 `04` 待办。
+注意：覆盖状态只说明 `04-roadmap.md` 是否已有对应条目，与代码完成状态是两个维度。C04 已完成（#28–#32；真机矩阵 2026-11-25 用户确认）；其余 7 项尚未进入 `04` 待办。
 
 ---
 

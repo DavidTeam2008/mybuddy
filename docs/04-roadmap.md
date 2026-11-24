@@ -20,7 +20,7 @@
 | 语言目录实查 | 生产注入 `SystemLanguageCatalog`（探针缓存）；当前仅首页设置消费，v1 扩展到所有语言入口 |
 | Wave 1 数据完整性 | 已合并到 `wave-1-data-integrity`（#2–#12，tip `fd820e4`）：TaskStoreV2、SpeechSessionGate、TaskLifecycle、显性存储降级、清屏/50 条/2 万字语义。iPhone 13 真机清单未验证 |
 | P1-1 翻译队列积压 | 已完成（#22–#25，main `37f0a50`）；真机验证 2026-11-24 通过（用户确认）；#21/#26 已关闭 |
-| Wave 3 C04 字幕/文字稿投影 | 代码收敛完成（#28–#31，PR #33–#36；#32 清理+文档已回填）；iPhone 13 完整真机矩阵未验证，#32 保持 open；候选台账见 [05-architecture-backlog.md](05-architecture-backlog.md) |
+| Wave 3 C04 字幕/文字稿投影 | 已完成（#28–#31，PR #33–#36；#32 清理+文档+iPhone 13 真机矩阵，用户确认 2026-11-25）；候选台账见 [05-architecture-backlog.md](05-architecture-backlog.md) |
 | 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
 
 ### Wave 1 测试调整说明（2026-11-23）
@@ -160,7 +160,7 @@
 
 **验收**：中英混读夹具命中率提升且不增加串音；快速切换说话人不丢整句。
 
-### Wave 3：C04 字幕/文字稿投影（代码收敛完成；真机矩阵待验证）
+### Wave 3：C04 字幕/文字稿投影（已完成）
 
 **来源**：2026-11-23 架构审查候选 C04；完整台账见 [`05-architecture-backlog.md`](05-architecture-backlog.md)。
 
@@ -170,7 +170,7 @@
 
 **验收**：现有三模块字幕/恢复/清屏/导出测试保持通过；新增投影 module 的边界测试；真机回归字幕窗口、恢复、清屏与导出。
 
-**进展**：2026-11-24 完成 C04a–d（#28–#31，PR #33–#36）：新增投影模块与 28 条契约测试，三 VM 迁移，删除三份 `upsertTranscript` / alias / 跨 ID 文本合并；补齐 `UtteranceAssembler` 的 volatile greeting name swap 新 ID。C04e（#32）的清理与文档已回填：`PaneState` 仅保留派生快照，`TranslationPipeline` alias API 与 `SpokenText.isDistinctGreeting` 删除。完整 iPhone 13 真机矩阵尚未验证，#32 保持 open，C04 待真机通过后收口。
+**进展**：2026-11-24 完成 C04a–d（#28–#31，PR #33–#36）：新增投影模块与 28 条契约测试，三 VM 迁移，删除三份 `upsertTranscript` / alias / 跨 ID 文本合并；补齐 `UtteranceAssembler` 的 volatile greeting name swap 新 ID。C04e（#32）的清理与文档已回填：`PaneState` 仅保留派生快照，`TranslationPipeline` alias API 与 `SpokenText.isDistinctGreeting` 删除。完整 iPhone 13 真机矩阵由用户确认通过（2026-11-25）；#32 与父票 #27 已关闭，C04 收口完成。
 
 ---
 
@@ -231,7 +231,7 @@
 | 3 | P0-2 长会话显示窗口 + 计数 | P0-3 已完成部分 | 已完成 Wave 1（#9/#10/#11）；D7 续集任务组仍待后续（1–2 周） |
 | 4 | P1-1 翻译队列合并 | 无 | 已完成（#22–#25，main `37f0a50`）；真机验证 2026-11-24 通过（用户确认） |
 | 5 | P1-4 混读/短句质量 | 真机夹具 | 未开始（1–2 周） |
-| 6 | Wave 3 C04 字幕/文字稿投影 | 无（建议 P1-4 后） | 部分修复；spec #27 已确认，代码未开始（架构 wave） |
+| 6 | Wave 3 C04 字幕/文字稿投影 | 无（建议 P1-4 后） | 已完成（#28–#32；真机矩阵 2026-11-25 用户确认） |
 
 同一失败检查修复 2 次仍失败，或同一子任务 3 轮修复-验证无进展时停止上报（团队规则）。
 
