@@ -20,13 +20,13 @@ final class ConversationViewModel {
     var userLanguage: AppLanguage
     var peerLanguage: AppLanguage
     var fontSize: CaptionFontSize
-    var userPane = PaneState.empty
-    var peerPane = PaneState.empty
+    var userPane: PaneState { projection.pane(.user) }
+    var peerPane: PaneState { projection.pane(.peer) }
     var isSettingsPresented = false
     var isSummaryPresented = false
     var autoStartListening: Bool
     var holdScreenAfterPause = false
-    var transcript: [TranscriptEntry] = []
+    var transcript: [TranscriptEntry] { projection.transcript }
     var summary: ConversationSummary?
     var summaryError: String?
     var summaryAvailability: SummaryAvailability = .unavailable
@@ -46,6 +46,7 @@ final class ConversationViewModel {
     private var lastCommittedAt = Date.distantPast
     private let idleRestoreDelay: Duration
     private let pipeline: TranslationPipeline
+    private var projection = CaptionProjection(policy: .conversation)
 
     init(
         gate: any SpeechSessionGating,
@@ -280,8 +281,8 @@ final class ConversationViewModel {
         stateOverride = nil
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
-        mutatePane(.user) { $0.speakingHint = nil }
-        mutatePane(.peer) { $0.speakingHint = nil }
+        projection.setSpeakingHint(nil, pane: .user)
+        projection.setSpeakingHint(nil, pane: .peer)
         switch outcome {
         case let .ended(session):
             resetCaptions()
@@ -338,8 +339,8 @@ final class ConversationViewModel {
                 idleRestoreTask?.cancel()
             }
         }
-        mutatePane(.user) { $0.speakingHint = nil }
-        mutatePane(.peer) { $0.speakingHint = nil }
+        projection.setSpeakingHint(nil, pane: .user)
+        projection.setSpeakingHint(nil, pane: .peer)
     }
 
     /// Display-only clear: flush any pending captions first, then empty both
@@ -347,16 +348,13 @@ final class ConversationViewModel {
     /// routing bookkeeping, and listening stream stay untouched.
     func clearDisplay() async {
         await lifecycle.flush()
-        userPane.resetCaptions()
-        peerPane.resetCaptions()
+        projection.clearDisplay()
         isSummaryPresented = false
         isExportThenContinuePending = false
     }
 
     func resetCaptions() {
-        userPane.resetCaptions()
-        peerPane.resetCaptions()
-        transcript = []
+        projection.reset()
         pipeline.reset()
         routedSideByUtterance.removeAll()
         lastCommittedLanguage = nil
@@ -455,52 +453,21 @@ final class ConversationViewModel {
         let speaking = Copy.speaking(for: speaker == .user ? userLanguage : peerLanguage)
 
         if utterance.isFinal {
-            mutatePane(speaker) { $0.speakingHint = nil }
+            projection.setSpeakingHint(nil, pane: speaker)
             lastCommittedLanguage = utterance.language
             lastCommittedAt = .now
         } else {
-            mutatePane(speaker) { $0.speakingHint = speaking }
-            mutatePane(listener) { $0.speakingHint = nil }
+            projection.setSpeakingHint(speaking, pane: speaker)
+            projection.setSpeakingHint(nil, pane: listener)
         }
 
-        let existing = pane(listener).live
-        let captionID: UUID
-        let carriedTranslation: String
-        if let existing, existing.source == utterance.language,
-           SpokenText.isDistinctGreeting(
-            incomingSource: utterance.text,
-            incomingDisplay: utterance.text,
-            previousSource: existing.sourceText,
-            previousDisplay: existing.displayText
-           ) {
-            captionID = UUID()
-            carriedTranslation = ""
-            pipeline.registerAlias(utterance.id, to: captionID)
-        } else if let existing, existing.source == utterance.language,
-           SpokenText.isContinuation(utterance.text, of: existing.sourceText, language: utterance.language) {
-            captionID = existing.id
-            carriedTranslation = existing.translatedText
-            pipeline.registerAlias(utterance.id, to: existing.id)
-        } else {
-            captionID = utterance.id
-            carriedTranslation = existing?.id == utterance.id ? existing?.translatedText ?? "" : ""
+        guard let line = projection.ingest(utterance, pane: listener, speaker: speaker) else {
+            return
         }
-
-        let line = CaptionLine(
-            id: captionID,
-            side: listener,
-            source: utterance.language,
-            sourceText: utterance.text,
-            translatedText: carriedTranslation,
-            phase: utterance.isFinal ? .settled : .streaming
-        )
-        var applied = line
-        mutatePane(listener) {
-            applied = $0.applyLive(line)
-            $0.trimHistory(to: ConversationLayout.paneHistoryLimit)
+        if line.phase == .settled {
+            lifecycle.persist(projection.transcript)
         }
-        upsertTranscript(line: applied, speaker: speaker)
-        enqueueTranslation(applied, isFinal: utterance.isFinal)
+        enqueueTranslation(line, isFinal: utterance.isFinal)
     }
 
     func fulfill(job: TranslationJob, text: String) {
@@ -563,72 +530,9 @@ final class ConversationViewModel {
     }
 
     private func applyTranslation(utteranceID: UUID, text: String, settle: Bool) {
-        mutatePane(.user) { $0.applyTranslation(utteranceID: utteranceID, text: text, settle: settle) }
-        mutatePane(.peer) { $0.applyTranslation(utteranceID: utteranceID, text: text, settle: settle) }
-        if let index = transcript.firstIndex(where: { $0.id == utteranceID }) {
-            transcript[index].translatedText = text
-            if settle {
-                transcript[index].isFinal = true
-                lifecycle.persist(transcript)
-            }
-        }
-    }
-
-    private func upsertTranscript(line: CaptionLine, speaker: SpeakerSide) {
-        if let index = transcript.firstIndex(where: { $0.id == line.id }) {
-            transcript[index].sourceText = SpokenText.preferredSource(transcript[index].sourceText, line.sourceText)
-            if !line.translatedText.isEmpty {
-                transcript[index].translatedText = line.translatedText
-            }
-            transcript[index].isFinal = line.phase == .settled
-            dropPrefixTranscript(after: index, speaker: speaker, language: line.source)
-            if line.phase == .settled {
-                lifecycle.persist(transcript)
-            }
-            return
-        }
-        if let last = transcript.last,
-           last.speaker == speaker,
-           SpokenText.isContinuation(line.sourceText, of: last.sourceText, language: line.source) {
-            var updated = last
-            updated.sourceText = SpokenText.preferredSource(last.sourceText, line.sourceText)
-            if !line.translatedText.isEmpty {
-                updated.translatedText = line.translatedText
-            }
-            updated.isFinal = line.phase == .settled
-            transcript[transcript.count - 1] = updated
-            dropPrefixTranscript(after: transcript.count - 1, speaker: speaker, language: line.source)
-            if line.phase == .settled {
-                lifecycle.persist(transcript)
-            }
-            return
-        }
-        transcript.append(
-            TranscriptEntry(
-                id: line.id,
-                speaker: speaker,
-                source: line.source,
-                sourceText: line.sourceText,
-                translatedText: line.translatedText,
-                isFinal: line.phase == .settled
-            )
-        )
-        if line.phase == .settled {
-            lifecycle.persist(transcript)
-        }
-    }
-
-    private func dropPrefixTranscript(after index: Int, speaker: SpeakerSide, language: AppLanguage) {
-        let current = transcript[index]
-        var cursor = index
-        while cursor > 0 {
-            let prior = transcript[cursor - 1]
-            guard prior.speaker == speaker,
-                  SpokenText.isContinuation(current.sourceText, of: prior.sourceText, language: language) else {
-                break
-            }
-            transcript.remove(at: cursor - 1)
-            cursor -= 1
+        projection.applyTranslation(utteranceID: utteranceID, text: text, settle: settle)
+        if settle {
+            lifecycle.persist(projection.transcript)
         }
     }
 
@@ -637,22 +541,6 @@ final class ConversationViewModel {
         guard Date().timeIntervalSince(lastCommittedAt) < 1.0 else { return false }
         guard utterance.language != lastCommittedLanguage else { return false }
         return !UtteranceAssembler.isConfident(utterance.text, language: utterance.language)
-    }
-
-    private func pane(_ side: SpeakerSide) -> PaneState {
-        switch side {
-        case .user: return userPane
-        case .peer: return peerPane
-        }
-    }
-
-    private func mutatePane(_ side: SpeakerSide, _ body: (inout PaneState) -> Void) {
-        switch side {
-        case .user:
-            body(&userPane)
-        case .peer:
-            body(&peerPane)
-        }
     }
 
     private func createNewTask() async {
@@ -719,8 +607,8 @@ final class ConversationViewModel {
         guard interrupted else { return }
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
-        mutatePane(.user) { $0.speakingHint = nil }
-        mutatePane(.peer) { $0.speakingHint = nil }
+        projection.setSpeakingHint(nil, pane: .user)
+        projection.setSpeakingHint(nil, pane: .peer)
     }
 
     /// Stops capture before the pair is mutated and the live captions are
@@ -746,26 +634,8 @@ final class ConversationViewModel {
             peerLanguage = target
             preferences.peerLanguage = target
         }
-        transcript = session.entries
+        projection.restore(session.entries)
         summary = session.summary
-        userPane = .empty
-        peerPane = .empty
-        for entry in session.entries {
-            let listener = entry.speaker.opposite
-            mutatePane(listener) {
-                $0.history.append(
-                    CaptionLine(
-                        id: entry.id,
-                        side: listener,
-                        source: entry.source,
-                        sourceText: entry.sourceText,
-                        translatedText: entry.translatedText,
-                        phase: .settled
-                    )
-                )
-                $0.trimHistory(to: ConversationLayout.paneHistoryLimit)
-            }
-        }
         resumePromptText = Copy.continueTask(session.title, for: userLanguage)
     }
 

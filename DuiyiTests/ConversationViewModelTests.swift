@@ -245,28 +245,31 @@ struct ConversationViewModelTests {
         #expect(viewModel.canSummarize)
     }
 
-    @Test("Growing restatements of the same sentence stay on one live line")
-    func continuationDoesNotCreateHistoryRows() async {
+    @Test("A growing update on one utterance id stays on one live line")
+    func growingUpdateOnOneIDStaysOneLine() async {
         let viewModel = makeViewModel()
         await viewModel.setUserLanguage(.zhHans)
+        let id = UUID()
         let first = Utterance(
+            id: id,
             language: .english,
             text: "The more inference added to the database",
             isFinal: true
         )
         let second = Utterance(
+            id: id,
             language: .english,
             text: "The more inference added to the database of media from plot TV to games the better the prediction model",
             isFinal: true
         )
         viewModel.accept(first)
         viewModel.fulfill(
-            job: TranslationJob(utteranceID: first.id, source: .english, target: .zhHans, text: first.text, isFinal: true),
+            job: TranslationJob(utteranceID: id, source: .english, target: .zhHans, text: first.text, isFinal: true),
             text: "从数据库中添加的推理越多"
         )
         viewModel.accept(second)
         viewModel.fulfill(
-            job: TranslationJob(utteranceID: second.id, source: .english, target: .zhHans, text: second.text, isFinal: true),
+            job: TranslationJob(utteranceID: id, source: .english, target: .zhHans, text: second.text, isFinal: true),
             text: "从情节电视到游戏等媒体的数据库中添加的推理越多，预测模型就越好。"
         )
 
@@ -274,6 +277,57 @@ struct ConversationViewModelTests {
         #expect(viewModel.userPane.live?.sourceText == second.text)
         #expect(viewModel.userPane.live?.translatedText.contains("预测模型") == true)
         #expect(viewModel.transcript.count == 1)
+    }
+
+    @Test("Different utterance ids keep separate lines and translations")
+    func differentIDsKeepSeparateLines() async {
+        let viewModel = makeViewModel()
+        await viewModel.setUserLanguage(.zhHans)
+        let first = Utterance(
+            language: .english,
+            text: "See you at three",
+            isFinal: true
+        )
+        let second = Utterance(
+            language: .english,
+            text: "See you at three tomorrow",
+            isFinal: true
+        )
+        viewModel.accept(first)
+        viewModel.fulfill(
+            job: TranslationJob(utteranceID: first.id, source: .english, target: .zhHans, text: first.text, isFinal: true),
+            text: "三点见"
+        )
+        viewModel.accept(second)
+        viewModel.fulfill(
+            job: TranslationJob(utteranceID: second.id, source: .english, target: .zhHans, text: second.text, isFinal: true),
+            text: "明天三点见"
+        )
+
+        #expect(viewModel.userPane.history.map(\.id) == [first.id])
+        #expect(viewModel.userPane.history.first?.translatedText == "三点见")
+        #expect(viewModel.userPane.live?.id == second.id)
+        #expect(viewModel.userPane.live?.translatedText == "明天三点见")
+        #expect(viewModel.transcript.map(\.id) == [first.id, second.id])
+    }
+
+    @Test("A new line on one pane leaves the other pane's live line alone")
+    func panesStayIsolated() async {
+        let viewModel = makeViewModel()
+        await viewModel.setUserLanguage(.zhHans)
+        viewModel.accept(Utterance(language: .english, text: "See you at three", isFinal: true))
+        viewModel.accept(Utterance(language: .zhHans, text: "好的我知道了", isFinal: true))
+        viewModel.accept(Utterance(language: .english, text: "Bring the contract", isFinal: true))
+
+        #expect(viewModel.userPane.history.map(\.sourceText) == ["See you at three"])
+        #expect(viewModel.userPane.live?.sourceText == "Bring the contract")
+        #expect(viewModel.peerPane.live?.sourceText == "好的我知道了")
+        #expect(viewModel.peerPane.history.isEmpty)
+        #expect(viewModel.transcript.map(\.sourceText) == [
+            "See you at three",
+            "好的我知道了",
+            "Bring the contract",
+        ])
     }
 
     @Test("Japanese speech for a Chinese-reading user lands on the user pane")
@@ -531,6 +585,30 @@ struct ConversationViewModelTests {
         #expect(viewModel.resumePromptText?.contains("继续任务") == true)
         #expect(viewModel.resumePromptText?.contains(title) == true)
         #expect(viewModel.sessionState == .ready)
+    }
+
+    @Test("A translation after a display clear updates the transcript without revealing the line")
+    func translationAfterClearUpdatesTranscriptOnly() async {
+        let viewModel = makeViewModel()
+        await viewModel.setUserLanguage(.zhHans)
+        let utterance = Utterance(language: .english, text: "See you at three", isFinal: true)
+        viewModel.accept(utterance)
+
+        await viewModel.clearDisplay()
+        viewModel.fulfill(
+            job: TranslationJob(
+                utteranceID: utterance.id,
+                source: .english,
+                target: .zhHans,
+                text: utterance.text,
+                isFinal: true
+            ),
+            text: "三点见"
+        )
+
+        #expect(viewModel.userPane == .empty)
+        #expect(viewModel.peerPane == .empty)
+        #expect(viewModel.transcript.first?.translatedText == "三点见")
     }
 
     @Test("Exporting after clearing the display keeps the full transcript")
@@ -868,19 +946,17 @@ struct ConversationViewModelTests {
         #expect(viewModel.outboundJob == nil)
     }
 
-    @Test("Continuation aliases are registered through the pipeline")
-    func continuationAliasResolvesThroughPipeline() async {
+    @Test("A new utterance id gets its own line and its own translation job")
+    func newIDGetsItsOwnLineAndTranslation() async {
         let viewModel = makeScheduledViewModel(scheduler: ManualTranslationScheduler())
         let first = Utterance(language: .english, text: "See you at three", isFinal: true)
         let second = Utterance(language: .english, text: "See you at three tomorrow", isFinal: true)
 
         viewModel.accept(first)
-        viewModel.accept(second)
-
-        // The continuation line itself is keyed to the canonical caption.
         #expect(viewModel.outboundJob?.utteranceID == first.id)
+        viewModel.accept(second)
+        #expect(viewModel.outboundJob?.utteranceID == second.id)
 
-        // A result keyed by the raw utterance still lands on the canonical line.
         viewModel.fulfill(
             job: TranslationJob(
                 utteranceID: second.id,
@@ -892,9 +968,10 @@ struct ConversationViewModelTests {
             text: "明天三点见"
         )
 
-        #expect(viewModel.userPane.live?.id == first.id)
+        #expect(viewModel.userPane.live?.id == second.id)
         #expect(viewModel.userPane.live?.translatedText == "明天三点见")
-        #expect(viewModel.transcript.count == 1)
+        #expect(viewModel.userPane.history.map(\.id) == [first.id])
+        #expect(viewModel.transcript.map(\.id) == [first.id, second.id])
     }
 
     @Test("A long final followed by a short continuation keeps the new source and job")
