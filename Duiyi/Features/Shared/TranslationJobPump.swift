@@ -15,12 +15,20 @@ struct TranslationJobPump {
     func run(_ consumer: TranslationJobBridge.Consumer) async {
         for await _ in consumer.wakeups {
             while let job = consumer.takeNext() {
+                if Task.isCancelled {
+                    consumer.requeue(job)
+                    return
+                }
                 let text = job.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { continue }
                 do {
                     let translatedText = try await translate(text)
                     await onSuccess(job, translatedText)
                 } catch {
+                    if Task.isCancelled || error is CancellationError {
+                        consumer.requeue(job)
+                        return
+                    }
                     await onFailure(job, error)
                 }
             }

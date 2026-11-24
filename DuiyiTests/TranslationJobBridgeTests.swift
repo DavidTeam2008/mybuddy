@@ -177,6 +177,58 @@ struct TranslationJobBridgeTests {
         #expect(current.takeNext() == job)
     }
 
+    @Test("A requeued job returns to the front of the queue")
+    func requeuedJobGoesToFront() {
+        let bridge = TranslationJobBridge()
+        let first = makeJob(utteranceID: UUID(), text: "A1")
+        let second = makeJob(utteranceID: UUID(), text: "B1")
+        bridge.submit(first)
+        bridge.submit(second)
+
+        let consumer = bridge.makeConsumer()
+        #expect(consumer.takeNext() == first)
+        consumer.requeue(first)
+
+        #expect(consumer.takeNext() == first)
+        #expect(consumer.takeNext() == second)
+        #expect(consumer.takeNext() == nil)
+    }
+
+    @Test("A requeued job is discarded when its utterance already has a pending job")
+    func requeueDiscardsWhenNewerSameUtterancePending() {
+        let bridge = TranslationJobBridge()
+        let utteranceID = UUID()
+        let original = makeJob(utteranceID: utteranceID, text: "A1")
+        let other = makeJob(utteranceID: UUID(), text: "B1")
+        let newer = makeJob(utteranceID: utteranceID, text: "A2")
+        bridge.submit(original)
+        bridge.submit(other)
+
+        let consumer = bridge.makeConsumer()
+        #expect(consumer.takeNext() == original)
+        bridge.submit(newer)
+        consumer.requeue(original)
+
+        #expect(consumer.takeNext() == other)
+        #expect(consumer.takeNext() == newer)
+        #expect(consumer.takeNext() == nil)
+    }
+
+    @Test("A superseded consumer cannot requeue a job")
+    func supersededConsumerCannotRequeue() {
+        let bridge = TranslationJobBridge()
+        let superseded = bridge.makeConsumer()
+        let current = bridge.makeConsumer()
+        let job = makeJob(utteranceID: UUID(), text: "hello", isFinal: true)
+
+        superseded.requeue(job)
+        #expect(current.takeNext() == nil)
+
+        current.requeue(job)
+        #expect(current.takeNext() == job)
+        #expect(current.takeNext() == nil)
+    }
+
     @Test("A whitespace-only job never enters the queue")
     func whitespaceOnlyJobIsIgnored() {
         let bridge = TranslationJobBridge()

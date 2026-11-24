@@ -131,14 +131,28 @@ final class TranslationJobBridge: @unchecked Sendable {
     final class Consumer: @unchecked Sendable {
         let wakeups: AsyncStream<Void>
         private let takeNextJob: () -> TranslationJob?
+        private let requeueJob: (TranslationJob) -> Void
 
-        init(wakeups: AsyncStream<Void>, takeNext: @escaping () -> TranslationJob?) {
+        init(
+            wakeups: AsyncStream<Void>,
+            takeNext: @escaping () -> TranslationJob?,
+            requeue: @escaping (TranslationJob) -> Void
+        ) {
             self.wakeups = wakeups
             self.takeNextJob = takeNext
+            self.requeueJob = requeue
         }
 
         func takeNext() -> TranslationJob? {
             takeNextJob()
+        }
+
+        /// Returns a job that was already taken but not translated. The job is
+        /// discarded when a newer job for the same utterance is pending, so a
+        /// cancelled pump never resurrects superseded text. Superseded
+        /// consumers cannot requeue into a newer generation.
+        func requeue(_ job: TranslationJob) {
+            requeueJob(job)
         }
     }
 
@@ -184,9 +198,15 @@ final class TranslationJobBridge: @unchecked Sendable {
             continuation.yield(())
         }
 
-        return Consumer(wakeups: wakeups) { [weak self] in
-            self?.takeNext(for: consumerGeneration)
-        }
+        return Consumer(
+            wakeups: wakeups,
+            takeNext: { [weak self] in
+                self?.takeNext(for: consumerGeneration)
+            },
+            requeue: { [weak self] job in
+                self?.requeue(job, for: consumerGeneration)
+            }
+        )
     }
 
     private func takeNext(for generation: Int) -> TranslationJob? {
@@ -194,6 +214,14 @@ final class TranslationJobBridge: @unchecked Sendable {
         defer { lock.unlock() }
         guard generation == self.generation, !queue.isEmpty else { return nil }
         return queue.removeFirst()
+    }
+
+    private func requeue(_ job: TranslationJob, for generation: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard generation == self.generation else { return }
+        guard !queue.contains(where: { $0.utteranceID == job.utteranceID }) else { return }
+        queue.insert(job, at: 0)
     }
 
     private func clearContinuation(for generation: Int) {
