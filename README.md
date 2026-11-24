@@ -34,14 +34,14 @@ Open Duiyi.xcodeproj in Xcode, or use xcodebuild:
 
     xcodebuild -project Duiyi.xcodeproj -scheme Duiyi -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' test
 
-For device builds, set your own Team and a unique Bundle ID. The old repository's Makefile and harness gates are not part of this repository.
+For device builds, copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig` (gitignored) and set your Team ID and device UDID; Xcode picks up the team automatically. Set a unique Bundle ID if needed. Physical-device automation uses `tools/device.sh` (see `docs/agents/device-testing.md`). The old repository's Makefile and harness gates are not part of this repository.
 
 For agent or CI runs, use the wrappers. They select and boot a simulator, parse the xcresult summary, print logical and expanded counts, and treat skips as failures except the known simulator speech skip:
 
     tools/test-unit.sh
     tools/test-ui.sh
 
-Physical iPhone verification (signing, UI automation, acoustic smoke) is documented in `docs/agents/device-testing.md`.
+Physical iPhone verification: run `tools/device.sh check` and follow `docs/agents/device-testing.md` (signing, UI automation, acoustic smoke).
 
 Fast static checks, plus the optional committed pre-commit hook:
 

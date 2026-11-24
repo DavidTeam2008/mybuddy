@@ -16,3 +16,6 @@ __pycache__/
 .env.*
 AGENTS.local.md
 CLAUDE.local.md
+Config/Local.xcconfig
+.device-state/
+.device-derived/
