@@ -93,7 +93,6 @@ struct HistoryView: View {
                 viewModel.cancelDelete()
             }
         }
-        .preferredColorScheme(.dark)
     }
 
     private var filterRow: some View {
@@ -115,7 +114,7 @@ struct HistoryView: View {
         Button(action: action) {
             Text(title)
                 .font(.footnote.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Color(hex: 0x1C1915) : Tokens.textPrimary)
+                .foregroundStyle(selected ? Tokens.onAccent : Tokens.textPrimary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(selected ? Tokens.listen : Tokens.sheetChip, in: Capsule())

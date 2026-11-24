@@ -78,7 +78,7 @@ struct CaptionPaneView: View {
                 onCancelPicking?()
             }
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Color(hex: 0x1C1915))
+            .foregroundStyle(Tokens.onAccent)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(Tokens.listen, in: Capsule())

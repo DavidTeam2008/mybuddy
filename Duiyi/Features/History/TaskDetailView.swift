@@ -104,7 +104,7 @@ struct TaskDetailView: View {
                                     Task { await viewModel.summarize(language: language) }
                                 }
                                 .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Color(hex: 0x1C1915))
+                                .foregroundStyle(Tokens.onAccent)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
                                 .background(Tokens.listen, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -115,7 +115,7 @@ struct TaskDetailView: View {
                                     startTranslation(for: task)
                                 }
                                 .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Tokens.listen)
+                                .foregroundStyle(Tokens.accentText)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 10)
                             }
@@ -186,7 +186,6 @@ struct TaskDetailView: View {
                 viewModel?.cancelDelete()
             }
         }
-        .preferredColorScheme(.dark)
     }
 
     private var canSummarize: Bool {
@@ -211,11 +210,11 @@ struct TaskDetailView: View {
             )
         return Text(text)
             .font(.footnote)
-            .foregroundStyle(used ? Color(hex: 0xB8E0C8) : Tokens.warningText)
+            .foregroundStyle(used ? Tokens.intelligenceText : Tokens.warningText)
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                used ? Color(hex: 0x1D2A24) : Tokens.warningBackground,
+                used ? Tokens.intelligenceBackground : Tokens.warningBackground,
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
     }

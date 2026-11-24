@@ -10,7 +10,7 @@ struct ModuleChrome: View {
         HStack {
             Button(Copy.homeButton(for: language), action: onHome)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Tokens.listen)
+                .foregroundStyle(Tokens.accentText)
                 .accessibilityIdentifier("nav-home")
             Spacer()
             Text(title)
@@ -19,7 +19,7 @@ struct ModuleChrome: View {
             Spacer()
             Button(Copy.historyTitle(for: language), action: onHistory)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Tokens.listen)
+                .foregroundStyle(Tokens.accentText)
                 .accessibilityIdentifier("nav-history")
         }
         .padding(.horizontal, Tokens.horizontalPadding)

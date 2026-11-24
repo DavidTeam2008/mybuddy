@@ -192,7 +192,6 @@ struct MeetingView: View {
                 viewModel.dismissUnsavedTaskPrompt()
             }
         }
-        .preferredColorScheme(.dark)
     }
 
     private var languageChip: some View {

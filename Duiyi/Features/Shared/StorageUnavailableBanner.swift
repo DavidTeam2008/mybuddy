@@ -15,7 +15,7 @@ struct StorageUnavailableBanner: View {
             Spacer(minLength: 8)
             Button(Copy.retry(for: language), action: onRetry)
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(Tokens.listen)
+                .foregroundStyle(Tokens.accentText)
                 .accessibilityIdentifier("storage-retry")
         }
         .padding(12)

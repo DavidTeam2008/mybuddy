@@ -182,7 +182,7 @@ struct InterpretationView: View {
                     }
                 }
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color(hex: 0x1C1915))
+                .foregroundStyle(Tokens.onAccent)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(Tokens.listen, in: Capsule())
@@ -195,7 +195,7 @@ struct InterpretationView: View {
                     Task { await redownloadModels() }
                 }
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color(hex: 0x1C1915))
+                .foregroundStyle(Tokens.onAccent)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(Tokens.listen, in: Capsule())
@@ -205,7 +205,7 @@ struct InterpretationView: View {
                     Task { await viewModel.requestSummary() }
                 }
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color(hex: 0x1C1915))
+                .foregroundStyle(Tokens.onAccent)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(Tokens.listen, in: Capsule())
@@ -297,7 +297,6 @@ struct InterpretationView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             Task { await viewModel.stop(restoreIdleTimerAfterDelay: false) }
         }
-        .preferredColorScheme(.dark)
     }
 
     private var captionColumn: some View {
@@ -374,7 +373,7 @@ struct InterpretationView: View {
                 picking = nil
             }
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(Color(hex: 0x1C1915))
+            .foregroundStyle(Tokens.onAccent)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(Tokens.listen, in: Capsule())

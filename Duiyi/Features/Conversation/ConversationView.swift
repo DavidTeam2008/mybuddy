@@ -185,7 +185,7 @@ struct ConversationView: View {
                     }
                 }
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color(hex: 0x1C1915))
+                .foregroundStyle(Tokens.onAccent)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(Tokens.listen, in: Capsule())
@@ -198,7 +198,7 @@ struct ConversationView: View {
                     Task { await redownloadModels() }
                 }
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color(hex: 0x1C1915))
+                .foregroundStyle(Tokens.onAccent)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(Tokens.listen, in: Capsule())
@@ -208,7 +208,7 @@ struct ConversationView: View {
                     Task { await viewModel.requestSummary() }
                 }
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color(hex: 0x1C1915))
+                .foregroundStyle(Tokens.onAccent)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(Tokens.listen, in: Capsule())
@@ -298,7 +298,6 @@ struct ConversationView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             Task { await viewModel.stop(restoreIdleTimerAfterDelay: false) }
         }
-        .preferredColorScheme(.dark)
     }
 
     private var translationProgress: Double {

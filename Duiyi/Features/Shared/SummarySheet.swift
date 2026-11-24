@@ -69,7 +69,7 @@ struct SummarySheet: View {
                 }
                 Button(Copy.done(for: language), action: onClose)
                     .fontWeight(.semibold)
-                    .foregroundStyle(Color(hex: 0x1C1915))
+                    .foregroundStyle(Tokens.onAccent)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
                     .background(Tokens.listen, in: Capsule())
@@ -90,12 +90,12 @@ struct SummarySheet: View {
         }
         return Text(text)
             .font(.footnote)
-            .foregroundStyle(summary?.usedAppleIntelligence == true ? Color(hex: 0xB8E0C8) : Tokens.warningText)
+            .foregroundStyle(summary?.usedAppleIntelligence == true ? Tokens.intelligenceText : Tokens.warningText)
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 summary?.usedAppleIntelligence == true
-                    ? Color(hex: 0x1D2A24)
+                    ? Tokens.intelligenceBackground
                     : Tokens.warningBackground,
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
