@@ -229,7 +229,7 @@
 | --- | --- | --- |
 | 单引擎共享 | 三 VM 经 `SpeechSessionGate` 共用一个 actor；owner + generation 仲裁 | 快速切模块不再互停（单测覆盖；真机待验） |
 | 双路资源 | 超限降级单路/去 Detector | 会丢一句，用户无提示 |
-| 翻译桥 | pending 单槽 + host 就绪后无界流 | volatile 高频时积压（P1-1） |
+| 翻译桥 | `TranslationJobBridge` 按 `utteranceID` 每句只留一条 pending（保留首次位置），final 优先；`TranslationJobPump` 每次唤醒 drain 到空 | 同一句只翻最新文本，积压不随会话增长；真机延迟口径待 #26 |
 | 持久化 | 主线程 ModelContext + 显式 save（autosave off）+ 全量快照 upsert | 降级已显性；长会写放大与迁移计划仍待后续（P0-3/P3-1） |
 | 长会话 | Conversation 3 条/侧、SI 50 条仅显示、Meeting 2 万字累计；transcript 全量 | 显示窗口有界，落盘全量；D7 续集组后续 wave（P0-2） |
 | 语言切换 | config 变化重建 task，旧译文靠字数丢弃 | 可能漏一句/串语言（P1-3） |
