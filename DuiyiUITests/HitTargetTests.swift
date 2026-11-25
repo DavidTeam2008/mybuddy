@@ -134,10 +134,15 @@ final class HitTargetTests: XCTestCase {
 
         let chip = app.buttons["langchip-zhHans"]
         XCTAssertTrue(chip.waitForExistence(timeout: 15))
-        let navigationBar = app.navigationBars.firstMatch
-        XCTAssertTrue(navigationBar.waitForExistence(timeout: 15))
 
-        let scale = navigationBar.frame.width / app.frame.width
+        // The presented sheet is the narrowest navigation bar on screen; the
+        // root (home) bar sits behind it at full width.
+        let navigationBars = app.navigationBars.allElementsBoundByIndex
+        XCTAssertFalse(navigationBars.isEmpty, "no navigation bar for the sheet")
+        let sheetBar = navigationBars.min { $0.frame.width < $1.frame.width }
+        XCTAssertNotNil(sheetBar, "could not locate the sheet navigation bar")
+
+        let scale = (sheetBar?.frame.width ?? 0) / app.frame.width
         XCTAssertGreaterThan(scale, 0, "could not derive sheet presentation scale")
 
         let frame = settledFrame(of: chip)
