@@ -13,25 +13,6 @@ struct HomeView: View {
         let _ = AppLaunchTracker.shared.beginOnce(.homeBody)
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(Copy.homeTitle(for: language))
-                            .font(.largeTitle.weight(.semibold))
-                            .foregroundStyle(Tokens.textPrimary)
-                    }
-                    Spacer()
-                    Button {
-                        isSettingsPresented = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(Tokens.textSecondary)
-                            .frame(width: 44, height: 44)
-                    }
-                    .accessibilityIdentifier("settings-open")
-                    .accessibilityLabel(Copy.settingsTitle(for: language))
-                }
-
                 if viewModel?.showsStorageBanner == true {
                     StorageUnavailableBanner(language: language) {
                         Task { await viewModel?.retry() }
@@ -68,27 +49,32 @@ struct HomeView: View {
                     .accessibilityLabel(feature.title(language))
                     .accessibilityHint(feature.subtitle(language))
                 }
-
-                HomeModuleCard(
-                    title: Copy.historyTitle(for: language),
-                    subtitle: Copy.historySubtitle(for: language),
-                    symbolName: "clock.arrow.circlepath",
-                    background: Tokens.sheet,
-                    accent: Tokens.textSecondary
-                ) {
-                    coordinator.open(.history)
-                }
-                .accessibilityIdentifier("home-history")
-                .accessibilityLabel(Copy.historyTitle(for: language))
-                .accessibilityHint(Copy.historySubtitle(for: language))
             }
             .padding(.horizontal, 20)
             .padding(.top, 12)
             .padding(.bottom, 32)
         }
         .background(Tokens.canvas.ignoresSafeArea())
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationTitle(Copy.homeTitle(for: language))
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    coordinator.open(.history)
+                } label: {
+                    ToolbarGlyph(systemName: "clock.arrow.circlepath")
+                }
+                .accessibilityIdentifier("home-history")
+                .accessibilityLabel(Copy.historyTitle(for: language))
+                Button {
+                    isSettingsPresented = true
+                } label: {
+                    ToolbarGlyph(systemName: "gearshape")
+                }
+                .accessibilityIdentifier("settings-open")
+                .accessibilityLabel(Copy.settingsTitle(for: language))
+            }
+        }
         .onAppear { AppLaunchTracker.shared.begin(.homeAppear) }
         .task(priority: .utility) {
             // Deferred: let Home paint empty first, then fill unfinished tasks.
