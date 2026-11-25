@@ -19,11 +19,7 @@ struct ModuleToolbar: ViewModifier {
             .navigationBarBackButtonHidden(true)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: onHome) {
-                        ToolbarGlyph(systemName: "house")
-                    }
-                    .accessibilityIdentifier("nav-home")
-                    .accessibilityLabel(Copy.homeButton(for: language))
+                    HomeToolbarButton(language: language, action: onHome)
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button(action: onHistory) {

@@ -11,3 +11,17 @@ struct ToolbarGlyph: View {
             .contentShape(Rectangle())
     }
 }
+
+/// Shared home entry for module and secondary-page toolbars.
+struct HomeToolbarButton: View {
+    let language: AppLanguage
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ToolbarGlyph(systemName: "house")
+        }
+        .accessibilityIdentifier("nav-home")
+        .accessibilityLabel(Copy.homeButton(for: language))
+    }
+}
