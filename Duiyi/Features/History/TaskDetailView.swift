@@ -15,13 +15,6 @@ struct TaskDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ModuleChrome(
-                title: Copy.recordTitle(for: language),
-                language: language,
-                onHome: { coordinator.popToHome() },
-                onHistory: { coordinator.pop() }
-            )
-
             if let viewModel {
                 if viewModel.showsStorageBanner {
                     StorageUnavailableBanner(language: language) {
@@ -141,7 +134,11 @@ struct TaskDetailView: View {
             }
         }
         .background(Tokens.canvas.ignoresSafeArea())
-        .toolbar(.hidden, for: .navigationBar)
+        .detailToolbar(
+            title: Copy.recordTitle(for: language),
+            language: language,
+            onHome: { coordinator.popToHome() }
+        )
         .overlay {
             if let job = translateJob {
                 OneWayTranslationHostView(

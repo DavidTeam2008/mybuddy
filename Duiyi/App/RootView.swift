@@ -22,6 +22,7 @@ struct RootView: View {
         .simultaneousGesture(
             DragGesture(minimumDistance: 10, coordinateSpace: .local)
                 .onEnded { value in
+                    guard !EdgeSwipeBackPolicy.defersToSystemPop(topRoute: coordinator.path.last) else { return }
                     guard EdgeSwipeBackPolicy.shouldPop(
                         hasPreviousPage: !coordinator.path.isEmpty,
                         startLocation: value.startLocation,

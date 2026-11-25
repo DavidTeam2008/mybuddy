@@ -36,8 +36,8 @@
 ## 5. UI 入口与可测试性
 
 - 新增 UI 入口必须加 `accessibilityIdentifier`，沿用 kebab-case（`home-module-*`、`nav-*`、`taskbar-*`、`caption-*`、`langchip-*`、`listening-control`）；不靠中文文案或坐标定位。
-- 改入口/标识要同步 `DuiyiUITests`；历史返回用 `nav-home`，不要用系统返回键。
-- View 保持薄：复用 `Shared/`（`ModuleToolbar`/`HistoryToolbar`、`ToolbarGlyph`、`TaskBar`、`LanguageChipGrid`）与 `DesignSystem`，不要复制布局常量。首页/三模块/历史/详情优先用系统导航栏；`ModuleChrome` 仅剩详情页过渡使用，详情改造后删除。
+- 改入口/标识要同步 `DuiyiUITests`；历史页返回用 `nav-home`，详情页用系统返回（回历史）+ 右上 `nav-home`（回首页）。
+- View 保持薄：复用 `Shared/`（`ModuleToolbar`/`HistoryToolbar`/`DetailToolbar`、`ToolbarGlyph`、`TaskStatusText`、`LanguageChipGrid`）与 `DesignSystem`，不要复制布局常量。所有页面优先用系统导航栏，不再自绘 chrome。
 
 ## 6. 新增模块（六步）
 

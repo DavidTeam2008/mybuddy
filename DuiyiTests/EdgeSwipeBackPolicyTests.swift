@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 @testable import Duiyi
 
@@ -48,6 +49,16 @@ struct EdgeSwipeBackPolicyTests {
                 translation: CGSize(width: 30, height: 10)
             )
         )
+    }
+
+    @Test("Defers to the system pop gesture on task detail")
+    func defersToSystemPopOnTaskDetail() {
+        #expect(
+            EdgeSwipeBackPolicy.defersToSystemPop(topRoute: .taskDetail(UUID()))
+        )
+        #expect(!EdgeSwipeBackPolicy.defersToSystemPop(topRoute: .history))
+        #expect(!EdgeSwipeBackPolicy.defersToSystemPop(topRoute: .conversation))
+        #expect(!EdgeSwipeBackPolicy.defersToSystemPop(topRoute: nil))
     }
 
     @Test("Rejects a mostly vertical swipe")
