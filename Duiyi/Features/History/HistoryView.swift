@@ -9,13 +9,6 @@ struct HistoryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ModuleChrome(
-                title: Copy.historyTitle(for: language),
-                language: language,
-                onHome: { coordinator.popToHome() },
-                onHistory: {}
-            )
-
             filterRow
                 .padding(.horizontal, Tokens.horizontalPadding)
                 .padding(.bottom, 8)
@@ -71,7 +64,11 @@ struct HistoryView: View {
             }
         }
         .background(Tokens.canvas.ignoresSafeArea())
-        .toolbar(.hidden, for: .navigationBar)
+        .historyToolbar(
+            title: Copy.historyTitle(for: language),
+            language: language,
+            onHome: { coordinator.popToHome() }
+        )
         .task {
             await viewModel.reload()
         }

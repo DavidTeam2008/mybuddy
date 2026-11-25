@@ -128,7 +128,7 @@ final class SimultaneousFlowTests: XCTestCase {
         }
         XCTAssertTrue(history.waitForExistence(timeout: timeout), "home history entry missing")
         history.tap()
-        // 历史页用 ModuleChrome 自定义导航（系统 toolbar 隐藏），经 nav-home 返回
+        // 历史页用系统大标题 toolbar（隐藏返回），经 nav-home 回首页
         let historyHome = app.buttons["nav-home"]
         XCTAssertTrue(historyHome.waitForExistence(timeout: timeout), "history nav home missing")
         historyHome.tap()
