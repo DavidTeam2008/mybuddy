@@ -1,0 +1,15 @@
+{
+  "name": "Overlapping Lens",
+  "concept": "Two rounded speech bubbles overlap into a luminous lens, and a carved bidirectional arrow turns their shared negative space into a single act of translation.",
+  "composition": "Two equal 276-radius bubbles sit side by side with centers offset 240 px horizontally and 24 px vertically; the right bubble is raised and lighter, both tails fall from the lower outer edges, and a tall vesica-shaped intersection becomes the central glass exchange zone. The mark sits centered within the 819 px safe area on the opaque deep-ink canvas.",
+  "arrowConstruction": "A single continuous double-headed arrow is centered on the lens short axis and rotated 5.7 degrees with the lens tilt, reading as two opposing arrows sharing one shaft. It has a 60 px shaft, 156 px tall heads, and tips about 10 px inside the lens rim; the heads are fused into one bold negative-space glyph so the bidirectional read survives at 40 px. A mask cuts the shape through every glass layer to the ink canvas, leaving a 5 px warm-white edge light around the cut.",
+  "smallSizePlan": "At 60 px and 40 px the mark reduces to two offset round bubbles, a bright overlap lens, and one bold double arrow; tails, speculars, and soft rim detail drop away without changing the read. The arrow spans roughly 17 px at 60 px and 11.6 px at 40 px with a 3.5 px / 2.3 px shaft, and no recognizable element depends on fine detail.",
+  "palette": [
+    "#0B0C10",
+    "#14161C",
+    "#E8B86D",
+    "#C98F3F",
+    "#FFF4E0",
+    "#7EC8C3"
+  ]
+}

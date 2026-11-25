@@ -1,0 +1,18 @@
+{
+  "name": "Asymmetric Listen",
+  "concept": "A large amber speech bubble speaks while a small clear, warm-white-rimmed glass bubble listens, and the gap between them holds one bold bidirectional exchange arrow.",
+  "composition": "1024x1024 canvas with a full-bleed opaque deep-ink field (#0B0C10 with a soft #14161C radial only). The speaker is a 364x304 rounded amber bubble (r 100, corner-tail at bottom-left, tail tip at y 566) set upper-left at x 160-524 / y 168-472. The listener is a 236x206 warm-white-rimmed dark glass bubble (r 80) at x 618-854 / y 622-828 with a short outward tail at the bottom-right. The two sit on a 45.8-degree diagonal with the listener about 2.4x smaller by area (392 wide vs 236), so the size contrast survives at 40 px. All geometry, including the 10-unit rim bleed, stays inside x 157-864 / y 165-878, fully within the centered 819x819 safe area.",
+  "arrowConstruction": "One single closed polygon path (shaft plus both chevron heads, 260 units tip-to-tip and 164 units across the heads) drawn as the last layer, rotated 45.8 degrees and centered on the gap midpoint at (563, 548). Each tip lands about 4 units inside the facing bubble edge, so the arrow reads as the negative space between the two bubbles while physically touching both. Head length 62, head half-width 82, shaft half-height 38; filled with a subtle warm-white gradient (#FFF4E0 100% to 86%). No outline, no filter.",
+  "smallSizePlan": "The mark is intentionally three-value at small sizes: bright amber mass, near-white arrow, thin warm ring on dark glass. At 40 px the speaker is about 14x12 px of solid #E8B86D, the arrow is about 10 px long with a 3 px shaft and 6.4 px heads, and the listener is about 9x8 px with a 0.8 px warm-white rim over a dark warm-tinted fill, holding its silhouette via the ring and its outward tail. Speculars, bloom and the cool reflection are all supportive only; no detail is load-bearing. Verified down-renders: 256 px, 60 px, and 40 px.",
+  "palette": [
+    { "hex": "#0B0C10", "role": "ink: full-bleed background base, listener glass fill base" },
+    { "hex": "#14161C", "role": "background radial center only (allowed subtle gradient)" },
+    { "hex": "#E8B86D", "role": "amber: speaker bubble gradient light end, listener glass tint" },
+    { "hex": "#C98F3F", "role": "deep amber: speaker bubble gradient dark end, shading, glass tint" },
+    { "hex": "#FFF4E0", "role": "warm white: exchange arrow, both rims, specular highlights, glass tint" },
+    { "hex": "#7EC8C3", "role": "cool reflection at 10% opacity on the speaker's lower-left inner edge" }
+  ],
+  "svgPath": "/tmp/duiyi-app-icon-prototype/Prototype/AppIcon/candidates/asymmetric-listen.svg",
+  "size": "1024x1024",
+  "background": "opaque #0B0C10 to #14161C radial; rendered PNG has no alpha channel"
+}

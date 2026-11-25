@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bgGrad" cx="512" cy="430" r="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14161C"/>
+      <stop offset="1" stop-color="#0B0C10"/>
+    </radialGradient>
+
+    <linearGradient id="amberFill" x1="0.12" y1="0.02" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#E8B86D"/>
+      <stop offset="1" stop-color="#C98F3F"/>
+    </linearGradient>
+    <radialGradient id="amberBloom" cx="0.27" cy="0.13" r="0.55">
+      <stop offset="0" stop-color="#FFF4E0" stop-opacity="0.46"/>
+      <stop offset="0.5" stop-color="#FFF4E0" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#FFF4E0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="amberShade" x1="0.28" y1="0.42" x2="0.88" y2="1">
+      <stop offset="0" stop-color="#C98F3F" stop-opacity="0"/>
+      <stop offset="1" stop-color="#C98F3F" stop-opacity="0.62"/>
+    </linearGradient>
+    <linearGradient id="bigRim" x1="0.08" y1="0" x2="0.82" y2="1">
+      <stop offset="0" stop-color="#FFF4E0" stop-opacity="0.85"/>
+      <stop offset="0.4" stop-color="#FFF4E0" stop-opacity="0.28"/>
+      <stop offset="0.75" stop-color="#FFF4E0" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#FFF4E0" stop-opacity="0.24"/>
+    </linearGradient>
+
+    <radialGradient id="glassTint" cx="0.26" cy="0.14" r="1">
+      <stop offset="0" stop-color="#FFF4E0" stop-opacity="0.34"/>
+      <stop offset="0.45" stop-color="#E8B86D" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#C98F3F" stop-opacity="0.07"/>
+    </radialGradient>
+    <linearGradient id="glassRim" x1="0.1" y1="0" x2="0.88" y2="1">
+      <stop offset="0" stop-color="#FFF4E0" stop-opacity="0.95"/>
+      <stop offset="0.5" stop-color="#FFF4E0" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#FFF4E0" stop-opacity="0.78"/>
+    </linearGradient>
+
+    <linearGradient id="arrowFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF4E0" stop-opacity="1"/>
+      <stop offset="0.55" stop-color="#FFF4E0" stop-opacity="0.97"/>
+      <stop offset="1" stop-color="#FFF4E0" stop-opacity="0.86"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#bgGrad)"/>
+
+  <g id="speaker-bubble">
+    <path d="M 260 168 L 424 168 Q 524 168 524 268 L 524 372 Q 524 472 424 472 L 352 472 C 346 514 326 546 284 566 C 302 534 308 506 310 472 L 260 472 Q 160 472 160 372 L 160 268 Q 160 168 260 168 Z"
+          fill="url(#amberFill)"/>
+    <path d="M 260 168 L 424 168 Q 524 168 524 268 L 524 372 Q 524 472 424 472 L 352 472 C 346 514 326 546 284 566 C 302 534 308 506 310 472 L 260 472 Q 160 472 160 372 L 160 268 Q 160 168 260 168 Z"
+          fill="url(#amberBloom)"/>
+    <path d="M 260 168 L 424 168 Q 524 168 524 268 L 524 372 Q 524 472 424 472 L 352 472 C 346 514 326 546 284 566 C 302 534 308 506 310 472 L 260 472 Q 160 472 160 372 L 160 268 Q 160 168 260 168 Z"
+          fill="url(#amberShade)"/>
+    <path d="M 260 168 L 424 168 Q 524 168 524 268 L 524 372 Q 524 472 424 472 L 352 472 C 346 514 326 546 284 566 C 302 534 308 506 310 472 L 260 472 Q 160 472 160 372 L 160 268 Q 160 168 260 168 Z"
+          fill="none" stroke="url(#bigRim)" stroke-width="6" stroke-linejoin="round"/>
+    <path d="M 186 276 Q 184 198 254 188 Q 296 182 330 184"
+          fill="none" stroke="#FFF4E0" stroke-opacity="0.38" stroke-width="8" stroke-linecap="round"/>
+    <path d="M 182 372 Q 182 450 260 450"
+          fill="none" stroke="#7EC8C3" stroke-opacity="0.1" stroke-width="10" stroke-linecap="round"/>
+  </g>
+
+  <g id="listener-bubble">
+    <path d="M 698 622 L 774 622 Q 854 622 854 702 L 854 748 Q 854 828 774 828 C 786 846 798 858 810 868 C 780 854 744 838 706 828 L 698 828 Q 618 828 618 748 L 618 702 Q 618 622 698 622 Z"
+          fill="#0B0C10"/>
+    <path d="M 698 622 L 774 622 Q 854 622 854 702 L 854 748 Q 854 828 774 828 C 786 846 798 858 810 868 C 780 854 744 838 706 828 L 698 828 Q 618 828 618 748 L 618 702 Q 618 622 698 622 Z"
+          fill="url(#glassTint)"/>
+    <path d="M 698 622 L 774 622 Q 854 622 854 702 L 854 748 Q 854 828 774 828 C 786 846 798 858 810 868 C 780 854 744 838 706 828 L 698 828 Q 618 828 618 748 L 618 702 Q 618 622 698 622 Z"
+          fill="none" stroke="url(#glassRim)" stroke-width="20" stroke-linejoin="round"/>
+    <path d="M 644 702 Q 644 650 696 650 L 736 650"
+          fill="none" stroke="#FFF4E0" stroke-opacity="0.5" stroke-width="7" stroke-linecap="round"/>
+  </g>
+
+  <g id="exchange-arrow" transform="translate(563 548) rotate(45.8)">
+    <path d="M 130 0 L 68 -82 L 68 -38 L -68 -38 L -68 -82 L -130 0 L -68 82 L -68 38 L 68 38 L 68 82 Z"
+          fill="url(#arrowFill)"/>
+  </g>
+</svg>

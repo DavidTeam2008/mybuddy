@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bgInk" cx="512" cy="470" r="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14161C"/>
+      <stop offset="0.7" stop-color="#0B0C10"/>
+      <stop offset="1" stop-color="#0B0C10"/>
+    </radialGradient>
+    <linearGradient id="paneFill" gradientUnits="userSpaceOnUse" x1="240" y1="290" x2="524" y2="752">
+      <stop offset="0" stop-color="#E8B86D"/>
+      <stop offset="0.45" stop-color="#E8B86D"/>
+      <stop offset="1" stop-color="#C98F3F"/>
+    </linearGradient>
+    <radialGradient id="paneGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFF4E0" stop-opacity="0.38"/>
+      <stop offset="0.55" stop-color="#FFF4E0" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#FFF4E0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="paneShade" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#C98F3F" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#C98F3F" stop-opacity="0"/>
+    </radialGradient>
+    <path id="bubble" d="M 336 284 L 468 284 A 44 44 0 0 1 512 328 L 512 712 A 44 44 0 0 1 468 756 L 320 756 Q 276 768 240 782 Q 216 776 198 790 Q 208 750 228 700 L 228 392 A 108 108 0 0 1 336 284 Z"/>
+    <path id="gapArrow" d="M 512 364 L 396 468 L 468 468 L 468 572 L 396 572 L 512 676 L 628 572 L 556 572 L 556 468 L 628 468 Z"/>
+    <clipPath id="bubbleClipL">
+      <use xlink:href="#bubble"/>
+    </clipPath>
+    <mask id="arrowCut" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect x="0" y="0" width="1024" height="1024" fill="#FFFFFF"/>
+      <use xlink:href="#gapArrow" fill="#000000"/>
+    </mask>
+    <g id="pane">
+      <use xlink:href="#bubble" fill="#C98F3F" fill-opacity="0.85"/>
+      <use xlink:href="#bubble" transform="translate(370 520) scale(0.95) translate(-370 -520)" fill="url(#paneFill)"/>
+      <ellipse cx="340" cy="380" rx="160" ry="120" fill="url(#paneGlow)" clip-path="url(#bubbleClipL)"/>
+      <ellipse cx="370" cy="724" rx="190" ry="96" fill="url(#paneShade)" clip-path="url(#bubbleClipL)"/>
+      <use xlink:href="#bubble" transform="translate(370 520) scale(0.95) translate(-370 -520)" fill="none" stroke="#FFF4E0" stroke-opacity="0.16" stroke-width="2.5" clip-path="url(#bubbleClipL)"/>
+      <use xlink:href="#bubble" fill="none" stroke="#FFF4E0" stroke-opacity="0.10" stroke-width="26" clip-path="url(#bubbleClipL)"/>
+      <use xlink:href="#bubble" fill="none" stroke="#FFF4E0" stroke-opacity="0.55" stroke-width="4.5"/>
+      <path d="M 228 392 A 108 108 0 0 1 336 284" fill="none" stroke="#FFF4E0" stroke-opacity="0.68" stroke-width="7" stroke-linecap="round"/>
+      <path d="M 310 748 L 430 748" fill="none" stroke="#7EC8C3" stroke-opacity="0.10" stroke-width="16" stroke-linecap="round" clip-path="url(#bubbleClipL)"/>
+    </g>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#bgInk)"/>
+  <g mask="url(#arrowCut)">
+    <use xlink:href="#pane"/>
+    <use xlink:href="#pane" transform="matrix(-1 0 0 1 1024 0)"/>
+  </g>
+  <use xlink:href="#gapArrow" fill="none" stroke="#FFF4E0" stroke-opacity="0.30" stroke-width="5" stroke-linejoin="round"/>
+</svg>

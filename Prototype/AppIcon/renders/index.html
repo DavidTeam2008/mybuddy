@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>对译 App Icon — Prototype Candidates</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: #101116;
+    color: #C9CBD3;
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    padding-bottom: 34px;
+  }
+  .banner {
+    background: repeating-linear-gradient(135deg, #E8B86D 0 18px, #D8A75A 18px 36px);
+    color: #0B0C10;
+    padding: 13px 32px;
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    border-bottom: 4px solid #0B0C10;
+  }
+  .banner strong {
+    font-size: 23px;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    white-space: nowrap;
+  }
+  .banner span {
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .page { max-width: 1360px; margin: 0 auto; padding: 0 28px; }
+  h1 {
+    color: #FFF4E0;
+    font-size: 30px;
+    line-height: 1.15;
+    margin: 26px 0 6px;
+    letter-spacing: -0.01em;
+  }
+  .lede { margin: 0 0 20px; max-width: 1000px; color: #A9ACB8; font-size: 13.5px; }
+  .lede code { color: #7EC8C3; font-family: "SF Mono", Menlo, monospace; font-size: 12px; }
+  .decisions {
+    border: 1px solid #2A2C34;
+    background: #15161C;
+    border-radius: 14px;
+    padding: 17px 20px 18px;
+    margin-bottom: 26px;
+  }
+  .decisions h2 {
+    margin: 0 0 12px;
+    color: #E8B86D;
+    font-size: 13px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .decision-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 24px; }
+  .decision h3 { margin: 0 0 4px; font-size: 12px; color: #F5F6F8; letter-spacing: 0.03em; }
+  .decision p { margin: 0; font-size: 11.5px; line-height: 1.45; color: #A9ACB8; }
+  .swatches { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
+  .sw { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: #A9ACB8; font-variant-numeric: tabular-nums; }
+  .chip { width: 17px; height: 17px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.2); }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+  .card {
+    background: #15161C;
+    border: 1px solid #2A2C34;
+    border-radius: 16px;
+    padding: 18px 20px 20px;
+    break-inside: avoid;
+  }
+  .card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .card h2 { color: #FFF4E0; font-size: 21px; line-height: 1.1; margin: 0 0 3px; letter-spacing: -0.01em; }
+  .slug { font: 11px/1.2 "SF Mono", Menlo, monospace; color: #7EC8C3; }
+  .badge {
+    font-size: 9.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: #0B0C10;
+    background: #E8B86D;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+  .card-top { display: flex; gap: 18px; align-items: flex-start; }
+  figure { margin: 0; }
+  .hero img { display: block; width: 280px; height: 280px; border-radius: 10px; border: 1px solid #33353D; }
+  figcaption { margin-top: 6px; font-size: 10.5px; color: #858896; letter-spacing: 0.02em; }
+  .tiles { display: flex; gap: 10px; }
+  .tile { width: 96px; }
+  .tile-face {
+    width: 96px;
+    height: 96px;
+    border-radius: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .tile-face img { width: 84px; height: 84px; border-radius: 19px; display: block; }
+  .tile.light .tile-face { border-color: rgba(0,0,0,0.14); }
+  .tile figcaption { text-align: center; font-family: "SF Mono", Menlo, monospace; font-size: 10px; letter-spacing: 0; }
+  .previews {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid #24262E;
+  }
+  .strip { display: flex; align-items: flex-end; gap: 12px; }
+  .strip img { display: block; border-radius: 6px; border: 1px solid #33353D; }
+  .tinted-wrap img { display: block; width: 120px; height: 120px; border-radius: 10px; border: 1px solid #33353D; filter: grayscale(1) brightness(1.5); }
+  .notes { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid #24262E; }
+  .notes dt { font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: #E8B86D; margin-top: 11px; font-weight: 700; }
+  .notes dt:first-child { margin-top: 0; }
+  .notes dd { margin: 3px 0 0; font-size: 11.5px; line-height: 1.5; color: #B9BCC7; }
+  footer { max-width: 1360px; margin: 26px auto 0; padding: 0 28px; font-size: 10.5px; line-height: 1.6; color: #7A7D8A; }
+  footer code { color: #9A9DAB; font-family: "SF Mono", Menlo, monospace; }
+</style>
+</head>
+<body>
+
+<div class="banner">
+  <strong>PROTOTYPE — NOT PRODUCTION</strong>
+  <span>设计探索 · design exploration only · not an App Store asset</span>
+</div>
+
+<div class="page">
+  <h1>对译 App Icon — Four Candidates</h1>
+  <p class="lede">Static render comparison for the on-device translation app <code>对译</code>. Each candidate is a 1024×1024 opaque deep-ink square rendered from its SVG source at 1024 / 180 / 120 / 60 px, plus simulated iOS home-tile and tinted treatments. All four share the settled canvas, palette, and small-size hierarchy below. Verdicts remain pending.</p>
+
+  <section class="decisions">
+    <h2>Settled design decisions</h2>
+    <div class="decision-grid">
+      <div class="decision">
+        <h3>Canvas &amp; background</h3>
+        <p>1024×1024 full-bleed, fully opaque deep ink (#0B0C10) with a faint #14161C radial lift. No transparency: every export is RGB with no alpha channel.</p>
+      </div>
+      <div class="decision">
+        <h3>Palette</h3>
+        <div class="swatches">
+          <span class="sw"><span class="chip" style="background:#0B0C10"></span>#0B0C10</span>
+          <span class="sw"><span class="chip" style="background:#14161C"></span>#14161C</span>
+          <span class="sw"><span class="chip" style="background:#E8B86D"></span>#E8B86D</span>
+          <span class="sw"><span class="chip" style="background:#C98F3F"></span>#C98F3F</span>
+          <span class="sw"><span class="chip" style="background:#FFF4E0"></span>#FFF4E0</span>
+          <span class="sw"><span class="chip" style="background:#7EC8C3"></span>#7EC8C3</span>
+        </div>
+      </div>
+      <div class="decision">
+        <h3>Mark language</h3>
+        <p>Exactly two speech bubbles and one bidirectional exchange arrow. Amber is speech / translation; warm white is the arrow and rims; the cool teal reflection stays at 10–12% opacity and is never load-bearing.</p>
+      </div>
+      <div class="decision">
+        <h3>Small-size hierarchy</h3>
+        <p>Silhouette first, arrow second. Gradients, speculars, pane lines, tails, and reflections are decorative and drop away; the arrow geometry and bubble silhouette are never simplified. Verified at 60 px and 40 px.</p>
+      </div>
+      <div class="decision">
+        <h3>Safe area &amp; masking</h3>
+        <p>All mark geometry sits inside the centered 819×819 safe area, so the iOS corner mask never clips a bubble or an arrow tip and no critical detail lives in a corner.</p>
+      </div>
+      <div class="decision">
+        <h3>Asset sizes</h3>
+        <p>1024 px store / marketing master, 180 px @3x home screen, 120 px @2x, 60 px @2x settings and notifications. Candidate SVGs live one directory up in <code>../candidates/</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <main class="grid">
+
+    <article class="card" id="mirrored-bubbles">
+      <header class="card-header">
+        <div>
+          <h2>Mirrored Bubbles</h2>
+          <div class="slug">mirrored-bubbles</div>
+        </div>
+        <span class="badge">Verdict pending</span>
+      </header>
+      <div class="card-top">
+        <figure class="hero">
+          <img src="mirrored-bubbles-1024.png" width="280" height="280" alt="Mirrored Bubbles at 1024 px, scaled to 280 px">
+          <figcaption>1024 master · scaled to 280 px</figcaption>
+        </figure>
+        <div class="tiles">
+          <figure class="tile">
+            <div class="tile-face" style="background:#000000">
+              <img src="mirrored-bubbles-180.png" width="84" height="84" alt="Mirrored Bubbles on a black home tile">
+            </div>
+            <figcaption>#000000</figcaption>
+          </figure>
+          <figure class="tile">
+            <div class="tile-face" style="background:#1C1C1E">
+              <img src="mirrored-bubbles-180.png" width="84" height="84" alt="Mirrored Bubbles on a dark home tile">
+            </div>
+            <figcaption>#1C1C1E</figcaption>
+          </figure>
+          <figure class="tile light">
+            <div class="tile-face" style="background:#F2F2F7">
+              <img src="mirrored-bubbles-180.png" width="84" height="84" alt="Mirrored Bubbles on a light home tile">
+            </div>
+            <figcaption>#F2F2F7</figcaption>
+          </figure>
+        </div>
+      </div>
+      <div class="previews">
+        <figure>
+          <div class="strip">
+            <img src="mirrored-bubbles-180.png" width="180" height="180" alt="Mirrored Bubbles at actual size, 180 px">
+            <img src="mirrored-bubbles-120.png" width="120" height="120" alt="Mirrored Bubbles at actual size, 120 px">
+            <img src="mirrored-bubbles-60.png" width="60" height="60" alt="Mirrored Bubbles at actual size, 60 px">
+          </div>
+          <figcaption>Actual size · 180 / 120 / 60 px</figcaption>
+        </figure>
+        <figure class="tinted-wrap">
+          <img src="mirrored-bubbles-180.png" width="120" height="120" alt="Mirrored Bubbles with the tinted grayscale preview filter">
+          <figcaption>Tinted · grayscale(1) brightness(1.5)</figcaption>
+        </figure>
+      </div>
+      <dl class="notes">
+        <dt>Concept</dt>
+        <dd>Two equal amber glass speech bubbles mirror each other across the vertical axis and kiss at top and bottom, their enclosed central gap cut into a clean vertical double-headed exchange arrow.</dd>
+        <dt>Arrow construction</dt>
+        <dd>The gap is a single negative-space vertical double arrow cut by a mask through the two mirrored bubbles (left body 228..512 x 284..756, right mirrored, x=512 axis): top tip (512,364), bottom tip (512,676); each head 232 wide (barbs at x=396/628, bases y=468/572); shaft 88 wide (x=468..556) by 104 tall; 36 px amber bridges separate the tips from the r44 kiss notches above and below, so the arrow reads as a closed clean cut, not an open notch. A 5 px #FFF4E0 rim at 30% opacity traces the cut, and the 2.64:1 head-to-shaft ratio keeps the chevrons bold.</dd>
+        <dt>Small-size plan</dt>
+        <dd>At 60 px the arrow is about 19 px tall, 14.5 px at the heads and 5.2 px at the shaft, an ink hole with amber flanks on both sides; the bubble mass is about 33x28 px, and tails, seam and notch are decorative only. Gradients, the inset pane line and the 10% cool reflection are dropped first at small sizes; the arrow geometry and bubble silhouette are never simplified. Verified legible at 256 px, 60 px and 40 px renders.</dd>
+      </dl>
+    </article>
+
+    <article class="card" id="overlapping-lens">
+      <header class="card-header">
+        <div>
+          <h2>Overlapping Lens</h2>
+          <div class="slug">overlapping-lens</div>
+        </div>
+        <span class="badge">Verdict pending</span>
+      </header>
+      <div class="card-top">
+        <figure class="hero">
+          <img src="overlapping-lens-1024.png" width="280" height="280" alt="Overlapping Lens at 1024 px, scaled to 280 px">
+          <figcaption>1024 master · scaled to 280 px</figcaption>
+        </figure>
+        <div class="tiles">
+          <figure class="tile">
+            <div class="tile-face" style="background:#000000">
+              <img src="overlapping-lens-180.png" width="84" height="84" alt="Overlapping Lens on a black home tile">
+            </div>
+            <figcaption>#000000</figcaption>
+          </figure>
+          <figure class="tile">
+            <div class="tile-face" style="background:#1C1C1E">
+              <img src="overlapping-lens-180.png" width="84" height="84" alt="Overlapping Lens on a dark home tile">
+            </div>
+            <figcaption>#1C1C1E</figcaption>
+          </figure>
+          <figure class="tile light">
+            <div class="tile-face" style="background:#F2F2F7">
+              <img src="overlapping-lens-180.png" width="84" height="84" alt="Overlapping Lens on a light home tile">
+            </div>
+            <figcaption>#F2F2F7</figcaption>
+          </figure>
+        </div>
+      </div>
+      <div class="previews">
+        <figure>
+          <div class="strip">
+            <img src="overlapping-lens-180.png" width="180" height="180" alt="Overlapping Lens at actual size, 180 px">
+            <img src="overlapping-lens-120.png" width="120" height="120" alt="Overlapping Lens at actual size, 120 px">
+            <img src="overlapping-lens-60.png" width="60" height="60" alt="Overlapping Lens at actual size, 60 px">
+          </div>
+          <figcaption>Actual size · 180 / 120 / 60 px</figcaption>
+        </figure>
+        <figure class="tinted-wrap">
+          <img src="overlapping-lens-180.png" width="120" height="120" alt="Overlapping Lens with the tinted grayscale preview filter">
+          <figcaption>Tinted · grayscale(1) brightness(1.5)</figcaption>
+        </figure>
+      </div>
+      <dl class="notes">
+        <dt>Concept</dt>
+        <dd>Two rounded speech bubbles overlap into a luminous lens, and a carved bidirectional arrow turns their shared negative space into a single act of translation.</dd>
+        <dt>Arrow construction</dt>
+        <dd>One continuous double-headed arrow is carved from the lens as true negative space: a 60 px shaft with 156 px tall heads, rotated 5.7 degrees to follow the lens tilt and held about 10 px inside the rim. The two opposing arrowheads share one shaft and are unified into one bold glyph so the bidirectional read survives at 40 px; the mask cuts through every glass layer to the ink canvas, leaving a 5 px warm-white edge light around the cut.</dd>
+        <dt>Small-size plan</dt>
+        <dd>At 60 px and 40 px the mark reduces to two offset round bubbles, a bright overlap lens, and one clear double arrow. Tails, soft rims, speculars, and inner glows disappear without changing the read; the arrow remains about 17 px / 11.6 px long with a 3.5 px / 2.3 px shaft, so no recognizable element depends on fine detail.</dd>
+      </dl>
+    </article>
+
+    <article class="card" id="asymmetric-listen">
+      <header class="card-header">
+        <div>
+          <h2>Asymmetric Listen</h2>
+          <div class="slug">asymmetric-listen</div>
+        </div>
+        <span class="badge">Verdict pending</span>
+      </header>
+      <div class="card-top">
+        <figure class="hero">
+          <img src="asymmetric-listen-1024.png" width="280" height="280" alt="Asymmetric Listen at 1024 px, scaled to 280 px">
+          <figcaption>1024 master · scaled to 280 px</figcaption>
+        </figure>
+        <div class="tiles">
+          <figure class="tile">
+            <div class="tile-face" style="background:#000000">
+              <img src="asymmetric-listen-180.png" width="84" height="84" alt="Asymmetric Listen on a black home tile">
+            </div>
+            <figcaption>#000000</figcaption>
+          </figure>
+          <figure class="tile">
+            <div class="tile-face" style="background:#1C1C1E">
+              <img src="asymmetric-listen-180.png" width="84" height="84" alt="Asymmetric Listen on a dark home tile">
+            </div>
+            <figcaption>#1C1C1E</figcaption>
+          </figure>
+          <figure class="tile light">
+            <div class="tile-face" style="background:#F2F2F7">
+              <img src="asymmetric-listen-180.png" width="84" height="84" alt="Asymmetric Listen on a light home tile">
+            </div>
+            <figcaption>#F2F2F7</figcaption>
+          </figure>
+        </div>
+      </div>
+      <div class="previews">
+        <figure>
+          <div class="strip">
+            <img src="asymmetric-listen-180.png" width="180" height="180" alt="Asymmetric Listen at actual size, 180 px">
+            <img src="asymmetric-listen-120.png" width="120" height="120" alt="Asymmetric Listen at actual size, 120 px">
+            <img src="asymmetric-listen-60.png" width="60" height="60" alt="Asymmetric Listen at actual size, 60 px">
+          </div>
+          <figcaption>Actual size · 180 / 120 / 60 px</figcaption>
+        </figure>
+        <figure class="tinted-wrap">
+          <img src="asymmetric-listen-180.png" width="120" height="120" alt="Asymmetric Listen with the tinted grayscale preview filter">
+          <figcaption>Tinted · grayscale(1) brightness(1.5)</figcaption>
+        </figure>
+      </div>
+      <dl class="notes">
+        <dt>Concept</dt>
+        <dd>A large amber speech bubble speaks while a small clear, warm-white-rimmed glass bubble listens, and the gap between them holds one bold bidirectional exchange arrow.</dd>
+        <dt>Arrow construction</dt>
+        <dd>One single closed polygon path (shaft plus both chevron heads, 260 units tip-to-tip and 164 units across the heads) drawn as the last layer, rotated 45.8 degrees and centered on the gap midpoint at (563, 548). Each tip lands about 4 units inside the facing bubble edge, so the arrow reads as the negative space between the two bubbles while physically touching both. Head length 62, head half-width 82, shaft half-height 38; filled with a subtle warm-white gradient (#FFF4E0 100% to 86%), no outline and no filter.</dd>
+        <dt>Small-size plan</dt>
+        <dd>The mark is deliberately three-value at small sizes: bright amber mass, near-white arrow, thin warm ring on dark glass. At 40 px the speaker is about 14x12 px of solid #E8B86D, the arrow is about 10 px long with a 3 px shaft and 6.4 px heads, and the listener is about 9x8 px with a 0.8 px warm-white rim over a dark warm-tinted fill, holding its silhouette via the ring plus its outward tail. Speculars, bloom and the cool reflection are supportive only; no detail is load-bearing. Verified by down-renders at 256 px, 60 px and 40 px.</dd>
+      </dl>
+    </article>
+
+    <article class="card" id="waveform-exchange">
+      <header class="card-header">
+        <div>
+          <h2>Waveform Exchange</h2>
+          <div class="slug">waveform-exchange</div>
+        </div>
+        <span class="badge">Verdict pending</span>
+      </header>
+      <div class="card-top">
+        <figure class="hero">
+          <img src="waveform-exchange-1024.png" width="280" height="280" alt="Waveform Exchange at 1024 px, scaled to 280 px">
+          <figcaption>1024 master · scaled to 280 px</figcaption>
+        </figure>
+        <div class="tiles">
+          <figure class="tile">
+            <div class="tile-face" style="background:#000000">
+              <img src="waveform-exchange-180.png" width="84" height="84" alt="Waveform Exchange on a black home tile">
+            </div>
+            <figcaption>#000000</figcaption>
+          </figure>
+          <figure class="tile">
+            <div class="tile-face" style="background:#1C1C1E">
+              <img src="waveform-exchange-180.png" width="84" height="84" alt="Waveform Exchange on a dark home tile">
+            </div>
+            <figcaption>#1C1C1E</figcaption>
+          </figure>
+          <figure class="tile light">
+            <div class="tile-face" style="background:#F2F2F7">
+              <img src="waveform-exchange-180.png" width="84" height="84" alt="Waveform Exchange on a light home tile">
+            </div>
+            <figcaption>#F2F2F7</figcaption>
+          </figure>
+        </div>
+      </div>
+      <div class="previews">
+        <figure>
+          <div class="strip">
+            <img src="waveform-exchange-180.png" width="180" height="180" alt="Waveform Exchange at actual size, 180 px">
+            <img src="waveform-exchange-120.png" width="120" height="120" alt="Waveform Exchange at actual size, 120 px">
+            <img src="waveform-exchange-60.png" width="60" height="60" alt="Waveform Exchange at actual size, 60 px">
+          </div>
+          <figcaption>Actual size · 180 / 120 / 60 px</figcaption>
+        </figure>
+        <figure class="tinted-wrap">
+          <img src="waveform-exchange-180.png" width="120" height="120" alt="Waveform Exchange with the tinted grayscale preview filter">
+          <figcaption>Tinted · grayscale(1) brightness(1.5)</figcaption>
+        </figure>
+      </div>
+      <dl class="notes">
+        <dt>Concept</dt>
+        <dd>A live sound waveform runs through two interlocking speech bubbles and resolves into a bold bidirectional exchange arrow, so the act of translating reads as one continuous signal.</dd>
+        <dt>Arrow construction</dt>
+        <dd>A single 544 px long bidirectional arrow is cut as negative space through both bubbles with an SVG mask down to the ink canvas, rotated -8 degrees and centered at (482, 500). Each head is 132 px long and 180 px tall with a 56 px shaft; the shaft is a two-cycle sine (140 px period, 26 px amplitude, 56 px stroke) whose ends terminate inside the 140 px deep arrowhead bases, so no wave-to-shaft joint is visible. A 14 px warm-white edge light outlines the cut.</dd>
+        <dt>Small-size plan</dt>
+        <dd>At 60 px and 40 px the mark reduces to two overlapping round speech bubbles and one bold dark double arrow; tails, speculars, cool reflections and the edge light drop away. The arrow spans about 32 px at 60 px (3.3 px shaft, 10.5 px heads) and the waveform flattens optically into a single bold stroke, so the bidirectional read never depends on wave detail.</dd>
+      </dl>
+    </article>
+
+  </main>
+
+  <footer>
+    Prototype render sheet · generated 2026-11-26 · sources in <code>../candidates/*.svg</code> · renders in <code>./&lt;slug&gt;-{1024,180,120,60}.png</code> · rendered with <code>rsvg-convert 2.63.2</code> · all PNGs are opaque RGB with no alpha channel · descriptions come from the candidate design JSON.
+  </footer>
+</div>
+
+</body>
+</html>

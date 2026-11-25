@@ -1,0 +1,16 @@
+{
+  "slug": "mirrored-bubbles",
+  "name": "Mirrored Bubbles",
+  "concept": "Two equal amber glass speech bubbles mirror each other across the vertical axis and kiss at top and bottom, their enclosed central gap cut into a clean vertical double-headed exchange arrow.",
+  "composition": "1024x1024 ink canvas: opaque #0B0C10 with a faint radial lift to #14161C. The mark spans about 628x506 px, horizontally centred on x=512. Left bubble body 228..512 x 284..756 with outer corners r108, inner kiss corners r44 and a small outward speech tail at the bottom-outer corner (tip near 198,790); the right bubble is the exact mirror. The two panes touch only along the 36 px seam bridges above and below the arrow, so the mark reads as two bubbles nearly touching rather than one plaque. Each pane is layered glass: deep-amber base, inset translucent amber pane (0.95 scale), warm top glow, soft bottom shade, 4.5 px warm rim, corner specular arc, and a 10%-opacity cool reflection along the bottom.",
+  "arrowConstruction": "The gap between the bubbles is a single negative-space vertical double arrow cut by a mask: top tip (512,364), bottom tip (512,676); each head 232 wide (barbs at x=396 and x=628, base lines y=468 and y=572); shaft 88 wide (x=468..556) and 104 tall. 36 px amber bridges separate the tips from the r44 kiss notches, so the arrow reads as a closed, clean cut. A 5 px #FFF4E0 rim at 30% opacity traces the cut edges. Head:shaft width ratio is 2.64:1, keeping the arrow bold when scaled down.",
+  "smallSizePlan": "At 60 px the arrow is about 19 px tall, 14.5 px wide at the heads and 5.2 px at the shaft, drawn as an ink hole with amber flanks on both sides. The bubble mass is about 33x28 px; the notch, seam and tails are decorative and never required for recognition. Gradients, the inner pane line and the 10% cool reflection are the first details to drop at small sizes; the arrow geometry and bubble silhouette are never simplified. Verified legible at 256 px, 60 px and 40 px.",
+  "palette": ["#0B0C10", "#14161C", "#E8B86D", "#C98F3F", "#FFF4E0", "#7EC8C3"],
+  "paletteUsage": {
+    "background": "#0B0C10 to #14161C radial",
+    "bubble base": "#C98F3F at 85% opacity",
+    "bubble pane": "#E8B86D to #C98F3F gradient",
+    "rim and highlights": "#FFF4E0",
+    "cool reflection": "#7EC8C3 at 10% opacity"
+  }
+}

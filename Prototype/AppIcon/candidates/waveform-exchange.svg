@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bgInk" cx="512" cy="430" r="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14161C"/>
+      <stop offset="0.78" stop-color="#0B0C10"/>
+      <stop offset="1" stop-color="#0B0C10"/>
+    </radialGradient>
+    <linearGradient id="fillLeft" x1="220" y1="300" x2="600" y2="780" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E8B86D"/>
+      <stop offset="0.55" stop-color="#E8B86D"/>
+      <stop offset="1" stop-color="#C98F3F"/>
+    </linearGradient>
+    <linearGradient id="fillRight" x1="600" y1="250" x2="860" y2="770" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFF4E0"/>
+      <stop offset="0.35" stop-color="#FFF4E0"/>
+      <stop offset="0.68" stop-color="#E8B86D"/>
+      <stop offset="1" stop-color="#C98F3F"/>
+    </linearGradient>
+    <radialGradient id="bloomWarm" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFF4E0" stop-opacity="0.34"/>
+      <stop offset="0.55" stop-color="#FFF4E0" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#FFF4E0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rimWarm" x1="0.12" y1="0.02" x2="0.86" y2="1">
+      <stop offset="0" stop-color="#FFF4E0" stop-opacity="0.9"/>
+      <stop offset="0.45" stop-color="#FFF4E0" stop-opacity="0.34"/>
+      <stop offset="0.75" stop-color="#FFF4E0" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#FFF4E0" stop-opacity="0.55"/>
+    </linearGradient>
+    <path id="bubbleL" d="M 172.2 673.0 C 166 704 156 738 152 766 C 180 742 218 736 245.0 745.8 A 270 270 0 1 0 172.2 673.0 Z"/>
+    <path id="bubbleR" d="M 851.8 641.0 C 872 660 878 700 872 734 C 838 724 808 720 779.0 713.8 A 270 270 0 1 1 851.8 641.0 Z"/>
+    <path id="waveLine" d="M -140 0 C -110.3 34.7 -99.7 34.7 -70 0 C -40.3 -34.7 -29.7 -34.7 0 0 C 29.7 34.7 40.3 34.7 70 0 C 99.7 -34.7 110.3 -34.7 140 0"/>
+    <path id="headLeft" d="M -272 0 L -140 -90 L -140 90 Z"/>
+    <path id="headRight" d="M 272 0 L 140 -90 L 140 90 Z"/>
+    <mask id="exchangeCut" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect x="0" y="0" width="1024" height="1024" fill="#FFFFFF"/>
+      <g transform="translate(482 500) rotate(-8)">
+        <use xlink:href="#waveLine" fill="none" stroke="#000000" stroke-width="56" stroke-linecap="round" stroke-linejoin="round"/>
+        <use xlink:href="#headLeft" fill="#000000"/>
+        <use xlink:href="#headRight" fill="#000000"/>
+      </g>
+    </mask>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#bgInk)"/>
+
+  <g mask="url(#exchangeCut)">
+    <use xlink:href="#bubbleL" fill="url(#fillLeft)"/>
+    <ellipse cx="300" cy="410" rx="180" ry="130" fill="url(#bloomWarm)"/>
+    <use xlink:href="#bubbleL" fill="none" stroke="url(#rimWarm)" stroke-width="18"/>
+    <use xlink:href="#bubbleL" fill="none" stroke="#FFF4E0" stroke-opacity="0.42" stroke-width="4"/>
+    <path d="M 174.8 625.1 A 248 248 0 0 1 155.7 479.6" fill="none" stroke="#7EC8C3" stroke-opacity="0.12" stroke-width="18" stroke-linecap="round"/>
+    <path d="M 191.6 404 A 236 236 0 0 1 315.3 300.2" fill="none" stroke="#FFF4E0" stroke-opacity="0.34" stroke-width="9" stroke-linecap="round"/>
+
+    <use xlink:href="#bubbleR" fill="url(#fillRight)"/>
+    <ellipse cx="760" cy="380" rx="170" ry="130" fill="url(#bloomWarm)"/>
+    <use xlink:href="#bubbleR" fill="none" stroke="url(#rimWarm)" stroke-width="20"/>
+    <use xlink:href="#bubbleR" fill="none" stroke="#FFF4E0" stroke-opacity="0.5" stroke-width="4"/>
+    <path d="M 818 649.4 A 248 248 0 0 1 671.1 734.2" fill="none" stroke="#7EC8C3" stroke-opacity="0.12" stroke-width="18" stroke-linecap="round"/>
+    <path d="M 746 285.6 A 236 236 0 0 1 849.8 409.3" fill="none" stroke="#FFF4E0" stroke-opacity="0.30" stroke-width="9" stroke-linecap="round"/>
+
+    <g transform="translate(482 500) rotate(-8)" fill="none" stroke="#FFF4E0" stroke-opacity="0.22" stroke-linejoin="round">
+      <use xlink:href="#waveLine" stroke-width="14" stroke-linecap="round"/>
+      <use xlink:href="#headLeft" stroke-width="14"/>
+      <use xlink:href="#headRight" stroke-width="14"/>
+    </g>
+  </g>
+</svg>

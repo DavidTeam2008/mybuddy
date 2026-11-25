@@ -1,0 +1,15 @@
+{
+  "name": "Waveform Exchange",
+  "concept": "A live sound waveform runs through two interlocking speech bubbles and resolves into a bold bidirectional exchange arrow, so the act of translating reads as one continuous signal.",
+  "composition": "Two equal 270-radius rounded speech bubbles overlap side by side with centers 232 px apart and the right bubble raised 32 px; short tails fall from the lower-left and lower-right edges. The left bubble is amber, the right is warm-white-to-amber glass with a bright liquid rim, and their overlap seam is a luminous glass edge. The mark is centered within the 819 px safe area on the opaque deep-ink canvas (content bounding box about 792 x 592 px).",
+  "arrowConstruction": "A single 544 px long bidirectional arrow is cut as negative space through both bubbles with an SVG mask down to the ink canvas; it is rotated -8 degrees and centered at (482, 500). Each head is 132 px long and 180 px tall, with a 56 px shaft. The shaft is a two-cycle sine (140 px period, 26 px amplitude, 56 px stroke) whose ends terminate inside the 140 px deep arrowhead bases, so no wave-to-shaft joint is visible. A 14 px warm-white edge light outlines the cut.",
+  "smallSizePlan": "At 60 px and 40 px the mark reduces to two overlapping round bubbles and one bold dark double arrow; tails, specular arcs, cool reflections and the edge light drop away. The arrow spans about 32 px at 60 px with a 3.3 px shaft and 10.5 px heads, and the waveform flattens optically into a single bold stroke, so the bidirectional read never depends on wave detail.",
+  "palette": [
+    "#0B0C10",
+    "#14161C",
+    "#E8B86D",
+    "#C98F3F",
+    "#FFF4E0",
+    "#7EC8C3"
+  ]
+}
