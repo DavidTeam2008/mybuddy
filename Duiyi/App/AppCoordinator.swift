@@ -3,14 +3,15 @@ import SwiftUI
 @MainActor
 @Observable
 final class AppCoordinator {
-    var path = NavigationPath()
+    /// Typed path so navigation policy can inspect the top route.
+    var path: [AppRoute] = []
 
     func open(_ route: AppRoute) {
         path.append(route)
     }
 
     func popToHome() {
-        path = NavigationPath()
+        path = []
     }
 
     func pop() {
@@ -19,14 +20,11 @@ final class AppCoordinator {
     }
 
     func replaceModule(_ feature: FeatureID) {
-        path = NavigationPath()
-        path.append(feature.route)
+        path = [feature.route]
     }
 
     func showEndedTask(_ id: UUID) {
-        path = NavigationPath()
-        path.append(AppRoute.history)
-        path.append(AppRoute.taskDetail(id))
+        path = [.history, .taskDetail(id)]
     }
 }
 

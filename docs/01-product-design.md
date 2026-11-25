@@ -248,7 +248,7 @@ Apple 智能不可用、生成失败或空结果时，只说明原因并保留�
 - 面对面：对方侧旋转 180°，`accessibilityHidden`；VoiceOver 只读用户侧。
 - 其他模块：主界面全部进入无障碍树，按钮/卡片有 label 与 hint。
 - 降低动态：新句淡入 + 4 pt 上移 180 ms；volatile 只改字；跟随 `AccessibilityReduceMotion`。
-- 发布阻断项：所有可点区域不小于 44 pt；面对面中央按钮热区 88 pt。当前 `DirectionBar` / `VoiceOutControl` / `TaskBar` 尚未全部达标，需在 v1 发布前补齐。
+- 发布阻断项：所有可点区域不小于 44 pt；面对面中央按钮热区 88 pt。已由 #44 补齐（`HitTargetTests` 覆盖），系统 toolbar 项由 Apple 管理。
 
 ---
 
