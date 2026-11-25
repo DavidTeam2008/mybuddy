@@ -18,23 +18,14 @@ struct InterpretationView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
-                ModuleChrome(
-                    title: Copy.interpretationTitle(for: viewModel.interfaceLanguage),
-                    language: viewModel.interfaceLanguage,
-                    onHome: { coordinator.popToHome() },
-                    onHistory: { coordinator.open(.history) }
-                )
-                TaskBar(
-                    language: viewModel.interfaceLanguage,
-                    statusText: TaskStatusText.make(
-                        hasTask: viewModel.hasActiveTask,
-                        startedAt: viewModel.taskStartedAt,
-                        language: viewModel.interfaceLanguage
-                    ),
-                    isActive: viewModel.hasActiveTask,
-                    onNewTask: { requestNewTask() },
-                    onEndTask: { confirmEndTask = true }
-                )
+                Text(taskStatusText)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(viewModel.hasActiveTask ? Tokens.accentText : Tokens.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Tokens.horizontalPadding)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+                    .accessibilityLabel(taskStatusText)
                 DirectionBar(
                     sourceLanguage: viewModel.sourceLanguage,
                     targetLanguage: viewModel.targetLanguage,
@@ -107,9 +98,8 @@ struct InterpretationView: View {
                         Task { await viewModel.setVoiceOutEnabled(!viewModel.voiceOutEnabled) }
                     }
                 )
-                .padding(.bottom, max(16, ScreenSafeArea.bottom))
+                .padding(.bottom, 16)
             }
-            .padding(.top, ScreenSafeArea.top)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if viewModel.isSettingsPresented {
@@ -212,9 +202,16 @@ struct InterpretationView: View {
                 .padding(.bottom, 120)
             }
         }
-        .background(Tokens.userPane)
-        .ignoresSafeArea()
-        .toolbar(.hidden, for: .navigationBar)
+        .background(Tokens.userPane.ignoresSafeArea())
+        .moduleToolbar(
+            title: Copy.interpretationTitle(for: viewModel.interfaceLanguage),
+            language: viewModel.interfaceLanguage,
+            isTaskActive: viewModel.hasActiveTask,
+            onHome: { coordinator.popToHome() },
+            onHistory: { coordinator.open(.history) },
+            onNewTask: { requestNewTask() },
+            onEndTask: { confirmEndTask = true }
+        )
         .confirmationDialog(
             Copy.replaceTaskConfirm(for: viewModel.interfaceLanguage),
             isPresented: $confirmNewTask,
@@ -445,6 +442,14 @@ struct InterpretationView: View {
     private var translationProgress: Double {
         if shouldPrepareTranslation { return max(speechProgress, 0.55) }
         return isRedownloading ? 0 : 1
+    }
+
+    private var taskStatusText: String {
+        TaskStatusText.make(
+            hasTask: viewModel.hasActiveTask,
+            startedAt: viewModel.taskStartedAt,
+            language: viewModel.interfaceLanguage
+        )
     }
 
     private var pairKey: String {
