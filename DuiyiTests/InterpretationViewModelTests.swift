@@ -205,6 +205,32 @@ struct InterpretationViewModelTests {
         #expect(viewModel.outboundJob?.text == "They also cause us to bump into each other.")
     }
 
+    @Test("A shorter final submission uses the authoritative final text")
+    func shorterFinalSubmissionUsesAuthoritativeText() {
+        let scheduler = ManualTranslationScheduler()
+        let viewModel = makeViewModel(scheduler: scheduler)
+        let id = UUID()
+        viewModel.accept(
+            Utterance(
+                id: id,
+                language: .english,
+                text: "they also cause us to bump into each other",
+                isFinal: false
+            )
+        )
+        viewModel.accept(
+            Utterance(
+                id: id,
+                language: .english,
+                text: "they also cause us",
+                isFinal: true
+            )
+        )
+
+        #expect(viewModel.outboundJob?.text == "they also cause us")
+        #expect(viewModel.transcript.first?.sourceText == "they also cause us")
+    }
+
     @Test("resetCaptions clears the pipeline's pending and outbound work")
     func resetCaptionsClearsPipeline() {
         let scheduler = ManualTranslationScheduler()
@@ -907,14 +933,15 @@ struct InterpretationViewModelTests {
         #expect(viewModel.pane.live?.translatedText.contains("Lucy") == true)
     }
 
-    @Test("A same-id greeting rewrite keeps both names")
-    func sameIDGreetingSwapKeepsBothNames() {
+    @Test("A greeting name swap gets its own row and both names stay visible")
+    func greetingNameSwapKeepsBothNames() {
         let viewModel = makeViewModel()
-        let id = UUID()
-        viewModel.accept(Utterance(id: id, language: .english, text: "Hi, Jack", isFinal: true))
+        let first = UUID()
+        let second = UUID()
+        viewModel.accept(Utterance(id: first, language: .english, text: "Hi, Jack", isFinal: true))
         viewModel.fulfill(
             job: TranslationJob(
-                utteranceID: id,
+                utteranceID: first,
                 source: .english,
                 target: .zhHans,
                 text: "Hi, Jack",
@@ -922,10 +949,12 @@ struct InterpretationViewModelTests {
             ),
             text: "嗨，Jack"
         )
-        viewModel.accept(Utterance(id: id, language: .english, text: "Hi, Lucy", isFinal: true))
+        // The assembler starts a new id for a name swap; the projection must
+        // keep both rows (a same-id final would be a correction, not a swap).
+        viewModel.accept(Utterance(id: second, language: .english, text: "Hi, Lucy", isFinal: true))
         viewModel.fulfill(
             job: TranslationJob(
-                utteranceID: id,
+                utteranceID: second,
                 source: .english,
                 target: .zhHans,
                 text: "Hi, Lucy",

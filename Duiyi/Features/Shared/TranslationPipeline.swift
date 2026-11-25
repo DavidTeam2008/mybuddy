@@ -1,15 +1,5 @@
 import Foundation
 
-/// How an incoming translation result compares with the last result applied
-/// for the same canonical utterance.
-enum StalePolicy: Sendable, Equatable {
-    /// Face-to-face: a shorter result is dropped only while it is non-final,
-    /// so a settled line can still correct a longer volatile one.
-    case dropShorterNonFinal
-    /// Interpretation: any shorter result is dropped, including a final one.
-    case dropShorterAny
-}
-
 /// One caption line handed to the pipeline. The feature computes the target
 /// language and the two debounce delays at submission time.
 struct TranslationSubmission: Equatable, Sendable {
@@ -81,20 +71,17 @@ final class TaskTranslationScheduler: TranslationScheduler {
 @MainActor
 @Observable
 final class TranslationPipeline {
-    let stalePolicy: StalePolicy
     private let scheduler: any TranslationScheduler
     private(set) var outboundJob: TranslationJob?
     private var scheduled: (any TranslationScheduledTask)?
     private var sentSourceText: [UUID: String] = [:]
     private var lastAppliedSourceCount: [UUID: Int] = [:]
 
-    init(stalePolicy: StalePolicy) {
-        self.stalePolicy = stalePolicy
+    init() {
         self.scheduler = TaskTranslationScheduler()
     }
 
-    init(stalePolicy: StalePolicy, scheduler: any TranslationScheduler) {
-        self.stalePolicy = stalePolicy
+    init(scheduler: any TranslationScheduler) {
         self.scheduler = scheduler
     }
 
@@ -138,25 +125,20 @@ final class TranslationPipeline {
         }
     }
 
-    /// Applies the stale policy to the job's utterance. Empty or stale text
-    /// returns `nil` without touching the outbound slot; an accepted result
-    /// clears the slot only when it belongs to the matching job.
+    /// Applies the result to the job's utterance. Empty or stale preview text
+    /// returns `nil` without touching the outbound slot; a final is always
+    /// applied, even when its source is shorter than an earlier preview. An
+    /// accepted result clears the slot only when it belongs to the matching
+    /// job.
     func accept(job: TranslationJob, text: String) -> TranslationUpdate? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
         let utteranceID = job.utteranceID
-        if let applied = lastAppliedSourceCount[utteranceID] {
-            let isStale: Bool
-            switch stalePolicy {
-            case .dropShorterNonFinal:
-                isStale = !job.isFinal && applied > job.text.count
-            case .dropShorterAny:
-                isStale = applied > job.text.count
-            }
-            if isStale {
-                return nil
-            }
+        if let applied = lastAppliedSourceCount[utteranceID],
+           !job.isFinal,
+           applied > job.text.count {
+            return nil
         }
         lastAppliedSourceCount[utteranceID] = max(
             lastAppliedSourceCount[utteranceID] ?? 0,

@@ -362,11 +362,57 @@ struct CaptionProjectionModuleTests {
         #expect(line?.translatedText == "Nice to meet you")
         #expect(line?.phase == .streaming)
         #expect(grown?.translatedText == "Nice to meet you all")
-        #expect(shorter?.translatedText == "Nice to meet you all")
+        #expect(shorter?.translatedText == "Nice")
         #expect(shorter?.phase == .settled)
-        #expect(projection.pane(.user).live?.translatedText == "Nice to meet you all")
-        #expect(projection.transcript.first?.translatedText == "Nice to meet you all")
+        #expect(projection.pane(.user).live?.translatedText == "Nice")
+        #expect(projection.transcript.first?.translatedText == "Nice")
         #expect(projection.transcript.first?.isFinal == true)
+    }
+
+    @Test("A final source replaces a longer preview source")
+    func finalSourceReplacesLongerPreview() {
+        var projection = makeProjection()
+        let id = UUID()
+        _ = projection.ingest(
+            makeUtterance(id: id, text: "They also cause us to bump into each other."),
+            pane: .user,
+            speaker: .peer
+        )
+
+        let final = projection.ingest(
+            makeUtterance(id: id, text: "They also cause us.", isFinal: true),
+            pane: .user,
+            speaker: .peer
+        )
+
+        #expect(final?.sourceText == "They also cause us.")
+        #expect(projection.transcript.first?.sourceText == "They also cause us.")
+        #expect(projection.transcript.first?.isFinal == true)
+    }
+
+    @Test("A late preview translation cannot overwrite a final translation")
+    func latePreviewDoesNotOverwriteFinalTranslation() {
+        var projection = makeProjection()
+        let id = UUID()
+        _ = projection.ingest(
+            makeUtterance(id: id, text: "Hello", isFinal: true),
+            pane: .user,
+            speaker: .peer
+        )
+        let final = projection.applyTranslation(
+            utteranceID: id,
+            text: "你好",
+            settle: true
+        )
+        #expect(final?.translatedText == "你好")
+
+        let late = projection.applyTranslation(
+            utteranceID: id,
+            text: "你好，很高兴认识你",
+            settle: false
+        )
+        #expect(late == nil)
+        #expect(projection.transcript.first?.translatedText == "你好")
     }
 
     @Test("Translating an in-window history row updates it and returns the row")

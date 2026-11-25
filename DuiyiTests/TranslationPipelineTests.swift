@@ -23,11 +23,9 @@ private func makeSubmission(
 
 @MainActor
 struct TranslationPipelineTests {
-    private func makePipeline(
-        _ stalePolicy: StalePolicy = .dropShorterNonFinal
-    ) -> (TranslationPipeline, ManualTranslationScheduler) {
+    private func makePipeline() -> (TranslationPipeline, ManualTranslationScheduler) {
         let scheduler = ManualTranslationScheduler()
-        let pipeline = TranslationPipeline(stalePolicy: stalePolicy, scheduler: scheduler)
+        let pipeline = TranslationPipeline(scheduler: scheduler)
         return (pipeline, scheduler)
     }
 
@@ -56,7 +54,7 @@ struct TranslationPipelineTests {
 
     @Test("Interpretation 25/50 ms delays pass through unchanged")
     func interpretationDelays() {
-        let (pipeline, scheduler) = makePipeline(.dropShorterAny)
+        let (pipeline, scheduler) = makePipeline()
         let id = UUID()
 
         pipeline.submit(
@@ -273,9 +271,9 @@ struct TranslationPipelineTests {
         #expect(pipeline.outboundJob == nil)
     }
 
-    @Test("Face-to-face keeps a shorter final result but drops a shorter volatile one")
-    func dropShorterNonFinalPolicy() {
-        let (pipeline, _) = makePipeline(.dropShorterNonFinal)
+    @Test("Previews drop shorter results; finals always win")
+    func previewsMayBeStaleFinalsAlwaysWin() {
+        let (pipeline, _) = makePipeline()
         let id = UUID()
 
         let long = TranslationJob(
@@ -299,9 +297,9 @@ struct TranslationPipelineTests {
         #expect(pipeline.accept(job: equalVolatile, text: "你好世界") != nil)
     }
 
-    @Test("Interpretation drops any shorter result, including a final one")
-    func dropShorterAnyPolicy() {
-        let (pipeline, _) = makePipeline(.dropShorterAny)
+    @Test("A shorter final correction is accepted")
+    func shorterFinalIsAccepted() {
+        let (pipeline, _) = makePipeline()
         let id = UUID()
 
         let long = TranslationJob(
@@ -312,7 +310,7 @@ struct TranslationPipelineTests {
         let shorterFinal = TranslationJob(
             utteranceID: id, source: .english, target: .zhHans, text: "hello", isFinal: true
         )
-        #expect(pipeline.accept(job: shorterFinal, text: "你好") == nil)
+        #expect(pipeline.accept(job: shorterFinal, text: "你好") != nil)
 
         let shorterVolatile = TranslationJob(
             utteranceID: id, source: .english, target: .zhHans, text: "hell", isFinal: false
@@ -332,7 +330,7 @@ struct TranslationPipelineTests {
 
     @Test("A stale result is not accepted and leaves the outbound job alone")
     func staleDoesNotClearOutboundJob() throws {
-        let (pipeline, _) = makePipeline(.dropShorterAny)
+        let (pipeline, _) = makePipeline()
         let id = UUID()
 
         let long = TranslationJob(
@@ -344,7 +342,7 @@ struct TranslationPipelineTests {
         let outbound = try #require(pipeline.outboundJob)
 
         let stale = TranslationJob(
-            utteranceID: id, source: .english, target: .zhHans, text: "hello", isFinal: true
+            utteranceID: id, source: .english, target: .zhHans, text: "hello", isFinal: false
         )
         #expect(pipeline.accept(job: stale, text: "你好") == nil)
         #expect(pipeline.outboundJob?.id == outbound.id)
@@ -386,7 +384,7 @@ struct TranslationPipelineTests {
 
     @Test("reset clears stale counts")
     func resetClearsStaleCounts() {
-        let (pipeline, _) = makePipeline(.dropShorterAny)
+        let (pipeline, _) = makePipeline()
         let id = UUID()
         let long = TranslationJob(
             utteranceID: id, source: .english, target: .zhHans, text: "hello world", isFinal: true

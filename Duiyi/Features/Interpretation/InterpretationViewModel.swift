@@ -87,7 +87,7 @@ final class InterpretationViewModel {
         self.synthesizer = synthesizer
         self.idleRestoreDelay = idleRestoreDelay
         self.speechSettleDelay = speechSettleDelay
-        self.pipeline = TranslationPipeline(stalePolicy: .dropShorterAny)
+        self.pipeline = TranslationPipeline()
         sourceLanguage = preferences.sourceLanguage
         targetLanguage = preferences.targetLanguage
         fontSize = preferences.fontSize
@@ -96,8 +96,8 @@ final class InterpretationViewModel {
     }
 
     /// Test seam: injects only the debounce scheduler. The ViewModel still
-    /// constructs its own pipeline with the fixed `.dropShorterAny` policy, so
-    /// callers cannot substitute a different stale rule.
+    /// constructs its own pipeline, so callers cannot substitute the stale
+    /// rule (finals always win; only previews may be dropped as shorter).
     init(
         gate: any SpeechSessionGating,
         permissions: any PermissionGranting,
@@ -124,10 +124,7 @@ final class InterpretationViewModel {
         self.synthesizer = synthesizer
         self.idleRestoreDelay = idleRestoreDelay
         self.speechSettleDelay = speechSettleDelay
-        self.pipeline = TranslationPipeline(
-            stalePolicy: .dropShorterAny,
-            scheduler: scheduler
-        )
+        self.pipeline = TranslationPipeline(scheduler: scheduler)
         sourceLanguage = preferences.sourceLanguage
         targetLanguage = preferences.targetLanguage
         fontSize = preferences.fontSize
