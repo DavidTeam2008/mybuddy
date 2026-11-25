@@ -14,8 +14,10 @@ struct VoiceOutControl: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .background(background, in: Capsule())
+                .minHitTarget()
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("voice-out")
         .accessibilityLabel(label)
         .accessibilityAddTraits(.isButton)
     }

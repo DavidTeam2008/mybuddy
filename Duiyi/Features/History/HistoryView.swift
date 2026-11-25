@@ -98,11 +98,19 @@ struct HistoryView: View {
     private var filterRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                filterChip(title: Copy.filterAll(for: language), selected: viewModel.filter == nil) {
+                filterChip(
+                    identifier: "history-filter-all",
+                    title: Copy.filterAll(for: language),
+                    selected: viewModel.filter == nil
+                ) {
                     Task { await viewModel.setFilter(nil) }
                 }
                 ForEach(FeatureID.allCases, id: \.self) { feature in
-                    filterChip(title: Copy.featureTitle(feature, for: language), selected: viewModel.filter == feature) {
+                    filterChip(
+                        identifier: "history-filter-\(feature.rawValue)",
+                        title: Copy.featureTitle(feature, for: language),
+                        selected: viewModel.filter == feature
+                    ) {
                         Task { await viewModel.setFilter(feature) }
                     }
                 }
@@ -110,7 +118,12 @@ struct HistoryView: View {
         }
     }
 
-    private func filterChip(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+    private func filterChip(
+        identifier: String,
+        title: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.footnote.weight(selected ? .semibold : .regular))
@@ -118,8 +131,10 @@ struct HistoryView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
                 .background(selected ? Tokens.listen : Tokens.sheetChip, in: Capsule())
+                .minHitTarget()
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier(identifier)
     }
 }
 

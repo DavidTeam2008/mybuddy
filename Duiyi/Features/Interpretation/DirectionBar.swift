@@ -29,8 +29,10 @@ struct DirectionBar: View {
                     .foregroundStyle(Tokens.textPrimary)
                     .frame(width: 40, height: 40)
                     .background(Tokens.controlIdle, in: Circle())
+                    .minHitTarget()
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("direction-swap")
             .accessibilityLabel(Copy.swapDirection(for: viewerLanguage))
             badge(
                 language: targetLanguage,
@@ -70,7 +72,8 @@ struct DirectionBar: View {
                 Capsule()
                     .stroke(Tokens.languageBadge(language), lineWidth: 1)
             )
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, minHeight: Tokens.minHitTarget)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(testID)

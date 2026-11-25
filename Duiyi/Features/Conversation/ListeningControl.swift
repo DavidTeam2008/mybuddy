@@ -45,6 +45,7 @@ struct ListeningControl: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("settings-open")
                 .accessibilityLabel(settingsLabel)
                 .padding(.trailing, 14)
             }
