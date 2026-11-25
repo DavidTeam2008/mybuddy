@@ -12,30 +12,12 @@ struct LaunchBackgroundTests {
             "LaunchBackground colorset is missing"
         )
 
-        let cases: [(TokenScheme, TokenContrast, UIUserInterfaceStyle, UIAccessibilityContrast)] = [
-            (.light, .normal, .light, .normal),
-            (.dark, .normal, .dark, .normal),
-            (.light, .high, .light, .high),
-            (.dark, .high, .dark, .high),
-        ]
-
-        for (scheme, contrast, style, accessibilityContrast) in cases {
-            let traits = UITraitCollection(traitsFrom: [
-                UITraitCollection(userInterfaceStyle: style),
-                UITraitCollection(accessibilityContrast: accessibilityContrast),
-            ])
-            let actual = launch.resolvedColor(with: traits)
-            let expected = TokenPalette.canvas.resolve(scheme: scheme, contrast: contrast)
-
-            var red: CGFloat = 0
-            var green: CGFloat = 0
-            var blue: CGFloat = 0
-            var alpha: CGFloat = 0
-            #expect(actual.getRed(&red, green: &green, blue: &blue, alpha: &alpha))
-            #expect(abs(Double(red) - expected.red) < 0.001, "\(scheme)/\(contrast) red")
-            #expect(abs(Double(green) - expected.green) < 0.001, "\(scheme)/\(contrast) green")
-            #expect(abs(Double(blue) - expected.blue) < 0.001, "\(scheme)/\(contrast) blue")
-            #expect(abs(Double(alpha) - 1) < 0.001, "\(scheme)/\(contrast) alpha")
+        for scheme in [TokenScheme.light, .dark] {
+            for contrast in [TokenContrast.normal, .high] {
+                let actual = launch.resolvedColor(with: traits(scheme: scheme, contrast: contrast))
+                let expected = TokenPalette.canvas.resolve(scheme: scheme, contrast: contrast)
+                assertChannels(of: actual, equal: expected, "\(scheme)/\(contrast)")
+            }
         }
     }
 
@@ -46,5 +28,34 @@ struct LaunchBackgroundTests {
             "UILaunchScreen is missing"
         )
         #expect(launch["UIColorName"] as? String == "LaunchBackground")
+    }
+
+    private func traits(scheme: TokenScheme, contrast: TokenContrast) -> UITraitCollection {
+        let style: UIUserInterfaceStyle
+        switch scheme {
+        case .light: style = .light
+        case .dark: style = .dark
+        }
+        let accessibilityContrast: UIAccessibilityContrast
+        switch contrast {
+        case .normal: accessibilityContrast = .normal
+        case .high: accessibilityContrast = .high
+        }
+        return UITraitCollection(traitsFrom: [
+            UITraitCollection(userInterfaceStyle: style),
+            UITraitCollection(accessibilityContrast: accessibilityContrast),
+        ])
+    }
+
+    private func assertChannels(of color: UIColor, equal expected: TokenColor, _ label: String) {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        #expect(color.getRed(&red, green: &green, blue: &blue, alpha: &alpha), "\(label) getRed")
+        #expect(abs(Double(red) - expected.red) < 0.001, "\(label) red")
+        #expect(abs(Double(green) - expected.green) < 0.001, "\(label) green")
+        #expect(abs(Double(blue) - expected.blue) < 0.001, "\(label) blue")
+        #expect(abs(Double(alpha) - 1) < 0.001, "\(label) alpha")
     }
 }

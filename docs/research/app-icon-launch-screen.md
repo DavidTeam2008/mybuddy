@@ -1,5 +1,13 @@
 # App icon and launch screen: Apple's current requirements (Nov 2026)
 
+> **中文摘要**
+>
+> 1. 图标用 Icon Composer `.icon`（`Duiyi/AppIcon.icon`）：`icon.json` + `Assets/*.svg`，无需改 `project.pbxproj`；空的 `AppIcon.appiconset` 会静默产出 0 个图标。
+> 2. 启动图保留 `UILaunchScreen`，加 `UIColorName = LaunchBackground`，颜色集精确对应 `Tokens.canvas`（浅 `#F2F2F7` / 深 `#0B0C10` / 高对比 `#FFFFFF` / `#000000`）。
+> 3. 启动图只放纯画布，不放图标 mark 或字标：HIG 要求它几乎等同首帧，mark 会变成 splash。
+> 4. 验证：`actool` 的 partial plist 应含 `CFBundleIconName`/`CFBundleIconFiles`；`assetutil` 应看到 ≥3 个 icon rendition；再构建并在模拟器/真机看 Home Screen 与首帧。
+> 5. 本文件是调研与决策记录；实现落在 `feat/app-icon-launch`。
+
 > Researched 2026-11-26. Environment verified locally: Xcode 27.1 (27A9275), iOS SDK 27.1
 > (`iphoneos27.1`), deployment target `26.4`, SwiftUI iPhone-only target `Duiyi`.
 > This document is research only: no app code, project file, or commit was changed.
@@ -523,6 +531,11 @@ xcrun simctl terminate booted com.david.Duiyi  # then relaunch for the launch sc
 4. Leave `AccentColor` untouched; it is unrelated to the icon.
 5. Verify with §5.1, then §5.2, then §5.4.
 
+The `.icon` fill uses the brand ink `#0B0C10`, the same value as `TokenPalette.canvas.dark`. It is
+part of the icon artwork, not a UI token: a future canvas change should not silently repaint the
+app icon. The launch colorset, by contrast, must track `Tokens.canvas` and is pinned by
+`LaunchBackgroundTests`.
+
 ### Icon (fallback: documented asset catalog)
 
 1. Put `AppIcon-1024.png` (1024×1024, sRGB, opaque, unmasked) in
@@ -540,7 +553,8 @@ xcrun simctl terminate booted com.david.Duiyi  # then relaunch for the launch sc
 3. Build, launch in light and dark, screenshot the first frame and compare to `RootView`.
 
 Expected source diff: `AppIcon.icon/` (manifest + SVG layers), `LaunchBackground.colorset`, one
-`Info.plist` key, removal of `AppIcon.appiconset`; **no pbxproj edit** (synchronized folder) and zero
+`Info.plist` key, removal of `AppIcon.appiconset`, and one regression test
+(`DuiyiTests/LaunchBackgroundTests.swift`); **no pbxproj edit** (synchronized folder) and no app
 Swift changes.
 
 ---
