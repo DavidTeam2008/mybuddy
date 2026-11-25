@@ -9,9 +9,22 @@ enum DebugHistorySeed {
         ProcessInfo.processInfo.arguments.contains("-duiyi.seedHistory")
     }
 
+    /// Optional `-duiyi.seedEntryCount <n>`: entries per seeded task, so device
+    /// runs can reproduce a real task's cascade-delete and transcript length.
+    static var entryCount: Int {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: "-duiyi.seedEntryCount") else { return 1 }
+        let valueIndex = arguments.index(after: flag)
+        guard valueIndex < arguments.endIndex,
+              let count = Int(arguments[valueIndex]),
+              count > 0
+        else { return 1 }
+        return count
+    }
+
     static func seedIfRequested(into store: any TaskStoreV2, language: AppLanguage) async {
         guard isRequested else { return }
-        // Deterministic fixture: clear prior ended tasks before seeding three.
+        // Deterministic fixture: clear prior ended tasks before seeding four.
         if case let .value(existing) = await store.readList(filter: nil) {
             for task in existing {
                 _ = await store.deleteTask(id: task.id)
@@ -19,8 +32,11 @@ enum DebugHistorySeed {
         }
 
         let now = Date()
+        // Two face-to-face tasks so the face-to-face filter shows the two-row
+        // list shape from the device crash reports.
         let specs: [(FeatureID, AppLanguage, AppLanguage?)] = [
             (.faceToFace, .zhHans, .english),
+            (.faceToFace, .english, .zhHans),
             (.simultaneous, .english, .zhHans),
             (.meeting, .zhHans, nil),
         ]
@@ -44,17 +60,17 @@ enum DebugHistorySeed {
                 )
             )
             guard case let .persisted(task) = await store.startNew(draft) else { continue }
-            let entries = [
+            let entries = (1...entryCount).map { line in
                 TranscriptEntry(
                     id: UUID(),
-                    speaker: .user,
+                    speaker: line.isMultiple(of: 2) ? .user : .peer,
                     source: spec.1,
-                    sourceText: "测试台词 \(index + 1)",
-                    translatedText: "Test line \(index + 1)",
+                    sourceText: "测试台词 \(index + 1)-\(line)",
+                    translatedText: "Test line \(index + 1)-\(line)",
                     isFinal: true,
-                    recordedAt: started.addingTimeInterval(5)
-                ),
-            ]
+                    recordedAt: started.addingTimeInterval(Double(line))
+                )
+            }
             _ = await store.end(taskID: task.id, entries: entries, summary: nil)
         }
     }

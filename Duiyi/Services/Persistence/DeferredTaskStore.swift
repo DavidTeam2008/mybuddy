@@ -196,10 +196,12 @@ final class DeferredTaskStore: TaskStoreV2 {
     }
 
     /// Blocking file I/O: runs on a detached background task, never on MainActor.
-    nonisolated static func openContainer() -> ModelContainer? {
+    /// `storeURL` redirects DEBUG UI-test runs to an isolated store.
+    nonisolated static func openContainer(storeURL: URL? = nil) -> ModelContainer? {
         do {
             let schema = Schema([TaskEntity.self, TranscriptEntity.self])
-            let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+            let configuration = storeURL.map { ModelConfiguration(schema: schema, url: $0) }
+                ?? ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
             let t0 = CFAbsoluteTimeGetCurrent()
             let container = try ModelContainer(for: schema, configurations: [configuration])
             let dt = (CFAbsoluteTimeGetCurrent() - t0) * 1000

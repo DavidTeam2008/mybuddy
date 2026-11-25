@@ -182,6 +182,7 @@ struct TaskDetailView: View {
                     }
                 }
             }
+            .accessibilityIdentifier("detail-delete-confirm")
             Button(Copy.cancel(for: language), role: .cancel) {
                 viewModel?.cancelDelete()
             }

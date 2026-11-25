@@ -47,9 +47,16 @@ final class AppEnvironment {
     }
 
     static func makeTaskStore() -> any TaskStoreV2 {
+        #if DEBUG
+        if let storeURL = DebugIsolatedStore.storeURL {
+            return DeferredTaskStore(openContainer: {
+                DeferredTaskStore.openContainer(storeURL: storeURL)
+            })
+        }
+        #endif
         // Deferred: zero I/O at init. Real ModelContainer opens after first frame
         // on a utility queue (see DeferredTaskStore). Open failure is exposed as
         // `unavailable`; callers can `retry()`.
-        DeferredTaskStore()
+        return DeferredTaskStore()
     }
 }
