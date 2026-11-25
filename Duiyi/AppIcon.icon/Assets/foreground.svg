@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="fillLeft" x1="230" y1="250" x2="600" y2="780" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E8B86D"/>
+      <stop offset="0.4" stop-color="#C98F3F"/>
+      <stop offset="1" stop-color="#C98F3F"/>
+    </linearGradient>
+
+    <linearGradient id="fillRight" x1="560" y1="240" x2="900" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E8B86D"/>
+      <stop offset="0.2" stop-color="#E8B86D"/>
+      <stop offset="0.82" stop-color="#E8B86D"/>
+      <stop offset="1" stop-color="#C98F3F"/>
+    </linearGradient>
+
+    <radialGradient id="fillLens" cx="495" cy="372" r="330" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFF4E0"/>
+      <stop offset="0.22" stop-color="#FFF4E0"/>
+      <stop offset="0.50" stop-color="#F2D6A0"/>
+      <stop offset="0.78" stop-color="#E8B86D"/>
+      <stop offset="1" stop-color="#C98F3F"/>
+    </radialGradient>
+
+    <radialGradient id="glowWarm" cx="0.5" cy="0.5" r="0.58">
+      <stop offset="0" stop-color="#FFF4E0" stop-opacity="0.34"/>
+      <stop offset="0.55" stop-color="#FFF4E0" stop-opacity="0.11"/>
+      <stop offset="1" stop-color="#FFF4E0" stop-opacity="0"/>
+    </radialGradient>
+
+    <path id="bubbleL" d="M297.60 755.76 C286 784 266 806 238 815 Q228 818 222 810 C211 789 195 728 180.57 673.81 A276 276 0 1 1 297.60 755.76 Z"/>
+    <path id="bubbleR" d="M726.40 755.76 C738 784 758 806 786 815 Q796 818 802 810 C813 789 829 728 843.43 673.81 A276 276 0 1 0 726.40 755.76 Z"/>
+    <path id="lens" d="M487.30 236.97 A276 276 0 0 1 536.70 731.03 A276 276 0 0 1 487.30 236.97 Z"/>
+    <path id="lensCoolArc" d="M487.30 236.97 A276 276 0 0 1 536.70 731.03"/>
+    <path id="exchangeArrow" d="M366.72 498.53 L420.66 414.75 L425.43 462.51 L592.60 445.79 L587.82 398.03 L657.28 469.47 L603.34 553.25 L598.57 505.49 L431.40 522.21 L436.18 569.97 Z"/>
+
+    <mask id="exchangeCut" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect x="0" y="0" width="1024" height="1024" fill="white"/>
+      <use xlink:href="#exchangeArrow" fill="black"/>
+    </mask>
+  </defs>
+
+  <g mask="url(#exchangeCut)">
+    <!-- left bubble -->
+    <use xlink:href="#bubbleL" fill="url(#fillLeft)"/>
+    <ellipse cx="330" cy="380" rx="155" ry="95" fill="url(#glowWarm)"/>
+    <use xlink:href="#bubbleL" fill="none" stroke="#FFF4E0" stroke-opacity="0.10" stroke-width="18"/>
+    <use xlink:href="#bubbleL" fill="none" stroke="#FFF4E0" stroke-opacity="0.42" stroke-width="3.5"/>
+
+    <!-- right bubble -->
+    <g transform="translate(0 -24)">
+      <use xlink:href="#bubbleR" fill="url(#fillRight)"/>
+      <ellipse cx="700" cy="370" rx="150" ry="95" fill="url(#glowWarm)"/>
+      <use xlink:href="#bubbleR" fill="none" stroke="#FFF4E0" stroke-opacity="0.10" stroke-width="18"/>
+      <use xlink:href="#bubbleR" fill="none" stroke="#FFF4E0" stroke-opacity="0.42" stroke-width="3.5"/>
+    </g>
+
+    <!-- exchange lens -->
+    <use xlink:href="#lens" fill="url(#fillLens)"/>
+    <use xlink:href="#lens" fill="none" stroke="#C98F3F" stroke-opacity="0.5" stroke-width="6"/>
+    <use xlink:href="#lens" fill="none" stroke="#FFF4E0" stroke-opacity="0.70" stroke-width="3.5"/>
+    <use xlink:href="#lensCoolArc" fill="none" stroke="#7EC8C3" stroke-opacity="0.12" stroke-width="16" stroke-linecap="round"/>
+    <use xlink:href="#exchangeArrow" fill="none" stroke="#FFF4E0" stroke-opacity="0.20" stroke-width="5" stroke-linejoin="round"/>
+
+    <!-- specular edges -->
+    <path d="M157.08 410.50 A250 250 0 0 1 327.30 254.52" fill="none" stroke="#FFF4E0" stroke-opacity="0.42" stroke-width="5" stroke-linecap="round"/>
+    <g transform="translate(0 -24)">
+      <path d="M696.70 254.52 A250 250 0 0 1 866.92 410.50" fill="none" stroke="#FFF4E0" stroke-opacity="0.38" stroke-width="5" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>

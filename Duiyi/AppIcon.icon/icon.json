@@ -1,0 +1,12 @@
+{
+  "fill" : { "automatic-gradient" : "extended-srgb:0.043,0.047,0.063,1.00000" },
+  "groups" : [
+    {
+      "name" : "Foreground",
+      "layers" : [
+        { "image-name" : "foreground.svg", "name" : "Mark" }
+      ]
+    }
+  ],
+  "supported-platforms" : { "squares" : "shared" }
+}
