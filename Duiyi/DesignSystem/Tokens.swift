@@ -308,6 +308,7 @@ enum Tokens {
     static let midBarHeight = ConversationLayout.midBarHeight
     static let micSize = ConversationLayout.micSize
     static let micHitSize = ConversationLayout.micHitSize
+    static let minHitTarget: CGFloat = 44
 }
 
 extension Color {

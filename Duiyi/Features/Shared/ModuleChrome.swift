@@ -8,19 +8,25 @@ struct ModuleChrome: View {
 
     var body: some View {
         HStack {
-            Button(Copy.homeButton(for: language), action: onHome)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Tokens.accentText)
-                .accessibilityIdentifier("nav-home")
+            Button(action: onHome) {
+                Text(Copy.homeButton(for: language))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Tokens.accentText)
+                    .minHitTarget()
+            }
+            .accessibilityIdentifier("nav-home")
             Spacer()
             Text(title)
                 .font(.headline)
                 .foregroundStyle(Tokens.textPrimary)
             Spacer()
-            Button(Copy.historyTitle(for: language), action: onHistory)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Tokens.accentText)
-                .accessibilityIdentifier("nav-history")
+            Button(action: onHistory) {
+                Text(Copy.historyTitle(for: language))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Tokens.accentText)
+                    .minHitTarget()
+            }
+            .accessibilityIdentifier("nav-history")
         }
         .padding(.horizontal, Tokens.horizontalPadding)
         .padding(.top, 8)

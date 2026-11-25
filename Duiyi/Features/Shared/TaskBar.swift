@@ -14,15 +14,21 @@ struct TaskBar: View {
                 .foregroundStyle(isActive ? Tokens.accentText : Tokens.textSecondary)
                 .accessibilityLabel(statusText)
             Spacer(minLength: 8)
-            Button(Copy.newTask(for: language), action: onNewTask)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Tokens.accentText)
-                .accessibilityIdentifier("taskbar-new-task")
-            Button(Copy.endTask(for: language), action: onEndTask)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(isActive ? Tokens.danger : Tokens.textSecondary)
-                .disabled(!isActive)
-                .accessibilityIdentifier("taskbar-end-task")
+            Button(action: onNewTask) {
+                Text(Copy.newTask(for: language))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Tokens.accentText)
+                    .minHitTarget()
+            }
+            .accessibilityIdentifier("taskbar-new-task")
+            Button(action: onEndTask) {
+                Text(Copy.endTask(for: language))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(isActive ? Tokens.danger : Tokens.textSecondary)
+                    .minHitTarget()
+            }
+            .disabled(!isActive)
+            .accessibilityIdentifier("taskbar-end-task")
         }
         .padding(.horizontal, Tokens.horizontalPadding)
         .padding(.bottom, 8)

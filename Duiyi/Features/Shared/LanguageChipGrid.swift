@@ -32,6 +32,7 @@ struct LanguageChipGrid: View {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .stroke(selected == language ? Tokens.listen : Color.clear, lineWidth: 1)
                         )
+                        .minHitTarget()
                 }
                 .buttonStyle(.plain)
                 .disabled(isUnavailable)

@@ -28,6 +28,7 @@ struct HomeView: View {
                             .foregroundStyle(Tokens.textSecondary)
                             .frame(width: 44, height: 44)
                     }
+                    .accessibilityIdentifier("settings-open")
                     .accessibilityLabel(Copy.settingsTitle(for: language))
                 }
 

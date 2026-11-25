@@ -36,14 +36,23 @@ struct InterpretationSettingsSheet: View {
                     .font(.footnote)
                     .foregroundStyle(Tokens.textSecondary)
                 HStack(spacing: 8) {
-                    chip(Copy.modeFaceToFace(for: viewerLanguage), selected: appMode == .faceToFace) {
+                    SelectChip(
+                        title: Copy.modeFaceToFace(for: viewerLanguage),
+                        isSelected: appMode == .faceToFace
+                    ) {
                         onSelectMode(.faceToFace)
                     }
-                    chip(Copy.modeSimultaneous(for: viewerLanguage), selected: appMode == .simultaneous) {
+                    SelectChip(
+                        title: Copy.modeSimultaneous(for: viewerLanguage),
+                        isSelected: appMode == .simultaneous
+                    ) {
                         onSelectMode(.simultaneous)
                     }
                 }
-                chip(Copy.modeMeeting(for: viewerLanguage), selected: appMode == .meeting) {
+                SelectChip(
+                    title: Copy.modeMeeting(for: viewerLanguage),
+                    isSelected: appMode == .meeting
+                ) {
                     onSelectMode(.meeting)
                 }
 
@@ -58,14 +67,17 @@ struct InterpretationSettingsSheet: View {
                 LanguageChipGrid(selected: targetLanguage, onSelect: onSelectTargetLanguage)
 
                 HStack(spacing: 8) {
-                    chip(Copy.voiceOut(for: viewerLanguage), selected: voiceOutEnabled && !isVoiceOutBlocked) {
+                    SelectChip(
+                        title: Copy.voiceOut(for: viewerLanguage),
+                        isSelected: voiceOutEnabled && !isVoiceOutBlocked
+                    ) {
                         onToggleVoiceOut(!voiceOutEnabled)
                     }
-                    chip(
-                        showsSourceLine
+                    SelectChip(
+                        title: showsSourceLine
                             ? Copy.showSourceLine(for: viewerLanguage)
                             : Copy.hideSourceLine(for: viewerLanguage),
-                        selected: showsSourceLine
+                        isSelected: showsSourceLine
                     ) {
                         onToggleSourceLine(!showsSourceLine)
                     }
@@ -75,17 +87,11 @@ struct InterpretationSettingsSheet: View {
                     .font(.footnote)
                     .foregroundStyle(Tokens.textSecondary)
 
-                HStack(spacing: 8) {
-                    chip(Copy.fontStandard(for: viewerLanguage), selected: fontSize == .standard) {
-                        onSelectFont(.standard)
-                    }
-                    chip(Copy.fontLarger(for: viewerLanguage), selected: fontSize == .larger) {
-                        onSelectFont(.larger)
-                    }
-                    chip(Copy.fontLargest(for: viewerLanguage), selected: fontSize == .largest) {
-                        onSelectFont(.largest)
-                    }
-                }
+                FontSizeChips(
+                    language: viewerLanguage,
+                    selection: fontSize,
+                    onSelect: onSelectFont
+                )
 
                 if isRedownloading {
                     AssetDownloadView(
@@ -135,15 +141,4 @@ struct InterpretationSettingsSheet: View {
         .padding(.bottom, 24)
     }
 
-    private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Tokens.onAccent : Tokens.textPrimary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(selected ? Tokens.listen : Tokens.sheetChip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
 }

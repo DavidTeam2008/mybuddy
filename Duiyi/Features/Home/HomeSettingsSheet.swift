@@ -30,10 +30,11 @@ struct HomeSettingsSheet: View {
                     Text(Copy.fontLarger(for: language))
                         .font(.footnote)
                         .foregroundStyle(Tokens.textSecondary)
-                    HStack(spacing: 8) {
-                        fontChip(Copy.fontStandard(for: language), .standard)
-                        fontChip(Copy.fontLarger(for: language), .larger)
-                        fontChip(Copy.fontLargest(for: language), .largest)
+                    FontSizeChips(
+                        language: language,
+                        selection: environment.preferences.fontSize
+                    ) { size in
+                        environment.preferences.fontSize = size
                     }
 
                     if isRedownloading {
@@ -80,21 +81,6 @@ struct HomeSettingsSheet: View {
             await environment.languageCatalog.refreshCapabilities()
             unavailableLanguages = LanguageCatalogSelection.unavailableLanguages(from: environment.languageCatalog)
         }
-    }
-
-    private func fontChip(_ title: String, _ size: CaptionFontSize) -> some View {
-        let selected = environment.preferences.fontSize == size
-        return Button {
-            environment.preferences.fontSize = size
-        } label: {
-            Text(title)
-                .font(.subheadline.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Tokens.onAccent : Tokens.textPrimary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(selected ? Tokens.listen : Tokens.sheetChip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
     }
 
     private func redownload() async {

@@ -32,14 +32,23 @@ struct SettingsSheet: View {
                 .font(.footnote)
                 .foregroundStyle(Tokens.textSecondary)
             HStack(spacing: 8) {
-                chip(Copy.modeFaceToFace(for: userLanguage), selected: appMode == .faceToFace) {
+                SelectChip(
+                    title: Copy.modeFaceToFace(for: userLanguage),
+                    isSelected: appMode == .faceToFace
+                ) {
                     onSelectMode(.faceToFace)
                 }
-                chip(Copy.modeSimultaneous(for: userLanguage), selected: appMode == .simultaneous) {
+                SelectChip(
+                    title: Copy.modeSimultaneous(for: userLanguage),
+                    isSelected: appMode == .simultaneous
+                ) {
                     onSelectMode(.simultaneous)
                 }
             }
-            chip(Copy.modeMeeting(for: userLanguage), selected: appMode == .meeting) {
+            SelectChip(
+                title: Copy.modeMeeting(for: userLanguage),
+                isSelected: appMode == .meeting
+            ) {
                 onSelectMode(.meeting)
             }
 
@@ -53,27 +62,27 @@ struct SettingsSheet: View {
                 .foregroundStyle(Tokens.textSecondary)
             LanguageChipGrid(selected: peerLanguage, onSelect: onSelectPeerLanguage)
 
-            HStack(spacing: 8) {
-                chip(Copy.fontStandard(for: userLanguage), selected: fontSize == .standard) {
-                    onSelectFont(.standard)
-                }
-                chip(Copy.fontLarger(for: userLanguage), selected: fontSize == .larger) {
-                    onSelectFont(.larger)
-                }
-                chip(Copy.fontLargest(for: userLanguage), selected: fontSize == .largest) {
-                    onSelectFont(.largest)
-                }
-            }
+            FontSizeChips(
+                language: userLanguage,
+                selection: fontSize,
+                onSelect: onSelectFont
+            )
 
             Text(Copy.autoStart(for: userLanguage))
                 .font(.footnote)
                 .foregroundStyle(Tokens.textSecondary)
 
             HStack(spacing: 8) {
-                chip(Copy.autoStartOn(for: userLanguage), selected: autoStartListening) {
+                SelectChip(
+                    title: Copy.autoStartOn(for: userLanguage),
+                    isSelected: autoStartListening
+                ) {
                     onToggleAutoStart(true)
                 }
-                chip(Copy.autoStartOff(for: userLanguage), selected: !autoStartListening) {
+                SelectChip(
+                    title: Copy.autoStartOff(for: userLanguage),
+                    isSelected: !autoStartListening
+                ) {
                     onToggleAutoStart(false)
                 }
             }
@@ -130,15 +139,4 @@ struct SettingsSheet: View {
         .padding(.bottom, 24)
     }
 
-    private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Tokens.onAccent : Tokens.textPrimary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(selected ? Tokens.listen : Tokens.sheetChip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
 }

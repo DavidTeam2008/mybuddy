@@ -28,10 +28,16 @@ struct MeetingSettingsSheet: View {
                     .font(.footnote)
                     .foregroundStyle(Tokens.textSecondary)
                 HStack(spacing: 8) {
-                    chip(Copy.meetingMultilingual(for: language), selected: recognizesMultipleLanguages) {
+                    SelectChip(
+                        title: Copy.meetingMultilingual(for: language),
+                        isSelected: recognizesMultipleLanguages
+                    ) {
                         onSelectMultilingual(true)
                     }
-                    chip(Copy.meetingSingleLanguage(for: language), selected: !recognizesMultipleLanguages) {
+                    SelectChip(
+                        title: Copy.meetingSingleLanguage(for: language),
+                        isSelected: !recognizesMultipleLanguages
+                    ) {
                         onSelectMultilingual(false)
                     }
                 }
@@ -46,17 +52,11 @@ struct MeetingSettingsSheet: View {
                     LanguageChipGrid(selected: sourceLanguage, onSelect: onSelectLanguage)
                 }
 
-                HStack(spacing: 8) {
-                    chip(Copy.fontStandard(for: language), selected: fontSize == .standard) {
-                        onSelectFont(.standard)
-                    }
-                    chip(Copy.fontLarger(for: language), selected: fontSize == .larger) {
-                        onSelectFont(.larger)
-                    }
-                    chip(Copy.fontLargest(for: language), selected: fontSize == .largest) {
-                        onSelectFont(.largest)
-                    }
-                }
+                FontSizeChips(
+                    language: language,
+                    selection: fontSize,
+                    onSelect: onSelectFont
+                )
 
                 if isRedownloading {
                     AssetDownloadView(
@@ -106,15 +106,4 @@ struct MeetingSettingsSheet: View {
         .padding(.bottom, 24)
     }
 
-    private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Tokens.onAccent : Tokens.textPrimary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(selected ? Tokens.listen : Tokens.sheetChip, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
 }
