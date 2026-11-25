@@ -124,7 +124,9 @@ enum TaskMapping {
             speaker: speaker,
             source: source,
             sourceText: entity.sourceText,
-            translatedText: entity.translatedText,
+            // A translation stored before the integrity gate existed may
+            // contain U+FFFD; treat it as absent instead of surfacing it.
+            translatedText: TextIntegrity.storedTranslation(entity.translatedText),
             isFinal: entity.isFinal,
             recordedAt: entity.recordedAt
         )

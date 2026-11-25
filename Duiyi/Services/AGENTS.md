@@ -22,6 +22,7 @@
 
 - 存储接缝分两层：`TaskStore` 只负责 `availability`（opening/ready/unavailable）、`prepare()`、`retry()`；`TaskStoreV2` 提供结果化读写（`readActiveTask` / `readUnfinishedTasks` / `readList` / `readTask`、`startNew` / `append` / `updateTranslations` / `setStatus` / `saveSummary` / `end` / `deleteTask`）。不要恢复 success-only 或静默吞错的变体。
 - 实时字幕/`PaneState` 是内存事实；落盘的 250ms debounce 由 `TaskLifecycle.persist` 统一负责，VM 不要各自 schedule；结束、清屏、进后台用 `flush()`。
+- 读取已存文字稿时 `TaskMapping` 把损坏译文（U+FFFD/可疑控制字符）视为空；导出 `TranscriptExportService` 不渲染损坏译文。不要静默把坏字符替换成其他文字冒充正确译文。
 - `TaskStoreV2.end` 是原子操作：先 upsert pending 条目，再以 store 中持久化内容判空稿；失败返回 `notPersisted` 且任务保持进行中、不删除。空稿判断不要在 VM 里用内存数组另做一套。
 - `DeferredTaskStore` 延迟开库；打开失败保持 `unavailable` 并提供 `retry()`，模块可继续但标记「本次内容不会保存」，**绝不静默回退 `InMemoryTaskStore`**；写失败只重试一次，仍失败即 `notPersisted`，不轮询、不自动回填。不要在 `AppEnvironment.init` 或首帧前同步 open container（D1）。
 - `SwiftDataTaskStore` 关闭 autosave（`autosaveEnabled = false`），每个变更显式 `save()` 并把错误返回接缝；失败时 `rollback()`，不依赖 `try?`。

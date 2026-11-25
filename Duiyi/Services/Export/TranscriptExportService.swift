@@ -60,9 +60,10 @@ struct TranscriptExportService: ExportSharing {
         } else {
             for entry in task.entries {
                 let prefix = task.feature == .meeting ? "[\(entry.source.nativeName)] " : ""
-                let line = entry.translatedText.isEmpty
+                let translated = TextIntegrity.storedTranslation(entry.translatedText)
+                let line = translated.isEmpty
                     ? "\(prefix)\(entry.sourceText)"
-                    : "\(prefix)\(entry.sourceText)\n→ \(entry.translatedText)"
+                    : "\(prefix)\(entry.sourceText)\n→ \(translated)"
                 blocks.append(line)
             }
         }
