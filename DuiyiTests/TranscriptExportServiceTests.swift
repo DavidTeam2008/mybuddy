@@ -23,6 +23,23 @@ struct TranscriptExportServiceTests {
         #expect(try String(contentsOf: laterURL, encoding: .utf8).contains("New translation"))
     }
 
+    @Test("A corrupted stored translation is not exported")
+    func corruptedTranslationIsNotExported() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let exporter = TranscriptExportService(
+            exportDirectory: directory,
+            now: { Date(timeIntervalSince1970: 1_800_000_000) }
+        )
+        let task = makeTask(translatedText: "你\u{FFFD}好")
+
+        let url = try exporter.makeTranscriptFile(task: task, language: .zhHans)
+        let text = try String(contentsOf: url, encoding: .utf8)
+
+        #expect(!text.contains("\u{FFFD}"))
+        #expect(text.contains("See you at six"))
+    }
+
     @Test("Same-minute tasks produce distinct snapshots")
     func sameMinuteTasksProduceDistinctSnapshots() throws {
         let directory = try makeDirectory()

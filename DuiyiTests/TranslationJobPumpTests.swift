@@ -58,6 +58,15 @@ private final class FakePumpRecorder: @unchecked Sendable {
 
 private struct FakeTranslationFailure: Error {}
 
+private actor TranslateAttempts {
+    private var count = 0
+
+    func next() -> Int {
+        count += 1
+        return count
+    }
+}
+
 /// Deterministic gate for an in-flight translation: the test waits until
 /// `translate` has started, then resumes it with a chosen result.
 private actor FakeTranslateGate {
@@ -169,6 +178,50 @@ struct TranslationJobPumpTests {
         #expect(recorder.failures.isEmpty)
     }
 
+    @Test("A corrupted translation is retried once and the clean retry is reported")
+    func corruptedTranslationIsRetried() async {
+        let recorder = FakePumpRecorder()
+        let bridge = TranslationJobBridge()
+        let job = makeTranslationJob(utteranceID: UUID(), text: "hello", isFinal: true)
+        bridge.submit(job)
+        let attempts = TranslateAttempts()
+
+        await runPump(
+            on: bridge.makeConsumer(),
+            recorder: recorder,
+            translate: { @Sendable _ in
+                let attempt = await attempts.next()
+                return attempt == 1 ? "你\u{FFFD}好" : "你好"
+            },
+            onSuccess: { _, _ in withUnsafeCurrentTask { $0?.cancel() } }
+        )
+
+        #expect(recorder.translatedTexts == ["hello", "hello"])
+        #expect(recorder.successes == [FakePumpRecorder.Success(job: job, text: "你好")])
+        #expect(recorder.failures.isEmpty)
+    }
+
+    @Test("Two corrupted translations fail without onSuccess")
+    func corruptedTranslationFailsAfterRetry() async {
+        let recorder = FakePumpRecorder()
+        let bridge = TranslationJobBridge()
+        let job = makeTranslationJob(utteranceID: UUID(), text: "hello", isFinal: true)
+        bridge.submit(job)
+
+        await runPump(
+            on: bridge.makeConsumer(),
+            recorder: recorder,
+            translate: { @Sendable _ in "你\u{FFFD}好" },
+            onFailure: { _, _ in withUnsafeCurrentTask { $0?.cancel() } }
+        )
+
+        #expect(recorder.translatedTexts == ["hello", "hello"])
+        #expect(recorder.successes.isEmpty)
+        #expect(recorder.failures.count == 1)
+        #expect(recorder.failures.first?.job == job)
+        #expect(recorder.failures.first?.error is TranslationIntegrityError)
+    }
+
     @Test("One wakeup drains every job the consumer still holds")
     func oneWakeupDrainsEveryQueuedJob() async {
         let recorder = FakePumpRecorder()
@@ -270,6 +323,71 @@ struct TranslationJobPumpTests {
         await task.value
 
         #expect(recorder.translatedTexts == ["hello"])
+        #expect(recorder.successes.isEmpty)
+        #expect(recorder.failures.isEmpty)
+
+        let nextConsumer = bridge.makeConsumer()
+        #expect(nextConsumer.takeNext() == job)
+        #expect(nextConsumer.takeNext() == nil)
+    }
+
+    @Test("A corrupt result after cancellation requeues without retry or failure")
+    func corruptResultAfterCancellationRequeues() async {
+        let recorder = FakePumpRecorder()
+        let bridge = TranslationJobBridge()
+        let job = makeTranslationJob(utteranceID: UUID(), text: "hello", isFinal: true)
+        bridge.submit(job)
+        let gate = FakeTranslateGate()
+
+        let task = Task { @MainActor in
+            let pump = makePump(
+                recorder: recorder,
+                translate: { @Sendable _ in try await gate.translate().get() }
+            )
+            await pump.run(bridge.makeConsumer())
+        }
+
+        await gate.waitForTranslationToStart()
+        task.cancel()
+        await gate.resume(with: .success("你\u{FFFD}好"))
+        await task.value
+
+        #expect(recorder.translatedTexts == ["hello"])
+        #expect(recorder.successes.isEmpty)
+        #expect(recorder.failures.isEmpty)
+
+        let nextConsumer = bridge.makeConsumer()
+        #expect(nextConsumer.takeNext() == job)
+        #expect(nextConsumer.takeNext() == nil)
+    }
+
+    @Test("A corrupt retry after cancellation requeues without failure")
+    func corruptRetryAfterCancellationRequeues() async {
+        let recorder = FakePumpRecorder()
+        let bridge = TranslationJobBridge()
+        let job = makeTranslationJob(utteranceID: UUID(), text: "hello", isFinal: true)
+        bridge.submit(job)
+        let gate = FakeTranslateGate()
+        let attempts = TranslateAttempts()
+
+        let task = Task { @MainActor in
+            let pump = makePump(
+                recorder: recorder,
+                translate: { @Sendable _ in
+                    let attempt = await attempts.next()
+                    if attempt == 1 { return "你\u{FFFD}好" }
+                    return try await gate.translate().get()
+                }
+            )
+            await pump.run(bridge.makeConsumer())
+        }
+
+        await gate.waitForTranslationToStart()
+        task.cancel()
+        await gate.resume(with: .success("你\u{FFFD}好"))
+        await task.value
+
+        #expect(recorder.translatedTexts == ["hello", "hello"])
         #expect(recorder.successes.isEmpty)
         #expect(recorder.failures.isEmpty)
 

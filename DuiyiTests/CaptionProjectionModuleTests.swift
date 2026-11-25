@@ -415,6 +415,26 @@ struct CaptionProjectionModuleTests {
         #expect(projection.transcript.first?.translatedText == "你好")
     }
 
+    @Test("A corrupted translation is rejected")
+    func corruptedTranslationIsRejected() {
+        var projection = makeProjection()
+        let id = UUID()
+        _ = projection.ingest(
+            makeUtterance(id: id, text: "Hello", isFinal: true),
+            pane: .user,
+            speaker: .peer
+        )
+
+        let result = projection.applyTranslation(
+            utteranceID: id,
+            text: "你\u{FFFD}好",
+            settle: true
+        )
+
+        #expect(result == nil)
+        #expect(projection.transcript.first?.translatedText == "")
+    }
+
     @Test("Translating an in-window history row updates it and returns the row")
     func translationUpdatesHistoryRow() {
         var projection = makeProjection()

@@ -100,6 +100,9 @@ struct CaptionProjection: Sendable {
         text: String,
         settle: Bool
     ) -> CaptionLine? {
+        // Never display or persist a corrupted translation, whatever produced
+        // it (framework result, restored data, or a future caller).
+        guard !TextIntegrity.isCorrupted(text) else { return nil }
         guard let recordIndex = index[utteranceID] else { return nil }
         var record = records[recordIndex]
         if settle {
