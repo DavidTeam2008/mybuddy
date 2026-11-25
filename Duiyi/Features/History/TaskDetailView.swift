@@ -6,6 +6,8 @@ struct TaskDetailView: View {
     @Environment(AppCoordinator.self) private var coordinator
 
     let taskID: UUID
+    /// Applied before navigating away so history owns the deleted row's removal.
+    var onDeleted: (UUID) -> Void = { _ in }
 
     @State private var viewModel: TaskDetailViewModel?
     @State private var translateJob: TranslationJob?
@@ -118,6 +120,7 @@ struct TaskDetailView: View {
                             Button(Copy.delete(for: language)) {
                                 viewModel.requestDelete()
                             }
+                            .accessibilityIdentifier("detail-delete")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Tokens.danger)
                             .frame(maxWidth: .infinity)
@@ -174,8 +177,8 @@ struct TaskDetailView: View {
             Button(Copy.delete(for: language), role: .destructive) {
                 Task {
                     if await viewModel?.confirmDelete() == true {
-                        coordinator.popToHome()
-                        coordinator.open(.history)
+                        onDeleted(taskID)
+                        coordinator.returnToHistory()
                     }
                 }
             }

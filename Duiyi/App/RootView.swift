@@ -57,6 +57,12 @@ struct RootView: View {
             await environment.taskStore.prepare()
             rebuildViewModelsIfNeeded()
             AppLaunchTracker.shared.begin(.viewModelsReady)
+            #if DEBUG
+            await DebugHistorySeed.seedIfRequested(
+                into: environment.taskStore,
+                language: environment.preferences.userLanguage
+            )
+            #endif
         }
         .onChange(of: environment.preferences.hasCompletedOnboarding) { _, completed in
             if completed {
@@ -120,7 +126,9 @@ struct RootView: View {
                     .task { historyViewModel = HistoryViewModel(store: environment.taskStore) }
             }
         case .taskDetail(let id):
-            TaskDetailView(taskID: id)
+            TaskDetailView(taskID: id) { deletedID in
+                historyViewModel?.removeDeletedTask(deletedID)
+            }
         }
     }
 

@@ -48,6 +48,7 @@ struct HistoryView: View {
                         } label: {
                             HistoryRow(task: task, language: language)
                         }
+                        .accessibilityIdentifier("history-row-\(task.id.uuidString)")
                         .listRowBackground(Tokens.userPane)
                         .listRowSeparatorTint(Tokens.sheetChip)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {

@@ -92,4 +92,48 @@ struct HistoryViewModelTests {
         #expect(viewModel.pendingDeletion == nil)
         #expect(await store.base.readTask(id: ended.id) != .value(nil))
     }
+
+    @Test("A stale reload cannot resurrect a deleted row")
+    func staleReloadCannotResurrectDeletedRow() async throws {
+        let store = ScriptedTaskStore()
+        let first = try await store.base.seedEndedTask()
+        let second = try await store.base.seedEndedTask()
+        let viewModel = HistoryViewModel(store: store)
+        await viewModel.reload()
+        #expect(Set(viewModel.tasks.map(\.id)) == Set([first.id, second.id]))
+
+        let gate = ReadGate()
+        store.readListHook = { _ in await gate.wait() }
+        let staleReload = Task { await viewModel.reload() }
+        while await gate.arrived == false {
+            await Task.yield()
+        }
+
+        _ = await store.base.deleteTask(id: second.id)
+        viewModel.removeDeletedTask(second.id)
+        await gate.open()
+        await staleReload.value
+
+        #expect(viewModel.tasks.map(\.id) == [first.id])
+    }
+}
+
+/// Holds a store read in flight until the test releases it.
+private actor ReadGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var arrived = false
+
+    func wait() async {
+        arrived = true
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        let pending = waiters
+        waiters = []
+        for waiter in pending { waiter.resume() }
+    }
 }
