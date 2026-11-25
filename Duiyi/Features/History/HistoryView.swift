@@ -35,6 +35,7 @@ struct HistoryView: View {
                 Text(Copy.historyEmpty(for: language))
                     .font(.body)
                     .foregroundStyle(Tokens.textSecondary)
+                    .accessibilityIdentifier("history-empty")
                     .padding(.horizontal, Tokens.horizontalPadding)
                     .padding(.top, 24)
                 Spacer()
@@ -57,11 +58,20 @@ struct HistoryView: View {
                             } label: {
                                 Text(Copy.delete(for: language))
                             }
+                            .accessibilityIdentifier("history-swipe-delete")
                         }
                     }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                // Rebuild, don't diff, when the row set changes. SwiftUI
+                // batches the delete diff into a view-graph update whose
+                // collection-view data source still reports the old row count
+                // (confirmed on iPhone 13 / iOS 27.2.1: UpdateCoalescing-
+                // CollectionView.performBatchUpdates → "invalid number of
+                // items"). A new identity tears the old collection view down
+                // instead of submitting the stale diff.
+                .id(viewModel.tasks.map(\.id))
             }
         }
         .background(Tokens.canvas.ignoresSafeArea())
@@ -87,6 +97,7 @@ struct HistoryView: View {
             Button(Copy.delete(for: language), role: .destructive) {
                 Task { await viewModel.confirmDelete(task) }
             }
+            .accessibilityIdentifier("history-delete-confirm")
             Button(Copy.cancel(for: language), role: .cancel) {
                 viewModel.cancelDelete()
             }

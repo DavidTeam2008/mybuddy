@@ -17,7 +17,7 @@
 
 ## 3. 定位与导航
 
-- 只用 `accessibilityIdentifier`：`home-module-<feature>`、`home-history`、`taskbar-new-task` / `taskbar-end-task`、`listening-control`、`caption-live` / `caption-history` / `caption-source`、`nav-home` / `nav-history`、`langchip-*`。
+- 只用 `accessibilityIdentifier`：`home-module-<feature>`、`home-history`、`taskbar-new-task` / `taskbar-end-task`、`listening-control`、`caption-live` / `caption-history` / `caption-source`、`nav-home` / `nav-history`、`langchip-*`、`history-row-<uuid>`、`history-swipe-delete`、`history-delete-confirm` / `detail-delete-confirm`。
 - 不用中文文案或坐标定位；历史卡片可能在首屏下方，需要 `swipeUp()`。
 - 历史页无系统返回键，返回用 `nav-home`；新增 UI 入口先补 identifier 再写断言。
 
