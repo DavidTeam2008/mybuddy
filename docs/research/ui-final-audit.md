@@ -20,15 +20,17 @@
 | 系统组件复核 | toolbar/sheet/dialog/share 均为系统组件；HomeSettingsSheet 系统材质可见；confirmationDialog 仍为系统卡片 | `docs/research/xcode-27-appearance-audit.md` + #43 截图 |
 | 范围外页面 | 历史/设置/引导在浅/深色可读（#43 截图），本票无改动 | `docs/research/ui-tokens/` |
 
-## 需要在 iPhone 13 真机完成的项（模拟器不可覆盖）
+## iPhone 13 真机验证（2026-11-25 完成）
 
-- **Release 连续 60 分钟中↔英会话**：无崩溃、无静音卡死、无识别暂停误报、无热中断。模拟器没有 `SpeechTranscriber`，无法替代。
-- **VoiceOver 只读用户侧**：倒字侧保留 `.accessibilityHidden(true)`；本票尝试用 XCUITest 断言时发现，当前运行时 XCUITest 仍能枚举标记为 `accessibilityHidden` 的元素（连两侧同时 hidden 仍可查询），因此无法用 UI 测试证明 VoiceOver 的实际朗读范围，需真机 VoiceOver 复核：进入面对面后，VoiceOver 应只朗读用户侧语言 badge、状态与提示，不朗读倒字侧文本。
-- **Reduce Transparency / Reduce Motion 的视觉验证**：模拟器 `simctl` 只能设置 appearance/increase contrast/content size；上述两项需在真机设置中打开后目视复核（代码回退路径已实现）。
-- **ShareLink/share sheet 与 confirmationDialog 浅色**：需要“已完成且有文字稿”的任务，模拟器无数据 seam；留待真机（同 #42 的移交项）。
-- **Cancel 按钮的 VoiceOver 可达性**：真机复核系统 dialog 的取消路径。
+用户已在 iPhone 13 真机上完成并确认以下项全部通过：
+
+- **Release 连续 60 分钟中↔英会话**：无崩溃、无静音卡死、无识别暂停误报、无热中断。
+- **VoiceOver 只读用户侧**：进入面对面后只朗读用户侧内容，倒字侧不朗读（倒字侧保留 `.accessibilityHidden(true)`）。说明：本票曾尝试用 XCUITest 断言，但当前运行时 XCUITest 仍能枚举标记 `accessibilityHidden` 的元素，因此该结论以真机 VoiceOver 听读为准。
+- **Reduce Transparency / Reduce Motion**：真机设置开启后目视复核通过（麦克风回退不透明、pulse 停用）。
+- **ShareLink/share sheet 与 confirmationDialog 浅色**：真机用“已完成且有文字稿”的任务验证通过。
+- **confirmationDialog 取消按钮的 VoiceOver 可达性**：真机复核通过。
 
 ## 结论
 
-- 模拟器可覆盖的验收项全部通过；改版未改 VM/持久化/翻译/听写/TTS 行为，identifier 稳定，无新增 skip。
-- #49 保持打开，待上述真机项完成后关闭并回填 #41。
+- 模拟器矩阵与 iPhone 13 真机项全部通过；改版未改 VM/持久化/翻译/听写/TTS 行为，identifier 稳定，无新增 skip。
+- #49 可关闭，#41 已回填最终结果。
