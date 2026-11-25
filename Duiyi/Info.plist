@@ -27,7 +27,10 @@
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>需要语音识别，才能在本机把中文和英文转成文字。不上传语音。</string>
 	<key>UILaunchScreen</key>
-	<dict/>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
