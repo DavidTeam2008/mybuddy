@@ -16,23 +16,14 @@ struct MeetingView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
-                ModuleChrome(
-                    title: Copy.modeMeeting(for: viewModel.displayLanguage),
-                    language: viewModel.displayLanguage,
-                    onHome: { coordinator.popToHome() },
-                    onHistory: { coordinator.open(.history) }
-                )
-                TaskBar(
-                    language: viewModel.displayLanguage,
-                    statusText: TaskStatusText.make(
-                        hasTask: viewModel.hasActiveTask,
-                        startedAt: viewModel.taskStartedAt,
-                        language: viewModel.displayLanguage
-                    ),
-                    isActive: viewModel.hasActiveTask,
-                    onNewTask: { requestNewTask() },
-                    onEndTask: { confirmEndTask = true }
-                )
+                Text(taskStatusText)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(viewModel.hasActiveTask ? Tokens.accentText : Tokens.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Tokens.horizontalPadding)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+                    .accessibilityLabel(taskStatusText)
 
                 languageChip
                     .padding(.horizontal, Tokens.horizontalPadding)
@@ -76,9 +67,8 @@ struct MeetingView: View {
                     },
                     onSwap: {}
                 )
-                .padding(.bottom, max(16, ScreenSafeArea.bottom))
+                .padding(.bottom, 16)
             }
-            .padding(.top, ScreenSafeArea.top)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if viewModel.isSettingsPresented {
@@ -136,9 +126,16 @@ struct MeetingView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .background(Tokens.userPane)
-        .ignoresSafeArea()
-        .toolbar(.hidden, for: .navigationBar)
+        .background(Tokens.userPane.ignoresSafeArea())
+        .moduleToolbar(
+            title: Copy.modeMeeting(for: viewModel.displayLanguage),
+            language: viewModel.displayLanguage,
+            isTaskActive: viewModel.hasActiveTask,
+            onHome: { coordinator.popToHome() },
+            onHistory: { coordinator.open(.history) },
+            onNewTask: { requestNewTask() },
+            onEndTask: { confirmEndTask = true }
+        )
         .task { await viewModel.bootstrap() }
         .onAppear {
             applyIdleTimer()
@@ -291,6 +288,14 @@ struct MeetingView: View {
                 .foregroundStyle(live && !liveIsSecondary ? Tokens.textPrimary : Tokens.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private var taskStatusText: String {
+        TaskStatusText.make(
+            hasTask: viewModel.hasActiveTask,
+            startedAt: viewModel.taskStartedAt,
+            language: viewModel.displayLanguage
+        )
     }
 
     private var showsLanguageBadge: Bool {
