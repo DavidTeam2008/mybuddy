@@ -63,23 +63,14 @@ struct ConversationView: View {
                 )
 
                 VStack(spacing: 0) {
-                    ModuleChrome(
-                        title: Copy.modeFaceToFace(for: viewModel.userLanguage),
-                        language: viewModel.userLanguage,
-                        onHome: { coordinator.popToHome() },
-                        onHistory: { coordinator.open(.history) }
-                    )
-                    TaskBar(
-                        language: viewModel.userLanguage,
-                        statusText: TaskStatusText.make(
-                            hasTask: viewModel.hasActiveTask,
-                            startedAt: viewModel.taskStartedAt,
-                            language: viewModel.userLanguage
-                        ),
-                        isActive: viewModel.hasActiveTask,
-                        onNewTask: { requestNewTask() },
-                        onEndTask: { confirmEndTask = true }
-                    )
+                    Text(taskStatusText)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(viewModel.hasActiveTask ? Tokens.accentText : Tokens.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, Tokens.horizontalPadding)
+                        .padding(.top, 8)
+                        .padding(.bottom, 4)
+                        .accessibilityLabel(taskStatusText)
                     if viewModel.isNotSaved {
                         NotSavedBanner(
                             language: viewModel.userLanguage,
@@ -216,7 +207,15 @@ struct ConversationView: View {
             }
         }
         .background(Tokens.canvas)
-        .toolbar(.hidden, for: .navigationBar)
+        .moduleToolbar(
+            title: Copy.modeFaceToFace(for: viewModel.userLanguage),
+            language: viewModel.userLanguage,
+            isTaskActive: viewModel.hasActiveTask,
+            onHome: { coordinator.popToHome() },
+            onHistory: { coordinator.open(.history) },
+            onNewTask: { requestNewTask() },
+            onEndTask: { confirmEndTask = true }
+        )
         .confirmationDialog(
             Copy.replaceTaskConfirm(for: viewModel.userLanguage),
             isPresented: $confirmNewTask,
@@ -303,6 +302,14 @@ struct ConversationView: View {
     private var translationProgress: Double {
         if shouldPrepareTranslation { return max(speechProgress, 0.55) }
         return isRedownloading ? 0 : 1
+    }
+
+    private var taskStatusText: String {
+        TaskStatusText.make(
+            hasTask: viewModel.hasActiveTask,
+            startedAt: viewModel.taskStartedAt,
+            language: viewModel.userLanguage
+        )
     }
 
     private var pairLanguages: [AppLanguage] {

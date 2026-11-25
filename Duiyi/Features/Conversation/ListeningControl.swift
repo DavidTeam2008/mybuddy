@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ListeningControl: View {
     let sessionState: SessionState
@@ -64,16 +65,10 @@ struct ListeningControl: View {
     }
 
     private var controlButton: some View {
-        let fill: Color = {
-            if sessionState.isFailed { return Tokens.danger }
-            if !isEnabled { return Tokens.controlIdle.opacity(0.7) }
-            if isListening { return Tokens.listen }
-            return Tokens.controlIdle
-        }()
         let symbolColor: Color = {
             if sessionState.isFailed { return Tokens.onDanger }
-            if isListening { return Tokens.onAccent }
-            return Tokens.textPrimary
+            if !isEnabled { return Tokens.textPrimary }
+            return Tokens.onAccent
         }()
 
         return ZStack {
@@ -81,9 +76,7 @@ struct ListeningControl: View {
                 .fill(isListening ? Tokens.listen.opacity(0.18) : Color.clear)
                 .frame(width: Tokens.micHitSize, height: Tokens.micHitSize)
                 .scaleEffect(isListening && pulse ? 1.08 : 1)
-            Circle()
-                .fill(fill)
-                .frame(width: Tokens.micSize, height: Tokens.micSize)
+            micFill
             Image(systemName: symbolName)
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(symbolColor)
@@ -96,6 +89,31 @@ struct ListeningControl: View {
         .accessibilityLabel(label)
         .accessibilityHint(settingsHint)
         .accessibilityAddTraits(.isButton)
+    }
+
+    /// The microphone is the only custom Liquid Glass control in a module.
+    /// Failures, disabled states, and Reduce Transparency fall back to opaque fills.
+    private var micFill: some View {
+        Group {
+            if sessionState.isFailed {
+                Circle()
+                    .fill(Tokens.danger)
+            } else if !isEnabled {
+                Circle()
+                    .fill(Tokens.controlIdle.opacity(0.7))
+            } else if UIAccessibility.isReduceTransparencyEnabled {
+                Circle()
+                    .fill(Tokens.listen)
+            } else {
+                Circle()
+                    .fill(Color.clear)
+                    .glassEffect(
+                        .regular.tint(Tokens.listen).interactive(),
+                        in: Circle()
+                    )
+            }
+        }
+        .frame(width: Tokens.micSize, height: Tokens.micSize)
     }
 
     private var symbolName: String {

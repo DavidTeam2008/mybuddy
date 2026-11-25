@@ -1,8 +1,9 @@
 import XCTest
 
-/// #44: every listed interactive control must offer at least a 44×44 pt hit target.
-/// Frames come from the accessibility hierarchy, so this also pins the identifiers
-/// used by the rest of the UI suite.
+/// #44: every custom interactive control must offer at least a 44×44 pt hit
+/// target. System toolbar items (#45) are Apple-owned controls and are covered
+/// by an identifier/existence check instead. Frames come from the accessibility
+/// hierarchy, so this also pins the identifiers used by the rest of the suite.
 final class HitTargetTests: XCTestCase {
     private let minimumSide: CGFloat = 44
 
@@ -66,16 +67,25 @@ final class HitTargetTests: XCTestCase {
         )
     }
 
-    func testModuleChromeAndTaskBar() throws {
+    /// The system toolbar owns these items' hit targets; assert the identifiers
+    /// survive the move out of the custom chrome.
+    func testModuleToolbarEntries() throws {
         let app = launchApp()
         let module = app.buttons["home-module-faceToFace"]
         XCTAssertTrue(module.waitForExistence(timeout: 15))
         module.tap()
 
-        assertHitTarget(app.buttons["nav-home"], "nav-home")
-        assertHitTarget(app.buttons["nav-history"], "nav-history")
-        assertHitTarget(app.buttons["taskbar-new-task"], "taskbar-new-task")
-        assertHitTarget(app.buttons["taskbar-end-task"], "taskbar-end-task")
+        for identifier in [
+            "nav-home",
+            "nav-history",
+            "taskbar-new-task",
+            "taskbar-end-task",
+        ] {
+            XCTAssertTrue(
+                app.buttons[identifier].waitForExistence(timeout: 15),
+                "\(identifier) missing from the system toolbar"
+            )
+        }
     }
 
     func testDirectionBarAndVoiceOut() throws {
