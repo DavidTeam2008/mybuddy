@@ -178,6 +178,33 @@ struct InterpretationViewModelTests {
         #expect(job.text == "Hello there.")
     }
 
+    @Test("A late revision final updates one row and re-submits the full text")
+    func revisionFinalUpdatesSameRow() {
+        let viewModel = makeViewModel()
+        let id = UUID()
+        viewModel.accept(
+            Utterance(id: id, language: .english, text: "They also cause us", isFinal: true)
+        )
+        #expect(viewModel.transcript.count == 1)
+
+        viewModel.accept(
+            Utterance(
+                id: id,
+                language: .english,
+                text: "They also cause us to bump into each other.",
+                isFinal: true,
+                isRevision: true
+            )
+        )
+
+        #expect(viewModel.transcript.count == 1)
+        #expect(
+            viewModel.transcript.first?.sourceText
+                == "They also cause us to bump into each other."
+        )
+        #expect(viewModel.outboundJob?.text == "They also cause us to bump into each other.")
+    }
+
     @Test("resetCaptions clears the pipeline's pending and outbound work")
     func resetCaptionsClearsPipeline() {
         let scheduler = ManualTranslationScheduler()

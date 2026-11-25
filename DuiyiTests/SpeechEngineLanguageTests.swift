@@ -18,4 +18,23 @@ struct SpeechEngineLanguageTests {
         let languages = BilingualSpeechEngine.normalizedLanguages(languages: [], fallback: .english)
         #expect(languages == [.english])
     }
+
+    @Test("Only non-revision finals are acknowledged as the current final")
+    func acknowledgesOnlyNonRevisionFinals() {
+        #expect(
+            BilingualSpeechEngine.shouldAcknowledgeFinal(
+                Utterance(language: .english, text: "Hello", isFinal: true)
+            )
+        )
+        #expect(
+            !BilingualSpeechEngine.shouldAcknowledgeFinal(
+                Utterance(language: .english, text: "Hello", isFinal: false)
+            )
+        )
+        #expect(
+            !BilingualSpeechEngine.shouldAcknowledgeFinal(
+                Utterance(language: .english, text: "Hello", isFinal: true, isRevision: true)
+            )
+        )
+    }
 }

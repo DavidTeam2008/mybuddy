@@ -11,9 +11,17 @@ struct CaptionProjectionModuleTests {
         language: AppLanguage = .english,
         text: String,
         isFinal: Bool = false,
-        createdAt: Date = Date(timeIntervalSince1970: 1_700_000_000)
+        createdAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
+        isRevision: Bool = false
     ) -> Utterance {
-        Utterance(id: id, language: language, text: text, isFinal: isFinal, createdAt: createdAt)
+        Utterance(
+            id: id,
+            language: language,
+            text: text,
+            isFinal: isFinal,
+            createdAt: createdAt,
+            isRevision: isRevision
+        )
     }
 
     private func makeProjection(
@@ -722,5 +730,99 @@ struct CaptionProjectionModuleTests {
         #expect(line?.translatedText == "Nice to meet you")
         #expect(projection.pane(.user).live?.translatedText == "Nice to meet you")
         #expect(projection.transcript.first?.translatedText == "Nice to meet you")
+    }
+
+    @Test("A revision of a settled row does not take the live slot from a newer utterance")
+    func revisionDoesNotStealLiveSlot() {
+        var projection = makeProjection()
+        let settledID = UUID()
+        let liveID = UUID()
+        _ = projection.ingest(
+            makeUtterance(id: settledID, text: "They also cause us", isFinal: true),
+            pane: .user,
+            speaker: .peer
+        )
+        _ = projection.ingest(
+            makeUtterance(id: liveID, text: "And then something else entirely"),
+            pane: .user,
+            speaker: .peer
+        )
+        #expect(projection.pane(.user).live?.id == liveID)
+
+        _ = projection.ingest(
+            makeUtterance(
+                id: settledID,
+                text: "They also cause us to bump into each other.",
+                isFinal: true,
+                isRevision: true
+            ),
+            pane: .user,
+            speaker: .peer
+        )
+
+        #expect(projection.pane(.user).live?.id == liveID)
+        #expect(
+            projection.transcript.first { $0.id == settledID }?.sourceText
+                == "They also cause us to bump into each other."
+        )
+    }
+
+    @Test("A volatile update cannot reopen a settled row")
+    func lateVolatileCannotReopenSettledRow() {
+        var projection = makeProjection()
+        let id = UUID()
+        _ = projection.ingest(
+            makeUtterance(id: id, text: "They also cause us", isFinal: true),
+            pane: .user,
+            speaker: .peer
+        )
+
+        let late = projection.ingest(
+            makeUtterance(id: id, text: "They also cause us to bump into each other."),
+            pane: .user,
+            speaker: .peer
+        )
+
+        #expect(late == nil)
+        #expect(projection.transcript.first?.sourceText == "They also cause us")
+        #expect(projection.pane(.user).live?.phase == .settled)
+    }
+
+    @Test("A revision cannot claim the live slot after the display was cleared")
+    func revisionDoesNotClaimClearedLiveSlot() {
+        var projection = makeProjection()
+        let settledID = UUID()
+        let liveID = UUID()
+        _ = projection.ingest(
+            makeUtterance(id: settledID, text: "They also cause us", isFinal: true),
+            pane: .user,
+            speaker: .peer
+        )
+        _ = projection.ingest(
+            makeUtterance(id: liveID, text: "And then something else entirely"),
+            pane: .user,
+            speaker: .peer
+        )
+        projection.clearDisplay()
+
+        _ = projection.ingest(
+            makeUtterance(
+                id: settledID,
+                text: "They also cause us to bump into each other.",
+                isFinal: true,
+                isRevision: true
+            ),
+            pane: .user,
+            speaker: .peer
+        )
+        #expect(projection.pane(.user).live?.id == nil)
+
+        let grown = projection.ingest(
+            makeUtterance(id: liveID, text: "And then something else entirely and more"),
+            pane: .user,
+            speaker: .peer
+        )
+        #expect(projection.pane(.user).live?.id == liveID)
+        #expect(grown?.phase == .streaming)
     }
 }

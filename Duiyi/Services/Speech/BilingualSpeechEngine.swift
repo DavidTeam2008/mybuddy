@@ -276,11 +276,18 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             return
         }
         publish(utterance)
-        if utterance.isFinal {
+        if Self.shouldAcknowledgeFinal(utterance) {
             assembler.acknowledgeFinal(language: utterance.language)
             scheduleSingleLocaleSwitchIfNeeded(to: utterance.language)
         }
         pingSilenceTimer()
+    }
+
+    /// A revision updates an utterance that was already closed; it is not the
+    /// current final, so it must not re-lock the language or switch the
+    /// single-locale pipeline.
+    nonisolated static func shouldAcknowledgeFinal(_ utterance: Utterance) -> Bool {
+        utterance.isFinal && !utterance.isRevision
     }
 
     private func handleVoiceActivity(_ speechDetected: Bool) {
