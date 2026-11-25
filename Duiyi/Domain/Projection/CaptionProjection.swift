@@ -52,7 +52,11 @@ struct CaptionProjection: Sendable {
             // must not reopen or downgrade it.
             guard !(record.isFinal && !utterance.isFinal) else { return nil }
             record.source = utterance.language
-            record.sourceText = SpokenText.preferredSource(record.sourceText, text)
+            // A final ASR correction is authoritative, even when shorter; the
+            // "longer wins" merge only applies to volatile previews.
+            record.sourceText = utterance.isFinal
+                ? text
+                : SpokenText.preferredSource(record.sourceText, text)
             record.isFinal = utterance.isFinal
             record.updatedAt = max(record.updatedAt, utterance.createdAt)
             record.displayGeneration = generation
@@ -98,9 +102,15 @@ struct CaptionProjection: Sendable {
     ) -> CaptionLine? {
         guard let recordIndex = index[utteranceID] else { return nil }
         var record = records[recordIndex]
-        record.translatedText = SpokenText.preferredTranslation(record.translatedText, text)
         if settle {
+            // The final translation is authoritative, even when shorter than
+            // a preview; the "longer wins" merge only applies to previews.
+            record.translatedText = text
             record.isFinal = true
+        } else {
+            // A settled row only accepts a newer final translation.
+            guard !record.isFinal else { return nil }
+            record.translatedText = SpokenText.preferredTranslation(record.translatedText, text)
         }
         record.updatedAt = .now
         records[recordIndex] = record

@@ -64,7 +64,7 @@ final class ConversationViewModel {
             permissions: permissions,
             audioSession: audioSession
         )
-        pipeline = TranslationPipeline(stalePolicy: .dropShorterNonFinal)
+        pipeline = TranslationPipeline()
         self.permissions = permissions
         self.preferences = preferences
         self.summarizer = summarizer
@@ -76,8 +76,8 @@ final class ConversationViewModel {
     }
 
     /// Test seam: injects only the debounce scheduler. The ViewModel still
-    /// constructs its own pipeline with the fixed `.dropShorterNonFinal`
-    /// policy, so callers cannot substitute a different stale rule.
+    /// constructs its own pipeline, so callers cannot substitute the stale
+    /// rule (finals always win; only previews may be dropped as shorter).
     init(
         gate: any SpeechSessionGating,
         permissions: any PermissionGranting,
@@ -95,10 +95,7 @@ final class ConversationViewModel {
             permissions: permissions,
             audioSession: audioSession
         )
-        pipeline = TranslationPipeline(
-            stalePolicy: .dropShorterNonFinal,
-            scheduler: scheduler
-        )
+        pipeline = TranslationPipeline(scheduler: scheduler)
         self.permissions = permissions
         self.preferences = preferences
         self.summarizer = summarizer
