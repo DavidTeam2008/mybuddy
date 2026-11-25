@@ -2,6 +2,10 @@ import Foundation
 import Testing
 @testable import Duiyi
 
+private final class TestClock: @unchecked Sendable {
+    var now = Date(timeIntervalSince1970: 1_700_000_000)
+}
+
 struct UtteranceAssemblerTests {
     @Test("Chinese script wins over latin noise")
     func chineseWins() {
@@ -138,6 +142,32 @@ struct UtteranceAssemblerTests {
         #expect(second?.text == "Hi, Lucy")
     }
 
+    @Test("A greeting name swap after silence gets a new utterance id")
+    func greetingNameSwapAfterSilenceGetsNewIdentity() throws {
+        var assembler = UtteranceAssembler()
+        _ = assembler.ingest(language: .zhHans, text: "你好，王刚", isFinal: false)
+        let finalizedValue = assembler.silenceTimedOut()
+        let finalized = try #require(finalizedValue)
+
+        let nextValue = assembler.ingest(language: .zhHans, text: "你好，王强", isFinal: true)
+        let next = try #require(nextValue)
+        #expect(next.id != finalized.id)
+        #expect(next.text == "你好，王强")
+    }
+
+    @Test("A greeting name swap volatile after silence gets a new utterance id")
+    func greetingNameSwapVolatileAfterSilenceGetsNewIdentity() throws {
+        var assembler = UtteranceAssembler()
+        _ = assembler.ingest(language: .zhHans, text: "你好，王刚", isFinal: false)
+        let finalizedValue = assembler.silenceTimedOut()
+        let finalized = try #require(finalizedValue)
+
+        let nextValue = assembler.ingest(language: .zhHans, text: "你好，王强", isFinal: false)
+        let next = try #require(nextValue)
+        #expect(next.id != finalized.id)
+        #expect(next.text == "你好，王强")
+    }
+
     @Test("A greeting name swap while still volatile gets a new utterance id")
     func greetingNameSwapWhileVolatileGetsNewIdentity() throws {
         var assembler = UtteranceAssembler()
@@ -213,5 +243,197 @@ struct UtteranceAssemblerTests {
             text: "在那时开始之前呢，我想请大家想象一个画面"
         )
         #expect(language == .zhHans)
+    }
+
+    @Test("A prefix-extension final after silence reuses the finalized utterance")
+    func prefixExtensionAfterSilenceKeepsIdentity() throws {
+        var assembler = UtteranceAssembler()
+        _ = assembler.ingest(language: .english, text: "They also cause us", isFinal: false)
+        let finalizedValue = assembler.silenceTimedOut()
+        let finalized = try #require(finalizedValue)
+
+        let revisedValue = assembler.ingest(
+            language: .english,
+            text: "They also cause us to bump into each other.",
+            isFinal: true
+        )
+        let revised = try #require(revisedValue)
+
+        #expect(revised.id == finalized.id)
+        #expect(revised.text == "They also cause us to bump into each other.")
+        #expect(revised.isFinal == true)
+        #expect(revised.isRevision == true)
+    }
+
+    @Test("A late prefix-extension final does not revise the closed row while a new row is live")
+    func latePrefixExtensionDoesNotReviseClosedRowWhileNewRowIsLive() throws {
+        var assembler = UtteranceAssembler()
+        _ = assembler.ingest(language: .english, text: "They also cause us", isFinal: false)
+        let finalizedValue = assembler.silenceTimedOut()
+        let finalized = try #require(finalizedValue)
+        let nextValue = assembler.ingest(
+            language: .english,
+            text: "And then something else entirely",
+            isFinal: false
+        )
+        let next = try #require(nextValue)
+        #expect(next.id != finalized.id)
+
+        // Without audio ranges the late final may belong to either row; while
+        // a new row is in progress, keep the previous (new-row) behavior.
+        let lateValue = assembler.ingest(
+            language: .english,
+            text: "They also cause us to bump into each other.",
+            isFinal: true
+        )
+        let late = try #require(lateValue)
+        #expect(late.id != finalized.id)
+        #expect(late.id == next.id)
+    }
+
+    @Test("A prefix-extension final outside the reconciliation window gets a new id")
+    func prefixExtensionOutsideWindowGetsNewIdentity() throws {
+        var assembler = UtteranceAssembler(reconciliationWindow: 0)
+        _ = assembler.ingest(language: .english, text: "They also cause us", isFinal: false)
+        let finalizedValue = assembler.silenceTimedOut()
+        let finalized = try #require(finalizedValue)
+
+        let lateValue = assembler.ingest(
+            language: .english,
+            text: "They also cause us to bump into each other.",
+            isFinal: true
+        )
+        let late = try #require(lateValue)
+        #expect(late.id != finalized.id)
+        #expect(late.text == "They also cause us to bump into each other.")
+    }
+
+    @Test("A non-overlapping final after silence gets a new id")
+    func unrelatedFinalAfterSilenceGetsNewIdentity() throws {
+        var assembler = UtteranceAssembler()
+        _ = assembler.ingest(language: .english, text: "See you at three in the lobby", isFinal: false)
+        let finalizedValue = assembler.silenceTimedOut()
+        let finalized = try #require(finalizedValue)
+
+        let nextValue = assembler.ingest(
+            language: .english,
+            text: "I'd like a cup of coffee please",
+            isFinal: true
+        )
+        let next = try #require(nextValue)
+        #expect(next.id != finalized.id)
+        #expect(next.text == "I'd like a cup of coffee please")
+    }
+
+    @Test("A reset clears the reconciliation record")
+    func resetClearsReconciliation() throws {
+        var assembler = UtteranceAssembler()
+        _ = assembler.ingest(language: .english, text: "They also cause us", isFinal: false)
+        let finalizedValue = assembler.silenceTimedOut()
+        let finalized = try #require(finalizedValue)
+
+        assembler.reset()
+
+        let nextValue = assembler.ingest(
+            language: .english,
+            text: "They also cause us to bump into each other.",
+            isFinal: true
+        )
+        let next = try #require(nextValue)
+        #expect(next.id != finalized.id)
+    }
+
+    @Test("The reconciliation window includes its boundary")
+    func reconciliationWindowIncludesBoundary() throws {
+        let clock = TestClock()
+        var assembler = UtteranceAssembler(reconciliationWindow: 3, now: { clock.now })
+        _ = assembler.ingest(language: .english, text: "They also cause us", isFinal: false)
+        let finalizedValue = assembler.silenceTimedOut()
+        let finalized = try #require(finalizedValue)
+
+        clock.now.addTimeInterval(3)
+
+        let revisedValue = assembler.ingest(
+            language: .english,
+            text: "They also cause us to bump into each other.",
+            isFinal: true
+        )
+        let revised = try #require(revisedValue)
+        #expect(revised.id == finalized.id)
+    }
+
+    @Test("A final after the reconciliation window gets a new id")
+    func reconciliationWindowExcludesLaterFinals() throws {
+        let clock = TestClock()
+        var assembler = UtteranceAssembler(reconciliationWindow: 3, now: { clock.now })
+        _ = assembler.ingest(language: .english, text: "They also cause us", isFinal: false)
+        let finalizedValue = assembler.silenceTimedOut()
+        let finalized = try #require(finalizedValue)
+
+        clock.now.addTimeInterval(3.001)
+
+        let lateValue = assembler.ingest(
+            language: .english,
+            text: "They also cause us to bump into each other.",
+            isFinal: true
+        )
+        let late = try #require(lateValue)
+        #expect(late.id != finalized.id)
+    }
+
+    @Test("A replay volatile after silence stays on the closed utterance")
+    func replayVolatileAfterSilenceKeepsIdentity() throws {
+        var assembler = UtteranceAssembler()
+        _ = assembler.ingest(language: .english, text: "Thank you", isFinal: false)
+        let finalizedValue = assembler.silenceTimedOut()
+        let finalized = try #require(finalizedValue)
+
+        let volatileValue = assembler.ingest(
+            language: .english,
+            text: "Thank you very much",
+            isFinal: false
+        )
+        let volatile = try #require(volatileValue)
+        #expect(volatile.id == finalized.id)
+        #expect(volatile.isFinal == false)
+        #expect(volatile.isRevision)
+
+        let finalValue = assembler.ingest(
+            language: .english,
+            text: "Thank you very much",
+            isFinal: true
+        )
+        let final = try #require(finalValue)
+        #expect(final.id == finalized.id)
+        #expect(final.text == "Thank you very much")
+        #expect(final.isFinal)
+        #expect(final.isRevision)
+    }
+
+    @Test("A late final in one language leaves the other language's live utterance intact")
+    func lateFinalDoesNotDisturbOtherLanguageUtterance() throws {
+        let clock = TestClock()
+        var assembler = UtteranceAssembler(now: { clock.now })
+        _ = assembler.ingest(language: .english, text: "They also cause us", isFinal: false)
+        let finalizedValue = assembler.silenceTimedOut()
+        let finalized = try #require(finalizedValue)
+
+        clock.now.addTimeInterval(0.9)
+        let liveValue = assembler.ingest(language: .zhHans, text: "我想点一杯咖啡", isFinal: false)
+        let live = try #require(liveValue)
+        #expect(live.id != finalized.id)
+
+        let lateValue = assembler.ingest(
+            language: .english,
+            text: "They also cause us to bump into each other.",
+            isFinal: true
+        )
+        #expect(lateValue == nil)
+
+        clock.now.addTimeInterval(0.2)
+        let grownValue = assembler.ingest(language: .zhHans, text: "我想点一杯咖啡带走", isFinal: false)
+        let grown = try #require(grownValue)
+        #expect(grown.id == live.id)
+        #expect(grown.text == "我想点一杯咖啡带走")
     }
 }

@@ -1,23 +1,95 @@
 import Foundation
 
-struct UtteranceAssembler: Equatable, Sendable {
+struct UtteranceAssembler: Sendable {
+    private struct FinalizedUtterance: Equatable, Sendable {
+        let id: UUID
+        let language: AppLanguage
+        let text: String
+        let at: Date
+    }
+
     var lastLanguage: AppLanguage?
     private var utteranceID = UUID()
     private var texts: [AppLanguage: String] = [:]
     private var finals: [AppLanguage: Bool] = [:]
     private var lockedLanguage: AppLanguage?
     private var suppressOtherUntil = Date.distantPast
+    private var latestFinal: FinalizedUtterance?
+    private let reconciliationWindow: TimeInterval
+    private let now: @Sendable () -> Date
+
+    init(
+        reconciliationWindow: TimeInterval = 3,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.reconciliationWindow = reconciliationWindow
+        self.now = now
+    }
 
     mutating func ingest(language: AppLanguage, text: String, isFinal: Bool) -> Utterance? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         guard Self.matchesClaimedLanguage(trimmed, claimed: language) else { return nil }
 
-        if Date() < suppressOtherUntil, let held = lastLanguage, language != held {
+        if now() < suppressOtherUntil, let held = lastLanguage, language != held {
             return nil
         }
-        if Date() >= suppressOtherUntil, lockedLanguage != nil, texts.values.allSatisfy(\.isEmpty) {
+        if now() >= suppressOtherUntil, lockedLanguage != nil, texts.values.allSatisfy(\.isEmpty) {
             lockedLanguage = nil
+        }
+
+        // A replay of the just-closed range can arrive as a volatile before
+        // the transcriber's final. Keep it on the closed row (as a volatile
+        // revision) instead of starting a row that the final cannot settle.
+        //
+        // Reconcile only while no new row has started. Once a new utterance
+        // has text, a later final may belong to either row; without audio
+        // ranges the safe choice is the previous behavior (new row).
+        let noRowInProgress = texts.values.allSatisfy(\.isEmpty)
+        if !isFinal,
+           noRowInProgress,
+           let latest = latestFinal,
+           latest.id != utteranceID,
+           latest.language == language,
+           !SpokenText.isNameSwap(trimmed, of: latest.text),
+           now().timeIntervalSince(latest.at) <= reconciliationWindow,
+           SpokenText.isRefinement(trimmed, of: latest.text) {
+            return Utterance(
+                id: latest.id,
+                language: language,
+                text: trimmed,
+                isFinal: false,
+                isRevision: true
+            )
+        }
+
+        // A silence-timeout final closes the utterance before the transcriber
+        // publishes its own final for the same range. When no new row has
+        // started and the late final is a prefix extension of the closed
+        // utterance, revise that utterance in place instead of starting a
+        // duplicate row.
+        if isFinal,
+           noRowInProgress,
+           let latest = latestFinal,
+           latest.id != utteranceID,
+           latest.language == language,
+           !SpokenText.isNameSwap(trimmed, of: latest.text),
+           now().timeIntervalSince(latest.at) <= reconciliationWindow,
+           SpokenText.isRefinement(trimmed, of: latest.text) {
+            let revised = Utterance(
+                id: latest.id,
+                language: language,
+                text: trimmed,
+                isFinal: true,
+                isRevision: true
+            )
+            latestFinal = FinalizedUtterance(
+                id: latest.id,
+                language: language,
+                text: trimmed,
+                at: now()
+            )
+            return revised
         }
 
         // A greeting name swap is a different person speaking and must start a
@@ -68,12 +140,21 @@ struct UtteranceAssembler: Equatable, Sendable {
         let winnerText = textFor(winner)
         guard !winnerText.isEmpty else { return nil }
 
-        return Utterance(
+        let utterance = Utterance(
             id: utteranceID,
             language: winner,
             text: winnerText,
             isFinal: isWinnerFinal(winner)
         )
+        if utterance.isFinal {
+            latestFinal = FinalizedUtterance(
+                id: utterance.id,
+                language: utterance.language,
+                text: utterance.text,
+                at: now()
+            )
+        }
+        return utterance
     }
 
     mutating func silenceTimedOut() -> Utterance? {
@@ -85,6 +166,12 @@ struct UtteranceAssembler: Equatable, Sendable {
             language: winner,
             text: winnerText,
             isFinal: true
+        )
+        latestFinal = FinalizedUtterance(
+            id: utterance.id,
+            language: utterance.language,
+            text: utterance.text,
+            at: now()
         )
         beginNextUtterance(keeping: winner)
         hold(winner, for: 0.8)
@@ -99,13 +186,14 @@ struct UtteranceAssembler: Equatable, Sendable {
         lastLanguage = nil
         lockedLanguage = nil
         suppressOtherUntil = .distantPast
+        latestFinal = nil
         beginNextUtterance(keeping: nil)
     }
 
     private mutating func hold(_ language: AppLanguage, for seconds: TimeInterval) {
         lockedLanguage = language
         lastLanguage = language
-        suppressOtherUntil = Date().addingTimeInterval(seconds)
+        suppressOtherUntil = now().addingTimeInterval(seconds)
     }
 
     private mutating func beginNextUtterance(keeping language: AppLanguage?) {

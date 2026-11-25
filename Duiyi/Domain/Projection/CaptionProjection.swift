@@ -48,13 +48,22 @@ struct CaptionProjection: Sendable {
 
         if let existingIndex = index[utterance.id] {
             var record = records[existingIndex]
+            // Once settled, a row only accepts a newer final; a late volatile
+            // must not reopen or downgrade it.
+            guard !(record.isFinal && !utterance.isFinal) else { return nil }
             record.source = utterance.language
             record.sourceText = SpokenText.preferredSource(record.sourceText, text)
             record.isFinal = utterance.isFinal
             record.updatedAt = max(record.updatedAt, utterance.createdAt)
             record.displayGeneration = generation
             records[existingIndex] = record
-            liveIDByPane[record.pane] = record.id
+            // Only the newest row for the pane owns the live slot; a late
+            // revision of an older row must not take it from the newer
+            // utterance already in progress (including after a clear).
+            let isNewestForPane = records.last(where: { $0.pane == record.pane })?.id == record.id
+            if liveIDByPane[record.pane] == record.id || isNewestForPane {
+                liveIDByPane[record.pane] = record.id
+            }
             return line(for: record)
         }
 
