@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>对译 App Icon — 候选对比（PROTOTYPE）</title>
+<style>
+  :root {
+    --ink: #0B0C10;
+    --panel: #161920;
+    --panel-2: #1C1C1E;
+    --amber: #E8B86D;
+    --amber-deep: #C98F3F;
+    --cream: #FFF4E0;
+    --text: #F4EFE6;
+    --muted: #A9A49B;
+    --teal: #7EC8C3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 44px 40px 64px;
+    background: var(--ink);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; }
+  .badge {
+    display: inline-block;
+    background: var(--amber);
+    color: #1C1915;
+    font-weight: 800;
+    letter-spacing: .14em;
+    font-size: 11px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    margin-bottom: 18px;
+  }
+  h1 { font-size: 34px; line-height: 1.15; margin: 0 0 10px; letter-spacing: -.02em; }
+  h2 { font-size: 20px; margin: 0 0 4px; letter-spacing: -.01em; }
+  h3 { font-size: 16px; margin: 0 0 6px; }
+  p { color: var(--muted); line-height: 1.55; margin: 8px 0 0; font-size: 14px; }
+  .sub { color: var(--muted); font-size: 15px; max-width: 780px; }
+  .accent { color: var(--amber); }
+  .section { margin-top: 42px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid rgba(255,244,224,.08);
+    border-radius: 24px;
+    padding: 24px;
+  }
+  .hero { display: grid; grid-template-columns: 300px 1fr; gap: 32px; align-items: start; }
+  .squircle {
+    width: 260px; height: 260px;
+    border-radius: 22.37%;
+    overflow: hidden;
+    background: #000;
+    box-shadow: 0 18px 50px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.06);
+  }
+  .squircle img { width: 100%; height: 100%; display: block; }
+  .sizes { display: flex; align-items: flex-end; gap: 22px; margin-top: 22px; }
+  .size { text-align: center; }
+  .size img { display: block; margin: 0 auto; }
+  .size span { display: block; color: var(--muted); font-size: 11px; margin-top: 8px; letter-spacing: .04em; }
+  .tiles { display: flex; gap: 16px; margin-top: 22px; }
+  .tile { border-radius: 30px; padding: 16px; display: flex; align-items: center; gap: 14px; }
+  .tile.dark { background: #000; border: 1px solid #2a2a2a; }
+  .tile.light { background: #F2F2F7; border: 1px solid #ddd; }
+  .tile .mini { width: 74px; height: 74px; border-radius: 22.37%; overflow: hidden; flex: none; }
+  .tile .mini img { width: 100%; height: 100%; display: block; }
+  .tile .label { font-size: 12px; line-height: 1.4; }
+  .tile.dark .label { color: #F4EFE6; }
+  .tile.light .label { color: #1C1C1E; }
+  .ab { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .ab .item { background: var(--panel-2); border-radius: 20px; padding: 18px; }
+  .ab .item h3 { display: flex; align-items: center; gap: 8px; }
+  .tag { font-size: 10px; letter-spacing: .08em; padding: 3px 8px; border-radius: 999px; font-weight: 700; }
+  .tag.before { background: rgba(169,164,155,.18); color: var(--muted); }
+  .tag.after { background: rgba(232,184,109,.18); color: var(--amber); }
+  .ab .pair { display: flex; align-items: flex-end; gap: 16px; margin-top: 12px; }
+  .ab .pair img { display: block; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .candidate { display: grid; grid-template-columns: 140px 1fr; gap: 18px; align-items: start; }
+  .candidate .thumb { width: 140px; height: 140px; border-radius: 22.37%; overflow: hidden; }
+  .candidate .thumb img { width: 100%; height: 100%; display: block; }
+  .verdict { font-size: 12px; font-weight: 700; letter-spacing: .04em; margin-bottom: 6px; }
+  .verdict.pick { color: var(--amber); }
+  .verdict.runner { color: var(--teal); }
+  .verdict.reject { color: #EE8A8A; }
+  ul { margin: 10px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+  li { margin: 4px 0; }
+  code { font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; color: var(--cream); background: rgba(255,255,255,.05); padding: 1px 5px; border-radius: 5px; }
+  .footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid rgba(255,244,224,.08); color: var(--muted); font-size: 12px; line-height: 1.7; }
+  .footer a { color: var(--amber); text-decoration: none; }
+  .note { color: var(--muted); font-size: 13px; line-height: 1.55; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="badge">PROTOTYPE — NOT PRODUCTION</div>
+  <h1>对译 App Icon — 候选对比</h1>
+  <p class="sub">1024×1024，深墨 <span class="accent">#0B0C10</span> + 暖琥珀 <span class="accent">#E8B86D</span>。两个对话气泡、一个交换箭头。以下渲染用于选择，不是 App Store 资产。</p>
+
+  <section class="section">
+    <div class="card hero">
+      <div>
+        <div class="squircle"><img src="overlapping-lens-v2-1024.png" alt="Overlapping Lens v2"></div>
+        <div class="sizes">
+          <div class="size"><img src="overlapping-lens-v2-180.png" width="180" height="180" alt="180"><span>180</span></div>
+          <div class="size"><img src="overlapping-lens-v2-120.png" width="120" height="120" alt="120"><span>120</span></div>
+          <div class="size"><img src="overlapping-lens-v2-60.png" width="60" height="60" alt="60"><span>60</span></div>
+          <div class="size"><img src="overlapping-lens-v2-40.png" width="40" height="40" alt="40"><span>40</span></div>
+        </div>
+      </div>
+      <div>
+        <div class="verdict pick">推荐 · TOP PICK（对比度修正后）</div>
+        <h2>Overlapping Lens v2</h2>
+        <p>两个气泡交叠成一枚发光的透镜，重叠区被切成一条水平双向箭头。三路评审一致把它列为第一：它是唯一在 60/40 px 仍读作“两个气泡 + 双向交换”的候选，也是唯一有可信 Liquid Glass 层次（半透明叶瓣、透镜、细边光、控制在 0.12 的冷反射）的候选。</p>
+        <div class="tiles">
+          <div class="tile dark"><div class="mini"><img src="overlapping-lens-v2-1024.png" alt=""></div><div class="label">深色 Home Screen<br>#000 背景</div></div>
+          <div class="tile light"><div class="mini"><img src="overlapping-lens-v2-1024.png" alt=""></div><div class="label">浅色 Home Screen<br>#F2F2F7 背景</div></div>
+          <div class="tile dark"><div class="mini" style="filter: grayscale(1) brightness(1.5)"><img src="overlapping-lens-v2-1024.png" alt=""></div><div class="label">Tinted 预览<br>grayscale</div></div>
+        </div>
+        <p class="note">这一版只做了一次对比度修正，没有改几何：右气泡从奶白恢复为琥珀，透镜中心从大面积 <code>#FFF4E0</code> 收到 <code>#FFF4E0 → #F2D6A0 → #E8B86D</code>，透镜下缘从 12 px / 0.35 收到 6 px / 0.5。目的是让 60/40 px 不再把透镜和右气泡糊成一块奶油色。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>修正前 vs 修正后</h2>
+    <p>同一几何，只改填充与透镜边缘。注意 60 px 下右侧是否还能读出“第二个气泡”。</p>
+    <div class="ab" style="margin-top:18px">
+      <div class="item">
+        <h3><span class="tag before">BEFORE</span> overlapping-lens</h3>
+        <div class="pair">
+          <img src="overlapping-lens-1024.png" width="220" height="220" style="border-radius:22.37%" alt="before 1024">
+          <img src="overlapping-lens-60.png" width="60" height="60" alt="before 60">
+          <img src="preflight/overlapping-lens-40.png" width="40" height="40" alt="before 40">
+        </div>
+        <p class="note">右气泡顶部从 <code>#FFF4E0</code> 开始，和透镜的奶油核心连成一片；60 px 下两个气泡的边界消失。</p>
+      </div>
+      <div class="item">
+        <h3><span class="tag after">AFTER</span> overlapping-lens-v2</h3>
+        <div class="pair">
+          <img src="overlapping-lens-v2-1024.png" width="220" height="220" style="border-radius:22.37%" alt="after 1024">
+          <img src="overlapping-lens-v2-60.png" width="60" height="60" alt="after 60">
+          <img src="overlapping-lens-v2-40.png" width="40" height="40" alt="after 40">
+        </div>
+        <p class="note">右气泡保持琥珀，透镜成为一枚独立的浅色叶瓣；60/40 px 下三个值（琥珀 / 浅透镜 / 墨色箭头）分得开。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Runner-up 与其余候选</h2>
+    <div class="grid2" style="margin-top:18px">
+      <div class="card">
+        <div class="candidate">
+          <div class="thumb"><img src="mirrored-bubbles-1024.png" alt="Mirrored Bubbles"></div>
+          <div>
+            <div class="verdict runner">RUNNER-UP · 需要几何返工</div>
+            <h3>Mirrored Bubbles</h3>
+            <p>左右镜像、中央竖直负空间箭头。60 px 下箭头最粗（箭杆 5.2 px），但两个琥珀面会熔成一块“金板/打开的书”，竖直箭头读作同步/传输。要修得动结构（开缝、错位、箭头改横向），不是润色。</p>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="candidate">
+          <div class="thumb"><img src="asymmetric-listen-1024.png" alt="Asymmetric Listen"></div>
+          <div>
+            <div class="verdict reject">REJECTED · 三路一致</div>
+            <h3>Asymmetric Listen</h3>
+            <p>大琥珀气泡 + 小深色气泡 + 白色斜箭头。深色“听者”在 60/40 px 直接消失，白箭头读作 resize/send，单向的主从关系也不符合“互译”。</p>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="candidate">
+          <div class="thumb"><img src="waveform-exchange-1024.png" alt="Waveform Exchange"></div>
+          <div>
+            <div class="verdict reject">NOT SHORTLISTED · 2 refine / 1 reject</div>
+            <h3>Waveform Exchange</h3>
+            <p>声波穿过两个气泡化成箭头。1024 很有辨识度，但 40 px 下正弦波读作均衡器/波浪线；修掉它就收敛回 Overlapping Lens，保留它就过不了小尺寸。</p>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="candidate">
+          <div class="thumb" style="display:flex;gap:8px;align-items:flex-end;justify-content:center;background:#0B0C10;padding:6px;border-radius:16px">
+            <img src="mirrored-bubbles-60.png" width="60" height="60" alt="Mirrored Bubbles 60">
+            <img src="overlapping-lens-v2-60.png" width="60" height="60" alt="Overlapping Lens v2 60">
+          </div>
+          <div>
+            <div class="verdict runner">小尺寸对照</div>
+            <h3>60 px 直接对比</h3>
+            <p>左：Mirrored Bubbles（箭杆更粗，但气泡合并）。右：Overlapping Lens v2（三个值分得开，箭杆更细）。如果你把“箭头必须最粗”放在第一位，Mirrored Bubbles 的返工方向值得另开一轮。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="card">
+      <h2>要你拍板</h2>
+      <ul>
+        <li><strong class="accent">A（推荐）</strong>：用 <code>overlapping-lens-v2</code> 进实现。它的 60/40 px 读法、Liquid Glass 层次和三路评审都最好。</li>
+        <li><strong>B</strong>：用 <code>mirrored-bubbles</code> 进实现，但先做一轮结构返工（横向箭头、开缝、错位），否则会读成“金板 + 同步箭头”。</li>
+        <li><strong>C</strong>：保留 Overlapping Lens 的构图，但再做一轮箭头几何（箭杆 60→72、箭头高 156→172、轴线拉平），让小尺寸箭头更粗。这会改变已验证的 796×624 内容框，需要重新量安全区。</li>
+        <li><strong>D</strong>：换一个方向；告诉我你看到的问题（气泡太多？透镜太亮？箭头太细？），我再出一轮。</li>
+      </ul>
+      <p class="note">完整四宫格与每个候选的构造说明在 <a href="index.html" style="color:var(--amber)">index.html</a>；评审与理由在 <code>Prototype/AppIcon/RECOMMENDATION.md</code>。</p>
+    </div>
+  </section>
+
+  <div class="footer">
+    PROTOTYPE — NOT PRODUCTION · 渲染：rsvg-convert 2.63.2 · 源：<code>candidates/overlapping-lens-v2.svg</code> · 所有 PNG 为不透明 sRGB，无 alpha · 这是设计探索，不是 App Store 资产。
+  </div>
+</div>
+</body>
+</html>
