@@ -14,6 +14,12 @@ final class AppCoordinator {
         path = []
     }
 
+    /// Collapses the stack to history in one write, so a detail-side delete
+    /// cannot straddle a pop and a push.
+    func returnToHistory() {
+        path = [.history]
+    }
+
     func pop() {
         guard !path.isEmpty else { return }
         path.removeLast()

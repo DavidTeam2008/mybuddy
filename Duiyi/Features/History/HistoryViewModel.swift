@@ -7,6 +7,9 @@ final class HistoryViewModel {
 
     private(set) var tasks: [TaskSession] = []
     var filter: FeatureID?
+    /// Invalidates in-flight reloads so a stale snapshot cannot overwrite a
+    /// newer delete or reload.
+    private var loadGeneration = 0
 
     /// The last history read failed. Loaded tasks stay visible; the view shows
     /// the shared storage banner instead of pretending history is empty.
@@ -25,7 +28,11 @@ final class HistoryViewModel {
     }
 
     func reload() async {
-        switch await store.readList(filter: filter) {
+        loadGeneration += 1
+        let generation = loadGeneration
+        let result = await store.readList(filter: filter)
+        guard generation == loadGeneration else { return }
+        switch result {
         case let .value(loaded):
             tasks = loaded
             readFailure = nil
@@ -65,13 +72,18 @@ final class HistoryViewModel {
         pendingDeletion = nil
         switch await store.deleteTask(id: target.id) {
         case .persisted:
-            deleteFailure = nil
-            // Drop the row before refreshing so a failed refresh cannot show a
-            // task the store already deleted.
-            tasks.removeAll { $0.id == target.id }
-            await reload()
+            // One list mutation for one delete; invalidates any in-flight reload.
+            removeDeletedTask(target.id)
         case let .notPersisted(reason):
             deleteFailure = reason
         }
+    }
+
+    /// Applies a confirmed delete (history swipe or detail screen) in a single
+    /// mutation and invalidates stale reloads so the row cannot reappear.
+    func removeDeletedTask(_ id: UUID) {
+        loadGeneration += 1
+        tasks.removeAll { $0.id == id }
+        deleteFailure = nil
     }
 }

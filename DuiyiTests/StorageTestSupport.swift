@@ -73,9 +73,15 @@ final class ScriptedTaskStore: TaskStoreV2 {
         return await base.readUnfinishedTasks()
     }
 
+    /// Optional suspension point for ordering tests: receives the captured
+    /// result before it is returned to the caller.
+    var readListHook: ((TaskStoreReadResult<[TaskSession]>) async -> Void)?
+
     func readList(filter: FeatureID?) async -> TaskStoreReadResult<[TaskSession]> {
         if let readBlock { return .unavailable(readBlock) }
-        return await base.readList(filter: filter)
+        let result = await base.readList(filter: filter)
+        if let readListHook { await readListHook(result) }
+        return result
     }
 
     func readTask(id: UUID) async -> TaskStoreReadResult<TaskSession?> {
