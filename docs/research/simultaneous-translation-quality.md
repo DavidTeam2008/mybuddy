@@ -241,7 +241,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P0-4. 停止时 finalize，结束任务前 drain**
 
-- **状态（2026-11-26）**：已实现于 `fix/p0-4-stop-finalize`（待 PR）。`stop()` 先停采集/输入，调用 `finalizeAndFinishThroughEndOfInput()`（1 s 上限），给消费者 300 ms 收 final，再用 `silenceTimedOut()` 做兜底；`resetPipelineKeepingStream`/`restartSingle` 走同样的 finalize；三个 VM 在 `endTask`/`stop`/`beginTask` 前 await `speechTask`（500 ms 上限），不再先 cancel consumer。单测覆盖 end/stop/新建任务三条路径；真机验收**未执行**（设备已连接，但需人工声学/暂停时序，且设备上可能有未结束任务；待用户确认后执行）。本票只保证 ASR final 进入快照；在途翻译的回填仍归 P0-6。
+- **状态（2026-11-26）**：已实现于 PR #78。`stop()` 先停采集/输入，调用 `finalizeAndFinishThroughEndOfInput()`（1 s 上限），给消费者 300 ms 收 final，再用 `silenceTimedOut()` 做兜底；`resetPipelineKeepingStream`/`restartSingle` 走同样的 finalize；三个 VM 在 `endTask`/`stop`/`beginTask` 前 await `speechTask`（500 ms 上限），不再先 cancel consumer。单测覆盖 end/stop/新建任务三条路径；真机验收**未执行**（设备已连接，但需人工声学/暂停时序，且设备上可能有未结束任务；待用户确认后执行）。本票只保证 ASR final 进入快照；在途翻译的回填仍归 P0-6。
 - **真机手动步骤（待设备）**：iPhone 13 上在同传/面对面/会议各说一句，在 final 到达前点暂停、结束或新建任务；断言最后一句进入文字稿/历史/导出且不重复；再验证暂停后继续不丢行。无法操作设备时记录原因并保留单测证据。
 - `stop()`：先停采集/输入，`inputContinuation.finish()`，`analyzer.finalizeAndFinishThroughEndOfInput()`（或 `finalize(through:)` 再 finish），给消费者有限窗口（300–500 ms）收 final，再取消剩余任务；不要先取消消费者。
 - 结束任务：在 `endTask` 前等待在途 final（有界超时），或让迟到的 final 通过 `TaskStoreV2.updateTranslations` 回填已结束任务；不要在 final 在途时 `resetCaptions()`。
