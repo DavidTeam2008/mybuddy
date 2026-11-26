@@ -9,6 +9,9 @@ struct HomeSettingsSheet: View {
     @State private var speechProgress: Double = 0
     @State private var redownloadError: String?
     @State private var unavailableLanguages: Set<AppLanguage> = []
+    #if DEBUG
+    @State private var diagnosticsFileURL: URL?
+    #endif
 
     private var language: AppLanguage { environment.preferences.userLanguage }
 
@@ -58,6 +61,10 @@ struct HomeSettingsSheet: View {
                     .foregroundStyle(Tokens.textSecondary)
                     .disabled(isRedownloading)
 
+                    #if DEBUG
+                    diagnosticsSection
+                    #endif
+
                     Button(Copy.openSettings(for: language)) {
                         if let url = URL(string: UIApplication.openSettingsURLString) {
                             UIApplication.shared.open(url)
@@ -82,6 +89,30 @@ struct HomeSettingsSheet: View {
             unavailableLanguages = LanguageCatalogSelection.unavailableLanguages(from: environment.languageCatalog)
         }
     }
+
+    #if DEBUG
+    /// Per-task diagnostics written to Documents; the share sheet and
+    /// `devicectl` can both retrieve the JSON. Nothing is uploaded.
+    private var diagnosticsSection: some View {
+        Group {
+            if environment.diagnostics.hasSession {
+                if let diagnosticsFileURL {
+                    ShareLink(item: diagnosticsFileURL) {
+                        Text(Copy.exportDiagnostics(for: language))
+                            .foregroundStyle(Tokens.accentText)
+                    }
+                    .accessibilityIdentifier("diagnostics-export")
+                } else {
+                    Button(Copy.exportDiagnostics(for: language)) {
+                        diagnosticsFileURL = environment.diagnostics.makeExportFile()
+                    }
+                    .foregroundStyle(Tokens.accentText)
+                    .accessibilityIdentifier("diagnostics-export")
+                }
+            }
+        }
+    }
+    #endif
 
     private func redownload() async {
         redownloadError = nil

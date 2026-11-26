@@ -4,27 +4,60 @@ import SwiftUI
 struct TranslationHostView: View {
     let userLanguage: AppLanguage
     let peerLanguage: AppLanguage
-    let job: TranslationJob?
+    private let latestJob: TranslationJob?
+    private let outboundRevision: Int
+    private let takeNextOutboundJob: (@MainActor () -> TranslationJob?)?
     let onSuccess: @MainActor (TranslationJob, String) -> Void
     let onFailure: @MainActor (TranslationJob, Error) -> Void
+    private let diagnostics: any DiagnosticsRecording
 
     @State private var userToPeer: TranslationSession.Configuration
     @State private var peerToUser: TranslationSession.Configuration
     @State private var userJobs = TranslationJobBridge()
     @State private var peerJobs = TranslationJobBridge()
 
+    /// Sequential host: the caller advances one job at a time and rebuilds the
+    /// host per job (history detail).
     init(
         userLanguage: AppLanguage,
         peerLanguage: AppLanguage,
         job: TranslationJob?,
         onSuccess: @escaping @MainActor (TranslationJob, String) -> Void,
-        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void
+        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         self.userLanguage = userLanguage
         self.peerLanguage = peerLanguage
-        self.job = job
+        self.latestJob = job
+        self.outboundRevision = 0
+        self.takeNextOutboundJob = nil
         self.onSuccess = onSuccess
         self.onFailure = onFailure
+        self.diagnostics = diagnostics
+        _userToPeer = State(initialValue: translationConfiguration(from: userLanguage, to: peerLanguage))
+        _peerToUser = State(initialValue: translationConfiguration(from: peerLanguage, to: userLanguage))
+    }
+
+    /// Live host: drains every queued job on each revision bump. Observing a
+    /// single "latest job" would let SwiftUI coalesce two finals produced
+    /// between renders and silently drop the first.
+    init(
+        userLanguage: AppLanguage,
+        peerLanguage: AppLanguage,
+        outboundRevision: Int,
+        takeNextOutboundJob: @escaping @MainActor () -> TranslationJob?,
+        onSuccess: @escaping @MainActor (TranslationJob, String) -> Void,
+        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
+    ) {
+        self.userLanguage = userLanguage
+        self.peerLanguage = peerLanguage
+        self.latestJob = nil
+        self.outboundRevision = outboundRevision
+        self.takeNextOutboundJob = takeNextOutboundJob
+        self.onSuccess = onSuccess
+        self.onFailure = onFailure
+        self.diagnostics = diagnostics
         _userToPeer = State(initialValue: translationConfiguration(from: userLanguage, to: peerLanguage))
         _peerToUser = State(initialValue: translationConfiguration(from: peerLanguage, to: userLanguage))
     }
@@ -34,18 +67,32 @@ struct TranslationHostView: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
             .translationTask(userToPeer) { session in
-                await TranslationJobPump(session: session, onSuccess: onSuccess, onFailure: onFailure)
-                    .run(userJobs.makeConsumer())
+                await TranslationJobPump(
+                    session: session,
+                    onSuccess: onSuccess,
+                    onFailure: onFailure,
+                    diagnostics: diagnostics
+                )
+                .run(userJobs.makeConsumer())
             }
             .translationTask(peerToUser) { session in
-                await TranslationJobPump(session: session, onSuccess: onSuccess, onFailure: onFailure)
-                    .run(peerJobs.makeConsumer())
+                await TranslationJobPump(
+                    session: session,
+                    onSuccess: onSuccess,
+                    onFailure: onFailure,
+                    diagnostics: diagnostics
+                )
+                .run(peerJobs.makeConsumer())
             }
-            .onChange(of: job) { _, newJob in
+            .onChange(of: latestJob) { _, newJob in
                 submit(newJob)
             }
+            .onChange(of: outboundRevision) { _, _ in
+                drainQueuedJobs()
+            }
             .onAppear {
-                submit(job)
+                submit(latestJob)
+                drainQueuedJobs()
             }
     }
 
@@ -57,30 +104,72 @@ struct TranslationHostView: View {
             peerJobs.submit(job)
         }
     }
+
+    /// Drains the pipeline queue into the direction bridges. `submit` drops a
+    /// job that no longer matches the host pair; language changes reset the
+    /// pipeline and rebuild this host first, so that filter is defensive.
+    private func drainQueuedJobs() {
+        guard let takeNextOutboundJob else { return }
+        while let job = takeNextOutboundJob() {
+            submit(job)
+        }
+    }
 }
 
 struct OneWayTranslationHostView: View {
     let sourceLanguage: AppLanguage
     let targetLanguage: AppLanguage
-    let job: TranslationJob?
+    private let latestJob: TranslationJob?
+    private let outboundRevision: Int
+    private let takeNextOutboundJob: (@MainActor () -> TranslationJob?)?
     let onSuccess: @MainActor (TranslationJob, String) -> Void
     let onFailure: @MainActor (TranslationJob, Error) -> Void
+    private let diagnostics: any DiagnosticsRecording
 
     @State private var configuration: TranslationSession.Configuration
     @State private var jobs = TranslationJobBridge()
 
+    /// Sequential host: the caller advances one job at a time and rebuilds the
+    /// host per job (history detail).
     init(
         sourceLanguage: AppLanguage,
         targetLanguage: AppLanguage,
         job: TranslationJob?,
         onSuccess: @escaping @MainActor (TranslationJob, String) -> Void,
-        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void
+        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         self.sourceLanguage = sourceLanguage
         self.targetLanguage = targetLanguage
-        self.job = job
+        self.latestJob = job
+        self.outboundRevision = 0
+        self.takeNextOutboundJob = nil
         self.onSuccess = onSuccess
         self.onFailure = onFailure
+        self.diagnostics = diagnostics
+        _configuration = State(initialValue: translationConfiguration(from: sourceLanguage, to: targetLanguage))
+    }
+
+    /// Live host: drains every queued job on each revision bump. Observing a
+    /// single "latest job" would let SwiftUI coalesce two finals produced
+    /// between renders and silently drop the first.
+    init(
+        sourceLanguage: AppLanguage,
+        targetLanguage: AppLanguage,
+        outboundRevision: Int,
+        takeNextOutboundJob: @escaping @MainActor () -> TranslationJob?,
+        onSuccess: @escaping @MainActor (TranslationJob, String) -> Void,
+        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
+    ) {
+        self.sourceLanguage = sourceLanguage
+        self.targetLanguage = targetLanguage
+        self.latestJob = nil
+        self.outboundRevision = outboundRevision
+        self.takeNextOutboundJob = takeNextOutboundJob
+        self.onSuccess = onSuccess
+        self.onFailure = onFailure
+        self.diagnostics = diagnostics
         _configuration = State(initialValue: translationConfiguration(from: sourceLanguage, to: targetLanguage))
     }
 
@@ -89,14 +178,23 @@ struct OneWayTranslationHostView: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
             .translationTask(configuration) { session in
-                await TranslationJobPump(session: session, onSuccess: onSuccess, onFailure: onFailure)
-                    .run(jobs.makeConsumer())
+                await TranslationJobPump(
+                    session: session,
+                    onSuccess: onSuccess,
+                    onFailure: onFailure,
+                    diagnostics: diagnostics
+                )
+                .run(jobs.makeConsumer())
             }
-            .onChange(of: job) { _, newJob in
+            .onChange(of: latestJob) { _, newJob in
                 submit(newJob)
             }
+            .onChange(of: outboundRevision) { _, _ in
+                drainQueuedJobs()
+            }
             .onAppear {
-                submit(job)
+                submit(latestJob)
+                drainQueuedJobs()
             }
     }
 
@@ -105,18 +203,37 @@ struct OneWayTranslationHostView: View {
         guard job.source == sourceLanguage, job.target == targetLanguage else { return }
         jobs.submit(job)
     }
+
+    /// Drains the pipeline queue into the bridge. `submit` drops a job that no
+    /// longer matches the host pair; language changes reset the pipeline and
+    /// rebuild this host first, so that filter is defensive.
+    private func drainQueuedJobs() {
+        guard let takeNextOutboundJob else { return }
+        while let job = takeNextOutboundJob() {
+            submit(job)
+        }
+    }
 }
 
 private extension TranslationJobPump {
     init(
         session: TranslationSession,
         onSuccess: @escaping @MainActor (TranslationJob, String) -> Void,
-        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void
+        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void,
+        diagnostics: any DiagnosticsRecording
     ) {
         self.init(
-            translate: { try await session.translate($0).targetText },
+            translateResponse: { text in
+                let response = try await session.translate(text)
+                return TranslationPumpResult(
+                    text: response.targetText,
+                    responseSourceLanguage: response.sourceLanguage.minimalIdentifier,
+                    responseTargetLanguage: response.targetLanguage.minimalIdentifier
+                )
+            },
             onSuccess: onSuccess,
-            onFailure: onFailure
+            onFailure: onFailure,
+            diagnostics: diagnostics
         )
     }
 }

@@ -20,9 +20,20 @@
 | 语言目录实查 | 生产注入 `SystemLanguageCatalog`（探针缓存）；当前仅首页设置消费，v1 扩展到所有语言入口 |
 | Wave 1 数据完整性 | 已合并到 `wave-1-data-integrity`（#2–#12，tip `fd820e4`）：TaskStoreV2、SpeechSessionGate、TaskLifecycle、显性存储降级、清屏/50 条/2 万字语义。iPhone 13 真机清单未验证 |
 | P1-1 翻译队列积压 | 已完成（#22–#25，main `37f0a50`）；真机验证 2026-11-24 通过（用户确认）；#21/#26 已关闭 |
-| 同传 P0-5 单语种 trusted locale | 已实现（2026-11-26，`fix/p0-5-trusted-locale`）：真单语种 `.trustedLocale`；双 locale 降级与会议保持 `.strict`；单测全绿；真机未验证 |
+| 同传 P0-5 单语种 trusted locale | 已实现（2026-11-26，PR #77）：真单语种 `.trustedLocale`；双 locale 降级与会议保持 `.strict`；单测全绿；真机未验证 |
+| 同传 P0-4 停止 finalize/drain | 已实现（2026-11-26，PR #78）：stop/reset/restart finalize（1 s 上限）+ 300 ms drain + 兜底 final；三个 VM 在 end/stop/新建任务前 drain consumer（500 ms 上限）；单测全绿；真机未验证 |
+| 同传 P0-1 outbound 无损队列 | 已实现（2026-11-26，PR #79）：单槽改为有界有序队列 + 每 utterance 防抖 + 单调 sequence + 结果去重；Host 按 `outboundRevision` drain；单测全绿；真机未验证 |
+| 同传 P1-2 稳定单元 preview | 已实现（2026-11-26，PR #82；#80 自动关闭）：句末标点立即、≥4 estimated words 防抖、更短丢弃；首包有用 preview 也走防抖；final 旁路；单测全绿；真机未验证 |
+| 同传 P0-6a 结束竞态回填 | 已实现（2026-11-26，PR #81）：endTask/新建任务后迟到的 final 译文经 `updateTranslations` 回填已结束任务；结束写入在途时暂存后回填；preview 不落库；单测全绿；真机未验证；P0-6b 重试/可见状态另开 |
+| 同传 P1-4a 每任务诊断 | 已实现（2026-11-26，PR #84 / merge `1cc8df6`）：内存 ring buffer + 聚合 + DEBUG JSON 导出；ASR 记录 language/range/resultsFinalizationTime/synthetic/脚本不匹配，翻译记录 submit/apply/response/retry/失败类/U+FFFD/延迟；设置页 DEBUG 导出写入 Documents；单测全绿；真机回放（P1-4b）未执行 |
+| 同传 P1-1 range-aware 组装 | 已实现（2026-11-26，PR #84 / merge `1cc8df6`）：Result(range) 建模、finalized-prefix、range 连续（含 volatile）+ 标点定句界、空 volatile 撤销、静音 finalize(through:nil) + 350ms 等待 + synthetic 兜底、迟到同 range final 复用 ID 且文本权威；D8/crosstalk/name-swap 保持；单测全绿；真机未验证。手动步骤：iPhone 13 同传英→中，连续说两个无标点短语应同行增长，句号/问号后换行；1.1 s 静音后不应出现重复行；诊断 JSON 的 `asr.result` 应显示相同 utterance 的 `revision` 与 range 重叠 |
+| 同传 P1-4b TED 真机回放 | 未验证（2026-11-26 暂停）：Debug 构建已安装、任务已创建，但设备持续收到房间人声，回放前即出现无关字幕，污染夹具指标；已暂停听写并保留任务。13 分钟 TTS 夹具（cue 132–331，195 句，110 个 ≥1.1 s 间隔）与 DEBUG 导出路径就绪；环境静音后新建任务重跑，手动步骤见 research §4 P1-4 |
+| 同传 P1-3 ASR 精度 A/B（research） | 未开始（2026-11-26）：等 P1-4b 同一夹具；`.fastResults` 去留、`AnalysisContext.contextualStrings`、`transcriptionConfidence` 只诊断，不因低置信度丢 final |
+| 同传 P0-6b 重试/可见状态 | 未开始（2026-11-26）：按用户确认拆票；取消/资源未就绪/不支持语言对/瞬时 2 次退避 + `permanentFailure` 可见状态，等 P1-4 诊断/设备数据后再定 UI 与预算 |
 | Wave 3 C04 字幕/文字稿投影 | 已完成（#28–#31，PR #33–#36；#32 清理+文档+iPhone 13 真机矩阵，用户确认 2026-11-25）；候选台账见 [05-architecture-backlog.md](05-architecture-backlog.md) |
 | 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
+
+> **下一步（2026-11-26）**：P1-4b 真机回放（环境静音后）→ P1-3 ASR 精度 A/B（同一夹具）→ P0-6b 重试/可见状态。P1-5/P2 仍暂缓，见 research §4。
 
 ### Wave 1 测试调整说明（2026-11-23）
 
@@ -120,7 +131,7 @@
 - Host 未就绪时也按 ID 合并；`makeConsumer()` 在队列非空时立即补一次 wakeup。
 - consumer generation-scoped `takeNext()`：旧 generation 返回 nil，旧 `onTermination` 不清新 continuation；`requeue` 接受任意 generation，只要该 job 仍是该句最新提交且无同 ID pending，插入队首并 wake 当前 consumer。
 - pump 每次唤醒 `takeNext()` 到空；取消时该 job 已被同 ID 更新取代则丢弃，否则 requeue 到队首并退出；取消错误不触发 `onFailure`。非任务取消的 `CancellationError` 由下一次 `.translationTask` 重启的新 consumer drain。
-- 时序不变：40/90 ms、voiceOut 25/50 ms、380 ms TTS settle、1.1 s 静音 final、crosstalk、emit 与单槽 `outboundJob`。
+- 时序不变：40/90 ms、voiceOut 25/50 ms、380 ms TTS settle、1.1 s 静音 final、crosstalk 与 emit（当时仍为单槽 `outboundJob`；该单槽已由 2026-11-26 的 P0-1 改为有序队列）。
 
 **验收**：`check-static` PASS；模拟器回归单测 326 logical / 352 expanded，0 failed / 0 skipped；UI 5 logical / 4 expanded，0 failed / 1 既有模拟器语音 skip。真机口径（连续快速说话时最终译文延迟不随会话增长、无旧 job 后到）由用户在 2026-11-24 报告通过，未提供 p95 数值。
 
@@ -141,7 +152,7 @@
 
 ### P1-3 切换语言后的旧翻译状态
 
-**现象**：语言对变化时 `ConversationView` / `InterpretationView` 用 `.id` 重建 Host，旧 session 取消；翻译态（`outboundJob`、防抖、`sentSourceText`、`lastAppliedSourceCount`、aliases）现由 `TranslationPipeline` 持有，`reset()` 会一并清空，但 `setUserLanguage` / `handlePairChange` 的调用时序仍可能漏一句。
+**现象**：语言对变化时 `ConversationView` / `InterpretationView` 用 `.id` 重建 Host，旧 session 取消；翻译态（outbound 队列、防抖、`sentSourceText`、`lastAppliedSourceCount`、`lastAppliedSequence`）现由 `TranslationPipeline` 持有，`reset()` 会一并清空，但 `setUserLanguage` / `handlePairChange` 的调用时序仍可能漏一句。
 
 **目标**：`applyDirectionChange` / `setUserLanguage` / `handlePairChange` 在重建配置前统一调用 `pipeline.reset()`。
 
@@ -169,7 +180,7 @@
 
 **原现象（C04 前）**：字幕/文字稿投影有 3 处 `upsertTranscript`（Conversation / Interpretation / Meeting），`PaneState.history` 可变，各 ViewModel 恢复时各自重新投影；显示窗口与文字稿全集的边界分散。
 
-**目标**：把 live / history / archive / merge / restore 投影收敛到一个 module，保持显示窗口（面对面 3 条/侧、同传 50 条仅显示、会议 2 万字累计）与 transcript 全集分离；不改变 P1-1 的 40/90、25/50、voiceOut、crosstalk 与单槽 `outboundJob`。**已达成**：`CaptionProjection` + `CaptionDisplayPolicy` 单一 record store，三 VM 全部迁移。
+**目标**：把 live / history / archive / merge / restore 投影收敛到一个 module，保持显示窗口（面对面 3 条/侧、同传 50 条仅显示、会议 2 万字累计）与 transcript 全集分离；不改变 P1-1 的 40/90、25/50、voiceOut、crosstalk 与单槽 `outboundJob`（当时口径；该单槽已由 P0-1 改为有序队列）。**已达成**：`CaptionProjection` + `CaptionDisplayPolicy` 单一 record store，三 VM 全部迁移。
 
 **验收**：现有三模块字幕/恢复/清屏/导出测试保持通过；新增投影 module 的边界测试；真机回归字幕窗口、恢复、清屏与导出。
 

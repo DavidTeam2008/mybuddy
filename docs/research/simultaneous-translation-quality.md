@@ -2,7 +2,7 @@
 
 > 日期：2026-11-25。对照材料：用户 iPhone 同传导出（2026-11-25 08:58–10:13，English → 中文，175 条）；TED 官方 transcript（Lauren Weinstein, *Don't believe everything you think*, TEDxPaloAlto）。代码基线：`main` = `0b1c626`（Xcode 27.1 / iOS 27.1 SDK）。逐条对照数据与脚本留在本机 `/tmp/simultaneous-comparison.md`，未入库。
 >
-> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77。P1/P2 与其余 P0 未开始。
+> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78；P0-1 outbound 无损队列 → PR #79；P1-2 稳定单元 preview → PR #82（#80 因基线分支删除自动关闭，内容相同）；P0-6a 结束竞态回填 → PR #81；P1-4a 每任务诊断 + P1-1 range-aware 组装 → PR #84（merge `1cc8df6`）。**剩余**：P1-4b 设备回放因环境人声暂停（未验证）、P1-3 ASR 精度 A/B（未开始，等同一夹具）、P0-6b 重试/可见状态（未开始）；P1-5/其余 P2 暂缓。
 
 ## 0. 结论
 
@@ -140,14 +140,14 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 | 路径 | 代码事实 | 影响 |
 | --- | --- | --- |
-| 单槽 outbound | `TranslationPipeline` 只有一个 `outboundJob` 槽和一个 `scheduled` 防抖；任何新提交覆盖旧槽（`TranslationPipeline.swift:86-139`，测试 `outboundJobIsASingleSlot`） | 连续两个 final 可能只有最后一个被 host 读到；bridge 的 final 优先逻辑救不了从未提交的 job |
+| 单槽 outbound | 修复前 `TranslationPipeline` 只有一个 `outboundJob` 槽和一个 `scheduled` 防抖；任何新提交覆盖旧槽（原测试 `outboundJobIsASingleSlot`，现为 `outboundJobReflectsNewestQueuedJob`） | 连续两个 final 可能只有最后一个被 host 读到；bridge 的 final 优先逻辑救不了从未提交的 job |
 | 停止不 finalize | `BilingualSpeechEngine.stop()` 取消消费者后直接 `cancelAndFinishNow()`（`:58-81`），`resetPipelineKeepingStream`/`restartSingle` 同样 | 暂停、结束、切模块、进后台、单语种漂移会丢掉最后一句（直到最后一个 final 之后的内容） |
 | 脚本纯度门 | `UtteranceAssembler.ingest` 对英文要求 `han == 0`（`:230-251`），单语种同传也走这条路 | 含一个中文词/人名或纯数字的英文结果会被整句丢弃 |
 | 翻译失败/结束竞态 | `failTranslation` 只清槽（`InterpretationViewModel.swift:586-588`）；`endTask` 不等在途翻译，`resetCaptions` 后迟到的 `fulfill` 找不到记录 | 文字稿可能留下有源文无译文的行；`TaskStoreV2.updateTranslations` 已支持回填但 live 路径没用 |
 
 这些路径在本次 TED 导出中没有成为主因（源文覆盖 99.12%，也没有空译行），但它们直接违反“不丢句/不漏翻译”，必须作为正确性项修复。
 
-> 2026-11-26：脚本纯度门已在单路同传改为 `.trustedLocale`（P0-5），双路仍为 `.strict`；其余三条路径仍未修。
+> 2026-11-26：脚本纯度门（P0-5）、停止/结束/新建任务以及 `resetPipelineKeepingStream`/`restartSingle` 的 finalize+drain（P0-4）、单槽 outbound（P0-1：有界有序队列 + 每句防抖 + sequence/去重）、结束竞态的迟到 final 回填（P0-6a）已修；翻译失败重试与可见状态（P0-6b）仍未修，排在 P1-4 之后。
 
 ### 2.4 U+FFFD
 
@@ -205,6 +205,8 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P1-2. 翻译稳定单元，而不是词片段**
 
+- **状态（2026-11-26）**：已实现 preview 门控于 PR #82（原 #80 因基线分支删除自动关闭）。`TranslationTrigger.action(for:language:)` 三选一：句末/从句标点（含仅看末字符时的 ASCII `.`；`ClauseSplitter` 本身不加 `.`，避免 TTS 小数分割）→ `.sendNow`；≥4 estimated words（英文按词数，越南语按音节/2，中/日/韩按脚本字符/2，泰语按字符/3）→ `.debounce`（沿用各 feature 的 40/90 ms，voiceOut 25/50 ms）；更短 → `.drop`，不形成 job。首包的有用 preview 过去立即发送，现在也走首包防抖；final 仍旁路。未做 `15:28` 的尾部补全（需要 range/volatile 尾部信息，归 P1-1）。单测覆盖三态、丢弃与短修订取消 pending preview；真机未验证，`有害断句 ≤2%` 指标不能由 preview 门控单独达成，仍需 P1-4 夹具 + P1-1。已知边界：末字符 `.` 会把 `Dr.`/`U.S.`/`3.` 之类当成稳定边界而提前 preview；只影响 preview 的额外成本，final 仍是整句权威，精确判定留 P1-1 的 range/标点组装。
+- **真机手动步骤（待设备）**：iPhone 13 同传英→中；先说 2–3 个词后停顿，断言没有新增片段译文；继续说满 ≥4 词，断言首包防抖后出现译文、final 随后覆盖；说 `OK.` 这类句末标点短句，断言立即出现译文；结束任务后确认 final 完整。无法操作设备时保留单测证据并记录原因。
 - final 是权威路径；preview 只在“足够有用”时发（完整从句/≥4–6 个英文词），2 个词的片段不翻译；长句可发从句级 preview，但标记为 preview，final 全句重译并覆盖。
 - 保留句末标点（`.?!。？！`）作为稳定边界；逗号只用于 preview/TTS 分句。不要为“实时感”无限提高频率（roadmap 明确不做）。
 - 对 15:28 这类“静音 final 丢尾巴”，优先用后续 volatile/final 的尾部补全再翻译，而不是全局延迟端点。
@@ -212,18 +214,18 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P1-3. ASR 精度选项（在延迟预算内）**
 
+- **状态（2026-11-26）**：未开始。等 P1-4b 的同一段夹具与诊断数据，先做 `.fastResults` 去留 A/B；`AnalysisContext.contextualStrings` 与 `transcriptionConfidence` 只作为诊断/候选，不因低置信度丢 final。改 ASR 选项前先确认 P1-4b 的源文覆盖、重复 final 与 final 延迟基线。
 - A/B 去掉 `.fastResults`（保留 `.volatileResults`）；用 `AnalysisContext.contextualStrings` 提示人名/术语；`transcriptionConfidence` 只做诊断，不因低置信度丢 final。`.etiquetteReplacements` 是否保留按“逐字保真”产品口径决定。
 - 现实上限：本次 ASR 错误多是合法词替换（`shared→Sheer`、`past→pastor`），这些不会被 contextual strings 或更慢的 ASR 稳定修复，需要上下文修复（P2-1）或翻译模型本身带上下文。
 
 **P1-1. Range-aware ASR 组装**
 
-- 把 `SpeechTranscriber.Result` 建模为 `(text, range, isFinal, resultsFinalizationTime)`，保留 finalized-prefix buffer；用 range 连续性与标点决定 utterance 边界，不再用文本前缀相似度；空 volatile 文本视为撤销。
-- 静音时调用 `analyzer.finalize(through: nil)`，让转写器发布该 range 的 final；合成 final 只做超时兜底并标记 `synthetic`，迟到的同 range final 复用 ID。
+- **状态（2026-11-26，已实现于 PR #84 / merge `1cc8df6`，待真机）**：`UtteranceAssembler` 新增 range-aware `ingest`：每个 `SpeechTranscriber.Result` 以 `(text, range, isFinal)` 进入；当前行 = 已 final 的 phrase 前缀 + 开放 range 的 volatile 尾部，range 连续性决定“续上一条”，句末标点（`.?!。？！`）决定换行；range 间隔 >0.75 s（volatile 或 final）也开新行。空 volatile 撤销开放尾部：有 final 前缀时回退并发 final revision（投影才能覆盖已 settled 行）；无前缀时无法清空旧行，记录为已知限制。`range`/`resultsFinalizationTime` 只在引擎消费处读取并写诊断，文本启发式路径仅为无 range 的兼容/测试保留。静音时引擎先 `analyzer.finalize(through: nil)` 并等待 350 ms，转写器自己的 final 优先；超时才合成 final 并标 synthetic。合成/迟到 final 按 range 重叠匹配最近关闭的行（最多 8 行，不设时间窗）并复用 `Utterance.id`（`isRevision`）；迟到 final 的文本始终权威，即使比合成猜测短。D8 不变：ID 仍由 assembler 独占；dual-locale 的脚本纯度、抢占、crosstalk hold 与 greeting name-swap 保持（name-swap 不登记为可修订 range）。final 去重签名加入 utterance ID，同一句在新行重复时不会被丢弃。单测覆盖 volatile 增长、连续 final 合并、标点换行、空 volatile 撤销、静音后迟到 final 复用/覆盖更短、range 间隔、中英拼接空格、strict 串音与 name swap；真机未验证。
 - 这是比 P0-2b 更彻底的方案，但改动共享 assembler（Conversation/Meeting 也用），必须保持 D8 与现有 crosstalk 行为。
 
 **P1-4. 诊断与 TED 离线夹具**
 
-- 每任务内存 ring buffer（可 DEBUG 导出 JSON，不上传）：ASR 的 utterance/range/isFinal/`resultsFinalizationTime`/text 长度/是否合成/脚本不匹配；翻译的 job/utterance/sequence/isFinal/源目标长度/策略/`Response` 语言/提交到应用延迟/重试/失败类/U+FFFD 数；聚合 settled 数、final job 数、final 应用数、永久失败数、被拒损坏数。
+- **状态（2026-11-26，P1-4a 已实现于 PR #84 / merge `1cc8df6`，P1-4b 未完成）**：`DiagnosticsRecorder`（Services）提供每任务有界 ring buffer（默认 4096 事件）+ 增量聚合 + DEBUG JSON 导出；`TaskLifecycle` 在任务开始/恢复/结束时 begin/end 会话，结束后的迟到事件仍写入最近任务；同一活动任务重复 bootstrap/restore 不重置缓冲。ASR 事件在 `BilingualSpeechEngine` 消费 `SpeechTranscriber.Result` 处记录 language、`range.start/duration`、`resultsFinalizationTime`、text 长度、isFinal、synthetic、脚本不匹配、accepted/published、utterance/revision；合成 final 标 synthetic。翻译事件由 `TranslationPipeline` 记录 submit（含 sequence/isFinal/源目标/长度/策略/text hash）与 apply（applied/原因/U+FFFD/提交→应用延迟），`TranslationJobPump` 记录 Response 语言、translated 长度、U+FFFD、重试次数与失败类；聚合 settled 数、final job 数、final 应用数、永久失败数、被拒损坏数。JSON 只含 ID/长度/语言/时间/失败类/版本元数据，不含正文；设置页 `#if DEBUG` 的「导出诊断 JSON」写入 Documents 并走 ShareLink，不上传。单测覆盖计数、ring 淘汰、会话保留、语言字段、延迟、拒收原因与 JSON。**P1-4b 未执行**：真机已安装 Debug 构建并成功创建任务，但设备麦克风持续收到房间人声（回放前即出现无关英文行），会污染夹具指标；已暂停听写并保留任务，环境静音后需重新新建任务回放。手动步骤：① Mac 生成 13 分钟 TTS 夹具（cue 132–331，195 句，110 个 ≥1.1 s 间隔）并通过扬声器回放；② iPhone 13 同传英→中新建任务开始聆听，整段回放后结束任务；③ 设置 → 导出诊断 JSON，`devicectl` 拷出；④ 用诊断事件统计重复 final、settled/final 应用、U+FFFD 与 final 延迟，并与 `/tmp/simultaneous-comparison.md` 对照。
 - 用同一段 TED 音频（或可授权夹具）回放真机 → 导出 → 跑本次的对齐脚本；指标见 §5。**这是把上面所有假设变成证据的唯一办法。**
 
 **P1-5. `.highFidelity` 翻译评估（需决策）**
@@ -235,12 +237,15 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P0-1. final 交付无损（队列 + ledger）**
 
-- 用有界有序 outbound 队列 + 每 utterance 防抖替代单槽；final 永不被 preview 取消；`TranslationJob` 加单调 `sequence`，`accept` 只拒绝更旧 sequence，并记录已应用 job ID 防重复。
+- **状态（2026-11-26）**：已实现于 PR #79。`TranslationPipeline` 的单槽 `outboundJob` 改为有界有序 outbound 队列（同句最多一条、替换保留首位、final 不被迟到 preview 取代、preview 积压上限 64 且 final 不丢）；防抖按 `utteranceID` 独立；`TranslationJob` 加单调 `sequence`，`accept` 拒绝同句更旧 sequence、按 job ID 去重；`outboundRevision` + `takeNextOutboundJob()` 让 Host 每次渲染后 drain 到空。Bridge/pump 未改；final 对 preview 的权威规则不变。单测覆盖连续 final 双到达、跨句防抖互不取消、final 不被 preview 取代、旧 sequence 拒绝、重复结果拒绝、preview 上限；真机/真翻译验收**未执行**（需要 burst 说话与设备声学环境；待用户确认后执行）。真机手动步骤：iPhone 13 上连续快速说两句、在两句话之间**暂停**（Host 仍在），确认两句 final 译文都出现且不重复；结束任务时的在途译文回填归 P0-6，本票不承诺。再观察长会话 p95（当前无诊断数据，归 P1-4）。
+- 实现要点：用有界有序 outbound 队列 + 每 utterance 防抖替代单槽；final 永不被 preview 取消；`TranslationJob` 加单调 `sequence`，`accept` 只拒绝更旧 sequence，并记录已应用 job ID 防重复。
 - Bridge/pump 保持现状（它的 per-utterance 合并/final 优先是对的），只保证更多 job 能到达它。
 - 这会修改 `Duiyi/Features/AGENTS.md` §3 与 `docs/02-architecture.md` §5.3 的“单槽”不变量，需要显式改文档。
 
 **P0-4. 停止时 finalize，结束任务前 drain**
 
+- **状态（2026-11-26）**：已实现于 PR #78。`stop()` 先停采集/输入，调用 `finalizeAndFinishThroughEndOfInput()`（1 s 上限），给消费者 300 ms 收 final，再用 `silenceTimedOut()` 做兜底；`resetPipelineKeepingStream`/`restartSingle` 走同样的 finalize；三个 VM 在 `endTask`/`stop`/`beginTask` 前 await `speechTask`（500 ms 上限），不再先 cancel consumer。单测覆盖 end/stop/新建任务三条路径；真机验收**未执行**（设备已连接，但需人工声学/暂停时序，且设备上可能有未结束任务；待用户确认后执行）。本票只保证 ASR final 进入快照；在途翻译的回填仍归 P0-6。
+- **真机手动步骤（待设备）**：iPhone 13 上在同传/面对面/会议各说一句，在 final 到达前点暂停、结束或新建任务；断言最后一句进入文字稿/历史/导出且不重复；再验证暂停后继续不丢行。无法操作设备时记录原因并保留单测证据。
 - `stop()`：先停采集/输入，`inputContinuation.finish()`，`analyzer.finalizeAndFinishThroughEndOfInput()`（或 `finalize(through:)` 再 finish），给消费者有限窗口（300–500 ms）收 final，再取消剩余任务；不要先取消消费者。
 - 结束任务：在 `endTask` 前等待在途 final（有界超时），或让迟到的 final 通过 `TaskStoreV2.updateTranslations` 回填已结束任务；不要在 final 在途时 `resetCaptions()`。
 
@@ -254,6 +259,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P0-6. 翻译失败重试与可见状态**
 
+- **状态（2026-11-26，已按用户确认拆成两半）**：**P0-6a（PR #81）** 已实现结束竞态回填：`TaskLifecycle.endTask` 与 `prepareForNewTask` 都保留最近一个已结束任务的快照；结束/新建任务/重置后到达的 final 译文通过 `TaskStoreV2.updateTranslations` 回填（preview 不落库，损坏文本拒绝），`fulfill` 不再因为 projection 已 reset 而静默丢掉 final 译文。结束写入在途时到达的 final 由 `LateTranslationBackfill` 先暂存，写入返回后回填，避免快照与 projection 之间的竞态。单测覆盖迟到 final 回填、迟到/在途 preview 不回填、结束写入在途 final、新建任务结束路径、损坏文本、未知条目与只回填最近结束任务；真机未验证，手动步骤：说一句后立即结束任务，确认历史/导出中该行有译文且不重复。**P0-6b（未开始）**：重试分类（取消/资源未就绪/不支持语言对/瞬时错误）与 `permanentFailure` 可见状态，等 P1-4 诊断/设备数据后再做，避免在没有错误分布数据时猜 UI 与重试预算。
 - 区分取消（不算失败）、语言包/下载/未就绪（提示并保留 job）、不支持语言对（不无限重试）、瞬时错误（2 次短退避）；耗尽后进入 `permanentFailure`，在 UI/文字稿可查，不静默丢。
 
 ### 实验（P2）
@@ -266,7 +272,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 ## 5. 验证与指标
 
-- 单测：final-wins（pipeline + projection source/translation）、迟到 volatile 不降级、重复 final 合并/非重叠不合并、U+FFFD 拒绝/重试/永久失败、单语种 trusted locale、结束任务 drain/回填。
+- 单测：final-wins（pipeline + projection source/translation）、迟到 volatile 不降级、重复 final 合并/非重叠不合并、U+FFFD 拒绝/重试/永久失败、单语种 trusted locale、结束任务 drain、结束任务后迟到 final 回填/迟到 preview 不回填、连续 final 双到达、跨句防抖互不取消、旧 sequence 与重复结果拒绝、preview 积压上限、preview 三态门控（立即/防抖/丢弃）。
 - UI/真机：现有套件保持全绿；新增“回放固定音频 → 导出 → 对齐”的设备验证记录；语音/翻译最终验收按仓库规则写“未验证”或真机结果。
 - TED 夹具指标（同一段音频，改动前后对比）：
 
@@ -328,7 +334,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 - **U+FFFD 产生层未证实**：代码审计排除 App 自产；Translation 结果、ASR 结果或流式边界仍待打点区分。
 - **重复 final 率**：5.7% 是这一次 13 分钟窗口；其他语速/端点行为需设备日志统计。
-- **SwiftUI `.onChange` 合并**：单槽丢 job 是代码事实；被 SwiftUI 合并放大的频率是假设，需要 burst 测试。
+- **SwiftUI `.onChange` 合并**：单槽丢 job 曾是代码事实；P0-1 已改为 `outboundRevision` + drain 队列覆盖该路径，实际 burst 频率仍无设备诊断（P1-4）。
 - **短片段翻译质量**：Apple 没有最短长度/质量承诺；本次 34.1% fragmentation 是强证据，但不是受控 A/B。
 - **`.highFidelity`/Foundation Models 质量**：无 Apple 质量基准；iPhone 13 不可用；需真机 A/B，且 D6 需改。
 - **单次基线**：25.1%、5.7%、99.12% 只作为回归基线，不是总体估计；延迟 p95 仍无数据。

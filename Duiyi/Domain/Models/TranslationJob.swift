@@ -7,6 +7,10 @@ struct TranslationJob: Equatable, Sendable, Identifiable {
     let target: AppLanguage
     let text: String
     let isFinal: Bool
+    /// Monotonic submission order assigned by `TranslationPipeline`. Jobs built
+    /// outside the pipeline (history detail, test fixtures) use 0 and are
+    /// exempt from the stale-sequence check.
+    let sequence: Int
 
     init(
         id: UUID = UUID(),
@@ -14,7 +18,8 @@ struct TranslationJob: Equatable, Sendable, Identifiable {
         source: AppLanguage,
         target: AppLanguage,
         text: String,
-        isFinal: Bool
+        isFinal: Bool,
+        sequence: Int = 0
     ) {
         self.id = id
         self.utteranceID = utteranceID
@@ -22,5 +27,6 @@ struct TranslationJob: Equatable, Sendable, Identifiable {
         self.target = target
         self.text = text
         self.isFinal = isFinal
+        self.sequence = sequence
     }
 }

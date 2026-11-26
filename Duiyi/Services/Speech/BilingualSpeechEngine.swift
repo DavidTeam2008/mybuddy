@@ -1,9 +1,11 @@
 import AVFAudio
+import CoreMedia
 import Foundation
 import Speech
 
 actor BilingualSpeechEngine: SpeechRecognizing {
     private let capturer: AudioCapturing
+    private let diagnostics: any DiagnosticsRecording
     private var assembler = UtteranceAssembler()
     private var utteranceContinuation: AsyncStream<Utterance>.Continuation?
     private var analyzer: SpeechAnalyzer?
@@ -16,14 +18,25 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     private var ignoreTranscriptionUntil: Date = .distantPast
     private var converter = BufferConverter()
     private var analyzerFormat: AVAudioFormat?
+    private var stopDepth = 0
+    private var isStopping: Bool { stopDepth > 0 }
     private var usingDual = true
+    private static let stopDrain: Duration = .milliseconds(300)
+    private static let finalizeTimeout: Duration = .seconds(1)
+    /// How long a silence boundary waits for the transcriber's own final after
+    /// `finalize(through: nil)` before synthesizing one.
+    private static let silenceFinalizeWindow: Duration = .milliseconds(350)
     private var pairLanguages: [AppLanguage] = [.zhHans, .english]
     private var requestedLanguageCount = 0
     private var singleLanguage: AppLanguage = .english
     private var style: SpeechRecognitionStyle = .liveCaptions
 
-    init(capturer: AudioCapturing = AudioEngineCapturer()) {
+    init(
+        capturer: AudioCapturing = AudioEngineCapturer(),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
+    ) {
         self.capturer = capturer
+        self.diagnostics = diagnostics
     }
 
     func start(
@@ -58,21 +71,23 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     func stop() async {
+        stopDepth += 1
+        defer { stopDepth -= 1 }
+
         silenceTask?.cancel()
         silenceTask = nil
         audioTask?.cancel()
         audioTask = nil
+        await capturer.stop()
+        inputContinuation?.finish()
+        inputContinuation = nil
+
+        await finalizeOpenRange()
+
         for task in consumeTasks {
             task.cancel()
         }
         consumeTasks.removeAll()
-        inputContinuation?.finish()
-        inputContinuation = nil
-        await capturer.stop()
-        if let analyzer {
-            await analyzer.cancelAndFinishNow()
-        }
-        analyzer = nil
         converter = BufferConverter()
         utteranceContinuation?.finish()
         utteranceContinuation = nil
@@ -80,6 +95,42 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             _ = await AssetInventory.release(reservedLocale: locale)
         }
         reservedLocales.removeAll()
+    }
+
+    /// Let the analyzer publish the final for the open range, then give the
+    /// transcriber consumers a bounded window to deliver it. A synthetic final
+    /// covers a framework that returns no final at all.
+    private func finalizeOpenRange() async {
+        guard let analyzer else { return }
+        let finalized = await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                do {
+                    try await analyzer.finalizeAndFinishThroughEndOfInput()
+                    return true
+                } catch {
+                    DuiyiLog.speech.error(
+                        "Analyzer finalize failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                    return false
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: Self.finalizeTimeout)
+                return false
+            }
+            let result = await group.next() ?? false
+            group.cancelAll()
+            return result
+        }
+        if !finalized {
+            DuiyiLog.speech.error("Analyzer finalize failed or timed out")
+            await analyzer.cancelAndFinishNow()
+        }
+        self.analyzer = nil
+        try? await Task.sleep(for: Self.stopDrain)
+        if let utterance = assembler.silenceTimedOut() {
+            publishSynthetic(utterance)
+        }
     }
 
     private func startBestPipeline(languages: [AppLanguage], fallback: AppLanguage) async throws {
@@ -122,21 +173,21 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private func resetPipelineKeepingStream() async {
+        stopDepth += 1
+        defer { stopDepth -= 1 }
+
         silenceTask?.cancel()
         silenceTask = nil
         audioTask?.cancel()
         audioTask = nil
+        await capturer.stop()
+        inputContinuation?.finish()
+        inputContinuation = nil
+        await finalizeOpenRange()
         for task in consumeTasks {
             task.cancel()
         }
         consumeTasks.removeAll()
-        inputContinuation?.finish()
-        inputContinuation = nil
-        await capturer.stop()
-        if let analyzer {
-            await analyzer.cancelAndFinishNow()
-        }
-        analyzer = nil
         converter = BufferConverter()
         for locale in reservedLocales {
             _ = await AssetInventory.release(reservedLocale: locale)
@@ -250,7 +301,10 @@ actor BilingualSpeechEngine: SpeechRecognizing {
                         await self?.handleTranscription(
                             language: language,
                             text: text,
-                            isFinal: result.isFinal
+                            isFinal: result.isFinal,
+                            rangeStart: Self.seconds(result.range.start),
+                            rangeDuration: Self.seconds(result.range.duration),
+                            resultsFinalizationTime: Self.seconds(result.resultsFinalizationTime)
                         )
                     }
                 } catch is CancellationError {
@@ -279,19 +333,112 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         )
     }
 
-    private func handleTranscription(language: AppLanguage, text: String, isFinal: Bool) {
+    private func handleTranscription(
+        language: AppLanguage,
+        text: String,
+        isFinal: Bool,
+        rangeStart: Double?,
+        rangeDuration: Double?,
+        resultsFinalizationTime: Double?
+    ) {
         if Date() < ignoreTranscriptionUntil {
             return
         }
-        guard let utterance = assembler.ingest(language: language, text: text, isFinal: isFinal) else {
+        let scriptMismatch = UtteranceAssembler.isScriptMismatch(text, claimed: language)
+        let range = SpeechRange(rangeStart: rangeStart, rangeDuration: rangeDuration)
+        guard let utterance = assembler.ingest(
+            language: language,
+            text: text,
+            isFinal: isFinal,
+            range: range
+        ) else {
+            recordASR(
+                language: language,
+                textLength: text.count,
+                isFinal: isFinal,
+                synthetic: false,
+                scriptMismatch: scriptMismatch,
+                accepted: false,
+                published: false,
+                utterance: nil,
+                rangeStart: rangeStart,
+                rangeDuration: rangeDuration,
+                resultsFinalizationTime: resultsFinalizationTime
+            )
             return
         }
-        publish(utterance)
+        let published = publish(utterance)
+        recordASR(
+            language: language,
+            textLength: text.count,
+            isFinal: isFinal,
+            synthetic: false,
+            scriptMismatch: scriptMismatch,
+            accepted: true,
+            published: published,
+            utterance: utterance,
+            rangeStart: rangeStart,
+            rangeDuration: rangeDuration,
+            resultsFinalizationTime: resultsFinalizationTime
+        )
         if Self.shouldAcknowledgeFinal(utterance) {
             assembler.acknowledgeFinal(language: utterance.language)
             scheduleSingleLocaleSwitchIfNeeded(to: utterance.language)
         }
         pingSilenceTimer()
+    }
+
+    private var styleName: String {
+        style == .meetingNotes ? "meetingNotes" : "liveCaptions"
+    }
+
+    private func publishSynthetic(_ utterance: Utterance) {
+        let published = publish(utterance)
+        recordASR(
+            language: utterance.language,
+            textLength: utterance.text.count,
+            isFinal: true,
+            synthetic: true,
+            scriptMismatch: false,
+            accepted: true,
+            published: published,
+            utterance: utterance,
+            rangeStart: nil,
+            rangeDuration: nil,
+            resultsFinalizationTime: nil
+        )
+    }
+
+    private func recordASR(
+        language: AppLanguage,
+        textLength: Int,
+        isFinal: Bool,
+        synthetic: Bool,
+        scriptMismatch: Bool,
+        accepted: Bool,
+        published: Bool,
+        utterance: Utterance?,
+        rangeStart: Double?,
+        rangeDuration: Double?,
+        resultsFinalizationTime: Double?
+    ) {
+        diagnostics.record(
+            ASRDiagnosticsRecord(
+                language: language,
+                textLength: textLength,
+                isFinal: isFinal,
+                synthetic: synthetic,
+                scriptMismatch: scriptMismatch,
+                accepted: accepted,
+                published: published,
+                utteranceID: utterance?.id,
+                revision: utterance?.isRevision ?? false,
+                rangeStartSeconds: rangeStart,
+                rangeDurationSeconds: rangeDuration,
+                resultsFinalizationTimeSeconds: resultsFinalizationTime,
+                style: styleName
+            )
+        )
     }
 
     /// A revision updates an utterance that was already closed; it is not the
@@ -311,6 +458,7 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private func pingSilenceTimer() {
+        guard !isStopping else { return }
         silenceTask?.cancel()
         silenceTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(ConversationLayout.silenceCommitMilliseconds))
@@ -319,21 +467,39 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         }
     }
 
-    private func finalizeFromSilence() {
+    private func finalizeFromSilence() async {
+        guard !isStopping, assembler.hasOpenRange else { return }
+        // Ask the analyzer to finalize the open range. The transcriber's own
+        // final is preferred; the synthetic final below is only a timeout
+        // fallback. `finalize(through: nil)` finalizes everything received so
+        // far while analysis continues.
+        if let analyzer {
+            do {
+                try await analyzer.finalize(through: nil)
+            } catch {
+                DuiyiLog.speech.error(
+                    "Analyzer finalize on silence failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+            try? await Task.sleep(for: Self.silenceFinalizeWindow)
+            guard !Task.isCancelled, !isStopping else { return }
+        }
         guard let utterance = assembler.silenceTimedOut() else { return }
-        publish(utterance)
+        publishSynthetic(utterance)
         scheduleSingleLocaleSwitchIfNeeded(to: utterance.language)
     }
 
-    private func publish(_ utterance: Utterance) {
+    @discardableResult
+    private func publish(_ utterance: Utterance) -> Bool {
         if utterance.isFinal {
             let signature = Self.signature(utterance)
             if signature == lastFinalSignature {
-                return
+                return false
             }
             lastFinalSignature = signature
         }
         utteranceContinuation?.yield(utterance)
+        return true
     }
 
     private func fail() {
@@ -341,18 +507,21 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private func scheduleSingleLocaleSwitchIfNeeded(to language: AppLanguage) {
-        guard !usingDual, language != singleLanguage else { return }
+        guard !isStopping, !usingDual, language != singleLanguage else { return }
         Task { [weak self] in
             await self?.restartSingle(language: language)
         }
     }
 
     private func restartSingle(language: AppLanguage) async {
+        guard !isStopping else { return }
         DuiyiLog.speech.info("Switching single transcriber to \(language.rawValue, privacy: .public)")
         await resetPipelineKeepingStream()
+        guard !isStopping else { return }
         assembler.reset()
         do {
             try await startSinglePipeline(language: language)
+            guard !isStopping else { return }
             usingDual = false
         } catch {
             DuiyiLog.speech.error("Single locale restart failed: \(error.localizedDescription, privacy: .public)")
@@ -390,9 +559,18 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         )
     }
 
+    /// CMTime may be indefinite or invalid; only finite seconds are recorded.
+    private static func seconds(_ time: CMTime) -> Double? {
+        guard time.isNumeric else { return nil }
+        let value = time.seconds
+        return value.isFinite ? value : nil
+    }
+
     private static func signature(_ utterance: Utterance) -> String {
+        // Include the row id: an identical sentence repeated in a new row must
+        // not be dropped, while duplicate finals for the same row still are.
         let filtered = utterance.text.lowercased().filter { $0.isLetter || $0.isNumber || $0.isWhitespace }
-        return "\(utterance.language.rawValue)-\(filtered)"
+        return "\(utterance.id.uuidString)-\(utterance.language.rawValue)-\(filtered)"
     }
 
     static func normalizedLanguages(languages: [AppLanguage], fallback: AppLanguage) -> [AppLanguage] {

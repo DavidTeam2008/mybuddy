@@ -65,24 +65,48 @@ final class TaskTranslationScheduler: TranslationScheduler {
 
 /// Shared translation job lifecycle for the two live translation modules.
 ///
-/// It owns job formation, debounce cancellation, duplicate suppression, the
-/// single outbound job slot, the stale-result table, and utterance aliases.
+/// It owns job formation, per-utterance debounce, duplicate suppression, the
+/// ordered outbound queue, and the stale-result tables.
 /// Features keep language routing, pane/transcript projection, and TTS.
 @MainActor
 @Observable
 final class TranslationPipeline {
     private let scheduler: any TranslationScheduler
-    private(set) var outboundJob: TranslationJob?
-    private var scheduled: (any TranslationScheduledTask)?
+    private let diagnostics: any DiagnosticsRecording
+    private var outboundQueue: [TranslationJob] = []
+    /// Bumps whenever a job is handed to the outbound queue. Hosts observe it
+    /// and drain `takeNextOutboundJob()`; a plain "latest job" value would let
+    /// SwiftUI coalesce two jobs into one render and lose the first.
+    private(set) var outboundRevision = 0
+    /// The newest job that has not been drained yet. Tests read it as the
+    /// current slot; live hosts drain the queue instead.
+    var outboundJob: TranslationJob? { outboundQueue.last }
+    /// One debounce per utterance: a new line must not cancel another line's
+    /// pending preview, and a final cancels only its own line's preview.
+    private var scheduled: [UUID: any TranslationScheduledTask] = [:]
     private var sentSourceText: [UUID: String] = [:]
     private var lastAppliedSourceCount: [UUID: Int] = [:]
+    private var lastAppliedSequence: [UUID: Int] = [:]
+    private var appliedJobIDs: Set<UUID> = []
+    private var appliedJobIDOrder: [UUID] = []
+    private var nextSequence = 0
 
-    init() {
+    /// Preview backlog cap. Finals are never evicted; the queue can only grow
+    /// past this while it holds nothing but finals, which the host drains.
+    static let outboundQueueLimit = 64
+    static let appliedJobIDLimit = 256
+
+    init(diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()) {
         self.scheduler = TaskTranslationScheduler()
+        self.diagnostics = diagnostics
     }
 
-    init(scheduler: any TranslationScheduler) {
+    init(
+        scheduler: any TranslationScheduler,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
+    ) {
         self.scheduler = scheduler
+        self.diagnostics = diagnostics
     }
 
     func submit(_ submission: TranslationSubmission) {
@@ -92,79 +116,188 @@ final class TranslationPipeline {
             return
         }
 
+        nextSequence += 1
         let job = TranslationJob(
             utteranceID: submission.line.id,
             source: submission.line.source,
             target: submission.target,
             text: text,
-            isFinal: submission.isFinal
+            isFinal: submission.isFinal,
+            sequence: nextSequence
         )
-        let isFirst = sentSourceText[submission.line.id] == nil
-        let shouldSendNow = submission.isFinal
-            || TranslationTrigger.shouldSendNow(
-                text: text,
-                isFirst: isFirst,
-                language: submission.line.source
-            )
-
-        scheduled?.cancel()
-        scheduled = nil
-        if shouldSendNow {
-            sentSourceText[submission.line.id] = text
-            outboundJob = job
-            return
-        }
-
-        let delay = isFirst ? submission.firstDelay : submission.subsequentDelay
         let lineID = submission.line.id
-        scheduled = scheduler.schedule(after: delay) { [weak self] in
-            guard let self else { return }
-            self.scheduled = nil
-            self.sentSourceText[lineID] = text
-            self.outboundJob = job
+        let isFirst = sentSourceText[lineID] == nil
+        let action: TranslationTrigger.Action = submission.isFinal
+            ? .sendNow
+            : TranslationTrigger.action(for: text, language: submission.line.source)
+
+        scheduled[lineID]?.cancel()
+        scheduled[lineID] = nil
+        switch action {
+        case .drop:
+            // A too-short preview never forms a job; the next volatile or the
+            // final will carry the line.
+            return
+        case .sendNow:
+            recordSubmit(job)
+            commit(job, text: text, lineID: lineID)
+        case .debounce:
+            recordSubmit(job)
+            let delay = isFirst ? submission.firstDelay : submission.subsequentDelay
+            scheduled[lineID] = scheduler.schedule(after: delay) { [weak self] in
+                guard let self else { return }
+                self.scheduled[lineID] = nil
+                self.commit(job, text: text, lineID: lineID)
+            }
         }
     }
 
-    /// Applies the result to the job's utterance. Empty or stale preview text
-    /// returns `nil` without touching the outbound slot; a final is always
-    /// applied, even when its source is shorter than an earlier preview. An
-    /// accepted result clears the slot only when it belongs to the matching
-    /// job.
+    private func recordSubmit(_ job: TranslationJob) {
+        diagnostics.recordSubmit(
+            TranslationSubmitRecord(
+                jobID: job.id,
+                utteranceID: job.utteranceID,
+                sequence: job.sequence,
+                isFinal: job.isFinal,
+                source: job.source,
+                target: job.target,
+                sourceLength: job.text.count,
+                strategy: "lowLatency",
+                sourceHash: DiagnosticsHash.fnv1a(job.text)
+            )
+        )
+    }
+
+    private func commit(_ job: TranslationJob, text: String, lineID: UUID) {
+        sentSourceText[lineID] = text
+        enqueue(job)
+    }
+
+    /// Hands the oldest queued job to the host and removes it from the queue.
+    /// Jobs are dequeued in enqueue order; a newer job for the same utterance
+    /// replaces the older one in place.
+    func takeNextOutboundJob() -> TranslationJob? {
+        guard !outboundQueue.isEmpty else { return nil }
+        return outboundQueue.removeFirst()
+    }
+
+    private func enqueue(_ job: TranslationJob) {
+        if let index = outboundQueue.firstIndex(where: { $0.utteranceID == job.utteranceID }) {
+            let queued = outboundQueue[index]
+            // A final already waiting for the host is never cancelled by a
+            // preview that fired late; a newer final still replaces it.
+            guard !queued.isFinal || job.isFinal else { return }
+            outboundQueue[index] = job
+        } else {
+            outboundQueue.append(job)
+        }
+        trimPreviewBacklog()
+        outboundRevision += 1
+    }
+
+    private func trimPreviewBacklog() {
+        while outboundQueue.count > Self.outboundQueueLimit,
+              let index = outboundQueue.firstIndex(where: { !$0.isFinal }) {
+            outboundQueue.remove(at: index)
+        }
+    }
+
+    private func removeQueuedJob(id: UUID) {
+        outboundQueue.removeAll { $0.id == id }
+    }
+
+    /// Applies the result to the job's utterance. Empty, duplicated, or stale
+    /// results return `nil`; a final is always applied, even when its source is
+    /// shorter than an earlier preview. Staleness is by monotonic sequence for
+    /// pipeline jobs (a result must be newer than the last applied one) and by
+    /// source length for previews, so a late result can neither overwrite a
+    /// newer job nor be replayed twice.
     func accept(job: TranslationJob, text: String) -> TranslationUpdate? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+        guard !trimmed.isEmpty else {
+            recordApply(job, text: trimmed, applied: false, reason: "empty")
+            return nil
+        }
+        guard !appliedJobIDs.contains(job.id) else {
+            recordApply(job, text: trimmed, applied: false, reason: "duplicate")
+            return nil
+        }
 
         let utteranceID = job.utteranceID
+        if job.sequence > 0,
+           let appliedSequence = lastAppliedSequence[utteranceID],
+           job.sequence <= appliedSequence {
+            recordApply(job, text: trimmed, applied: false, reason: "staleSequence")
+            return nil
+        }
         if let applied = lastAppliedSourceCount[utteranceID],
            !job.isFinal,
            applied > job.text.count {
+            recordApply(job, text: trimmed, applied: false, reason: "shorterPreview")
             return nil
         }
         lastAppliedSourceCount[utteranceID] = max(
             lastAppliedSourceCount[utteranceID] ?? 0,
             job.text.count
         )
-        if outboundJob?.id == job.id {
-            outboundJob = nil
+        if job.sequence > 0 {
+            lastAppliedSequence[utteranceID] = max(
+                lastAppliedSequence[utteranceID] ?? 0,
+                job.sequence
+            )
         }
+        rememberApplied(job.id)
+        removeQueuedJob(id: job.id)
+        recordApply(job, text: trimmed, applied: true, reason: nil)
         return TranslationUpdate(job: job, utteranceID: utteranceID, translatedText: trimmed)
     }
 
-    /// A failed job only clears the outbound slot when it is still the current
-    /// job, so a late failure cannot drop a newer job.
-    func fail(job: TranslationJob) {
-        if outboundJob?.id == job.id {
-            outboundJob = nil
+    private func recordApply(
+        _ job: TranslationJob,
+        text: String,
+        applied: Bool,
+        reason: String?
+    ) {
+        diagnostics.recordApply(
+            TranslationApplyRecord(
+                jobID: job.id,
+                utteranceID: job.utteranceID,
+                sequence: job.sequence,
+                isFinal: job.isFinal,
+                applied: applied,
+                reason: reason,
+                translatedLength: text.count,
+                replacementCharacterCount: TextIntegrity.replacementCharacterCount(text)
+            )
+        )
+    }
+
+    private func rememberApplied(_ id: UUID) {
+        appliedJobIDs.insert(id)
+        appliedJobIDOrder.append(id)
+        if appliedJobIDOrder.count > Self.appliedJobIDLimit {
+            appliedJobIDs.remove(appliedJobIDOrder.removeFirst())
         }
+    }
+
+    /// A failed job is removed from the queue only if it has not been drained
+    /// yet; a late failure cannot drop a newer job.
+    func fail(job: TranslationJob) {
+        removeQueuedJob(id: job.id)
     }
 
     /// Full translation reset for a new task, an ended task, or a language or
     /// direction change.
     func reset() {
-        scheduled?.cancel()
-        scheduled = nil
-        outboundJob = nil
+        for task in scheduled.values {
+            task.cancel()
+        }
+        scheduled.removeAll()
+        outboundQueue.removeAll()
         sentSourceText.removeAll()
         lastAppliedSourceCount.removeAll()
+        lastAppliedSequence.removeAll()
+        appliedJobIDs.removeAll()
+        appliedJobIDOrder.removeAll()
     }
 }

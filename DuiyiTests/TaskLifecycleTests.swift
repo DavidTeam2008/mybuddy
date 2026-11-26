@@ -359,6 +359,131 @@ struct TaskLifecycleTests {
         #expect(lifecycle.sessionState == .ready)
     }
 
+    @Test("A translation that arrives after the task ends is backfilled into the ended task")
+    func lateTranslationBackfillsEndedTask() async throws {
+        let log = LifecycleEventLog()
+        let store = LifecycleFakeStore(log: log)
+        let gate = LifecycleFakeGate(log: log)
+        let lifecycle = makeLifecycle(store: store, gate: gate)
+        _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
+        let entry = makeEntry("六点见")
+        lifecycle.persist([entry])
+        let outcome = await lifecycle.endTask(transcript: [entry], summary: nil)
+        guard case let .ended(session) = outcome else {
+            Issue.record("Expected ended, got \(outcome)")
+            return
+        }
+
+        let didBackfill = await lifecycle.backfillTranslation(
+            entryID: entry.id,
+            text: "See you at six."
+        )
+
+        #expect(didBackfill)
+        #expect(
+            await store.base.task(id: session.id)?.entries.first?.translatedText
+                == "See you at six."
+        )
+    }
+
+    @Test("A task ended by the new-task flow can still receive a late translation")
+    func lateTranslationBackfillsTaskEndedByPrepareForNewTask() async throws {
+        let log = LifecycleEventLog()
+        let store = LifecycleFakeStore(log: log)
+        let gate = LifecycleFakeGate(log: log)
+        let lifecycle = makeLifecycle(store: store, gate: gate)
+        _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
+        let entry = makeEntry("旧任务最后一句")
+        lifecycle.persist([entry])
+
+        let outcome = await lifecycle.prepareForNewTask()
+        #expect(outcome == .ready)
+        let didBackfill = await lifecycle.backfillTranslation(
+            entryID: entry.id,
+            text: "The old last line."
+        )
+
+        #expect(didBackfill)
+        let ended = await store.base.list(filter: .meeting)
+        #expect(ended.first?.entries.first?.translatedText == "The old last line.")
+    }
+
+    @Test("A corrupted late translation is rejected")
+    func corruptedLateTranslationIsRejected() async throws {
+        let log = LifecycleEventLog()
+        let store = LifecycleFakeStore(log: log)
+        let gate = LifecycleFakeGate(log: log)
+        let lifecycle = makeLifecycle(store: store, gate: gate)
+        _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
+        let entry = makeEntry("六点见")
+        lifecycle.persist([entry])
+        let outcome = await lifecycle.endTask(transcript: [entry], summary: nil)
+        guard case let .ended(session) = outcome else {
+            Issue.record("Expected ended, got \(outcome)")
+            return
+        }
+
+        let didBackfill = await lifecycle.backfillTranslation(
+            entryID: entry.id,
+            text: "坏\u{FFFD}字"
+        )
+
+        #expect(!didBackfill)
+        #expect(await store.base.task(id: session.id)?.entries.first?.translatedText == "")
+    }
+
+    @Test("A late translation for an unknown entry is ignored")
+    func lateTranslationUnknownEntryIsIgnored() async throws {
+        let log = LifecycleEventLog()
+        let store = LifecycleFakeStore(log: log)
+        let gate = LifecycleFakeGate(log: log)
+        let lifecycle = makeLifecycle(store: store, gate: gate)
+        _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
+        let entry = makeEntry("六点见")
+        lifecycle.persist([entry])
+        let outcome = await lifecycle.endTask(transcript: [entry], summary: nil)
+        guard case let .ended(session) = outcome else {
+            Issue.record("Expected ended, got \(outcome)")
+            return
+        }
+
+        let didBackfill = await lifecycle.backfillTranslation(
+            entryID: UUID(),
+            text: "Not this line."
+        )
+
+        #expect(!didBackfill)
+        #expect(await store.base.task(id: session.id)?.entries.first?.translatedText == "")
+    }
+
+    @Test("Backfill targets only the most recently ended task")
+    func backfillTargetsLatestEndedTask() async throws {
+        let log = LifecycleEventLog()
+        let store = LifecycleFakeStore(log: log)
+        let gate = LifecycleFakeGate(log: log)
+        let lifecycle = makeLifecycle(store: store, gate: gate)
+
+        _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
+        let first = makeEntry("第一句")
+        lifecycle.persist([first])
+        _ = await lifecycle.endTask(transcript: [first], summary: nil)
+
+        _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
+        let second = makeEntry("第二句")
+        lifecycle.persist([second])
+        let outcome = await lifecycle.endTask(transcript: [second], summary: nil)
+        guard case let .ended(secondSession) = outcome else {
+            Issue.record("Expected ended, got \(outcome)")
+            return
+        }
+
+        #expect(await lifecycle.backfillTranslation(entryID: first.id, text: "old") == false)
+        #expect(await lifecycle.backfillTranslation(entryID: second.id, text: "new"))
+        #expect(
+            await store.base.task(id: secondSession.id)?.entries.first?.translatedText == "new"
+        )
+    }
+
     @Test("Ending a task with no transcript anywhere discards the empty task")
     func endDiscardsEmptyTask() async throws {
         let log = LifecycleEventLog()
@@ -807,6 +932,43 @@ struct TaskLifecycleTests {
 
     // MARK: - Helpers
 
+    @Test("Task start and end scope one diagnostics session")
+    func diagnosticsSessionFollowsTaskLifecycle() async throws {
+        let log = LifecycleEventLog()
+        let store = LifecycleFakeStore(log: log)
+        let gate = LifecycleFakeGate(log: log)
+        let recorder = DiagnosticsRecorder()
+        let lifecycle = makeLifecycle(store: store, gate: gate, diagnostics: recorder)
+
+        _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
+        let taskID = try #require(lifecycle.taskID)
+        let session = try #require(recorder.snapshot().session)
+        #expect(session.feature == FeatureID.meeting.rawValue)
+        #expect(session.taskID == taskID.uuidString)
+        #expect(session.endedAt == nil)
+
+        let entry = makeEntry("六点见")
+        lifecycle.persist([entry])
+        _ = await lifecycle.endTask(transcript: [entry], summary: nil)
+        #expect(recorder.snapshot().session?.endedAt != nil)
+    }
+
+    @Test("Restoring an unfinished task starts a diagnostics session for it")
+    func restoreStartsDiagnosticsSession() async throws {
+        let log = LifecycleEventLog()
+        let store = LifecycleFakeStore(log: log)
+        let gate = LifecycleFakeGate(log: log)
+        let recorder = DiagnosticsRecorder()
+        let lifecycle = makeLifecycle(store: store, gate: gate, diagnostics: recorder)
+        _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
+        let taskID = try #require(lifecycle.taskID)
+
+        let restored = await lifecycle.restore()
+        #expect(restored?.id == taskID)
+        #expect(recorder.snapshot().session?.taskID == taskID.uuidString)
+        #expect(recorder.snapshot().session?.endedAt == nil)
+    }
+
     private func makeEntry(_ text: String) -> TranscriptEntry {
         TranscriptEntry(
             id: UUID(),
@@ -822,7 +984,8 @@ struct TaskLifecycleTests {
         store: LifecycleFakeStore,
         gate: LifecycleFakeGate,
         audio: LifecycleFakeAudioSession? = nil,
-        permissions: LifecycleFakePermissions = LifecycleFakePermissions()
+        permissions: LifecycleFakePermissions = LifecycleFakePermissions(),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) -> TaskLifecycle {
         let log = store.log
         return TaskLifecycle(
@@ -831,7 +994,8 @@ struct TaskLifecycleTests {
             gate: gate,
             permissions: permissions,
             audioSession: audio ?? LifecycleFakeAudioSession(log: log),
-            persistDebounce: .seconds(3600)
+            persistDebounce: .seconds(3600),
+            diagnostics: diagnostics
         )
     }
 

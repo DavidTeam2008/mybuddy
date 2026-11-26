@@ -9,6 +9,7 @@ final class InterpretationViewModel {
     private let summarizer: any ConversationSummarizing
     private let audioSession: any AudioSessionConfiguring
     private let synthesizer: any SpeechSynthesizing
+    private let diagnostics: any DiagnosticsRecording
 
     /// Feature-specific transient states (asset preparation, preparation
     /// failure) layered over the lifecycle-owned session state.
@@ -46,6 +47,7 @@ final class InterpretationViewModel {
 
     private let pipeline: TranslationPipeline
     private var projection = CaptionProjection(policy: .interpretation)
+    private let lateTranslation: LateTranslationBackfill
 
     private var speechTask: Task<Void, Never>?
     private var idleRestoreTask: Task<Void, Never>?
@@ -71,23 +73,28 @@ final class InterpretationViewModel {
         synthesizer: any SpeechSynthesizing,
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
-        speechSettleDelay: Duration = .milliseconds(380)
+        speechSettleDelay: Duration = .milliseconds(380),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
-        lifecycle = TaskLifecycle(
+        let lifecycle = TaskLifecycle(
             feature: .simultaneous,
             store: taskStore,
             gate: gate,
             permissions: permissions,
-            audioSession: audioSession
+            audioSession: audioSession,
+            diagnostics: diagnostics
         )
+        self.lifecycle = lifecycle
+        lateTranslation = LateTranslationBackfill(lifecycle: lifecycle)
         self.permissions = permissions
         self.preferences = preferences
         self.summarizer = summarizer
         self.audioSession = audioSession
         self.synthesizer = synthesizer
+        self.diagnostics = diagnostics
         self.idleRestoreDelay = idleRestoreDelay
         self.speechSettleDelay = speechSettleDelay
-        self.pipeline = TranslationPipeline()
+        self.pipeline = TranslationPipeline(diagnostics: diagnostics)
         sourceLanguage = preferences.sourceLanguage
         targetLanguage = preferences.targetLanguage
         fontSize = preferences.fontSize
@@ -108,23 +115,28 @@ final class InterpretationViewModel {
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
         speechSettleDelay: Duration = .milliseconds(380),
-        scheduler: any TranslationScheduler
+        scheduler: any TranslationScheduler,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
-        lifecycle = TaskLifecycle(
+        let lifecycle = TaskLifecycle(
             feature: .simultaneous,
             store: taskStore,
             gate: gate,
             permissions: permissions,
-            audioSession: audioSession
+            audioSession: audioSession,
+            diagnostics: diagnostics
         )
+        self.lifecycle = lifecycle
+        lateTranslation = LateTranslationBackfill(lifecycle: lifecycle)
         self.permissions = permissions
         self.preferences = preferences
         self.summarizer = summarizer
         self.audioSession = audioSession
         self.synthesizer = synthesizer
+        self.diagnostics = diagnostics
         self.idleRestoreDelay = idleRestoreDelay
         self.speechSettleDelay = speechSettleDelay
-        self.pipeline = TranslationPipeline(scheduler: scheduler)
+        self.pipeline = TranslationPipeline(scheduler: scheduler, diagnostics: diagnostics)
         sourceLanguage = preferences.sourceLanguage
         targetLanguage = preferences.targetLanguage
         fontSize = preferences.fontSize
@@ -143,7 +155,8 @@ final class InterpretationViewModel {
         synthesizer: any SpeechSynthesizing,
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
-        speechSettleDelay: Duration = .milliseconds(380)
+        speechSettleDelay: Duration = .milliseconds(380),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         self.init(
             gate: SpeechSessionGate(engine: speech),
@@ -154,7 +167,8 @@ final class InterpretationViewModel {
             synthesizer: synthesizer,
             taskStore: taskStore,
             idleRestoreDelay: idleRestoreDelay,
-            speechSettleDelay: speechSettleDelay
+            speechSettleDelay: speechSettleDelay,
+            diagnostics: diagnostics
         )
     }
 
@@ -241,9 +255,23 @@ final class InterpretationViewModel {
         pendingJobs.count
     }
 
-    /// The single translation job waiting for the Host; the pipeline owns it.
+    /// Diagnostics sink handed to the live translation host.
+    var translationDiagnostics: any DiagnosticsRecording { diagnostics }
+
+    /// The newest translation job that has not been drained yet; the pipeline
+    /// owns the queue. Kept for tests.
     var outboundJob: TranslationJob? {
         pipeline.outboundJob
+    }
+
+    /// Bumps on every enqueue so the Host drains the pipeline queue instead of
+    /// a single job observed through SwiftUI (which can coalesce two jobs).
+    var outboundRevision: Int {
+        pipeline.outboundRevision
+    }
+
+    func takeNextOutboundJob() -> TranslationJob? {
+        pipeline.takeNextOutboundJob()
     }
 
     func bootstrap() async {
@@ -269,19 +297,29 @@ final class InterpretationViewModel {
     /// Two-phase begin: the lifecycle stops the old stream and ends the old
     /// task first; captions are cleared only after it reports ready.
     func beginTask() async {
+        // Stop and drain the old stream first, so a final published during
+        // stop is part of the snapshot that ends the old task.
+        await lifecycle.pauseListening()
+        await drainSpeechTask()
         // An empty display may be a cleared screen over content the lifecycle
         // already holds; only overwrite its snapshot with real captions.
         if !transcript.isEmpty {
             lifecycle.persist(transcript)
         }
         stateOverride = nil
-        switch await lifecycle.prepareForNewTask() {
+        lateTranslation.beginEnding()
+        let prepareOutcome = await lifecycle.prepareForNewTask()
+        lateTranslation.endEnding()
+        switch prepareOutcome {
         case .ready:
+            await lateTranslation.flushPending()
             await createNewTask()
         case .blockedByUnsavedTask:
+            lateTranslation.discardPending()
             isUnsavedTaskPromptPresented = true
         case .notSaved:
             // Keep the task and captions; the not-saved banner explains why.
+            lateTranslation.discardPending()
             break
         }
     }
@@ -328,29 +366,35 @@ final class InterpretationViewModel {
 
     func endTask() async -> TaskSession? {
         // Stop this module's stream before cancelling the consumer so the
-        // finished stream is classified as superseded, not interrupted.
+        // finished stream is classified as superseded, not interrupted. Wait
+        // for the consumer so a final published during stop is applied before
+        // the transcript snapshot is written.
         await lifecycle.pauseListening()
-        speechTask?.cancel()
-        speechTask = nil
+        await drainSpeechTask()
         isUnsavedTaskPromptPresented = false
         isExportThenContinuePending = false
         await clearSpeechQueue()
+        lateTranslation.beginEnding()
         let outcome = await lifecycle.endTask(transcript: transcript, summary: summary)
+        lateTranslation.endEnding()
         stateOverride = nil
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
         projection.setSpeakingHint(nil, pane: .user)
         switch outcome {
         case let .ended(session):
+            await lateTranslation.flushPending()
             resetCaptions()
             resumePromptText = nil
             return session
         case .discardedEmpty:
+            lateTranslation.discardPending()
             resetCaptions()
             resumePromptText = nil
             return nil
         case .notSaved:
             // Keep the transcript in memory for export; nothing was written.
+            lateTranslation.discardPending()
             return nil
         }
     }
@@ -392,10 +436,11 @@ final class InterpretationViewModel {
             stateOverride = nil
         }
         // Clearing the lifecycle handle first keeps the cancelled stream from
-        // being reported as a recognition interruption.
+        // being reported as a recognition interruption. Drain the consumer so
+        // the engine's stop-time final reaches the transcript before the
+        // speaking hint and queue are cleared.
         await lifecycle.pauseListening()
-        speechTask?.cancel()
-        speechTask = nil
+        await drainSpeechTask()
         await clearSpeechQueue()
         if wasListening {
             if restoreIdleTimerAfterDelay {
@@ -564,6 +609,10 @@ final class InterpretationViewModel {
 
     func fulfill(job: TranslationJob, text: String) {
         guard let update = pipeline.accept(job: job, text: text) else { return }
+        // A record that is gone means the task was ended and reset while this
+        // translation was in flight. A final result still belongs in the
+        // finished transcript; a preview does not.
+        let hadRecord = projection.contains(utteranceID: update.utteranceID)
         let line = projection.applyTranslation(
             utteranceID: update.utteranceID,
             text: update.translatedText,
@@ -571,8 +620,13 @@ final class InterpretationViewModel {
         )
         if job.isFinal {
             lifecycle.persist(projection.transcript)
+            lateTranslation.finalArrived(
+                entryID: update.utteranceID,
+                text: update.translatedText,
+                hasLiveRecord: hadRecord
+            )
         }
-        guard let line else { return }
+        guard let line, !lateTranslation.isEnding else { return }
         scheduleSpeech(
             utteranceID: update.utteranceID,
             translated: line.translatedText,
@@ -582,6 +636,11 @@ final class InterpretationViewModel {
 
     func failTranslation(job: TranslationJob, error: Error) {
         pipeline.fail(job: job)
+    }
+
+    /// Test seam: waits for a late-final backfill drain started by `fulfill`.
+    func waitForTranslationBackfill() async {
+        await lateTranslation.waitForDrain()
     }
 
     func requestSummary() async {
@@ -615,10 +674,9 @@ final class InterpretationViewModel {
     }
 
     private func createNewTask() async {
-        // The lifecycle already stopped the old stream; drop any stale buffered
-        // utterances so they cannot land in the new task.
-        speechTask?.cancel()
-        speechTask = nil
+        // The lifecycle already stopped the old stream; drain its consumer so
+        // the stop-time final cannot land in the new task's captions.
+        await drainSpeechTask()
         resetCaptions()
         resumePromptText = nil
         _ = await lifecycle.startNewTask(makeNewTaskRequest())
@@ -675,12 +733,20 @@ final class InterpretationViewModel {
         }
     }
 
+    /// Waits for the speech consumer after the gate has stopped the stream.
+    /// The analyzer publishes its last final during `stop`; cancelling the
+    /// consumer immediately would drop it.
+    private func drainSpeechTask() async {
+        let task = speechTask
+        speechTask = nil
+        await SpeechTaskDrain.wait(for: task)
+    }
+
     /// Stops this feature's capture without touching the task so the audio
     /// route can change underneath the session.
     private func pauseCaptureForReroute() async {
         await lifecycle.pauseListening()
-        speechTask?.cancel()
-        speechTask = nil
+        await drainSpeechTask()
     }
 
     private func rerouteCaptureIfListening() async {
@@ -688,8 +754,8 @@ final class InterpretationViewModel {
             try? await audioSession.activate(currentUseCase)
             return
         }
-        speechTask?.cancel()
-        speechTask = nil
+        await lifecycle.pauseListening()
+        await drainSpeechTask()
         stateOverride = nil
         guard case let .started(handle) = await lifecycle.startListening(makeListeningRequest()) else {
             return
@@ -702,8 +768,7 @@ final class InterpretationViewModel {
     /// on its own.
     private func applyDirectionChange(wasActive: Bool) async {
         await lifecycle.pauseListening()
-        speechTask?.cancel()
-        speechTask = nil
+        await drainSpeechTask()
         projection.archiveLive(pane: .user)
         projection.setSpeakingHint(nil, pane: .user)
         pipeline.reset()

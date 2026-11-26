@@ -67,6 +67,7 @@ final class TaskLifecycle {
     private let permissions: any PermissionGranting
     private let audioSession: any AudioSessionConfiguring
     private let persistDebounce: Duration
+    private let diagnostics: any DiagnosticsRecording
 
     @ObservationIgnored private var activeHandle: SpeechSessionHandle?
     @ObservationIgnored private var pendingPersist: PendingPersist?
@@ -77,13 +78,19 @@ final class TaskLifecycle {
         var entries: [TranscriptEntry]
     }
 
+    /// The most recently ended task, kept so a final translation that arrives
+    /// after the task ends can be written back instead of dropped. The store
+    /// allows translation-only writes on ended tasks.
+    @ObservationIgnored private var endedTask: TaskSession?
+
     init(
         feature: FeatureID,
         store: any TaskStoreV2,
         gate: any SpeechSessionGating,
         permissions: any PermissionGranting,
         audioSession: any AudioSessionConfiguring,
-        persistDebounce: Duration = .milliseconds(250)
+        persistDebounce: Duration = .milliseconds(250),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         self.feature = feature
         self.store = store
@@ -91,6 +98,7 @@ final class TaskLifecycle {
         self.permissions = permissions
         self.audioSession = audioSession
         self.persistDebounce = persistDebounce
+        self.diagnostics = diagnostics
     }
 
     var hasActiveTask: Bool {
@@ -114,6 +122,9 @@ final class TaskLifecycle {
             isMemoryOnly = false
             isNotSaved = false
             sessionState = .ready
+            if let restoredTaskID = task?.id {
+                diagnostics.beginSession(feature: feature, taskID: restoredTaskID)
+            }
             return task
         case .unavailable:
             current = nil
@@ -153,7 +164,11 @@ final class TaskLifecycle {
             entries: latestTranscript,
             summary: task.summary
         ) {
-        case .ended, .discardedEmpty:
+        case let .ended(session):
+            endedTask = session
+            clearCurrent()
+            return .ready
+        case .discardedEmpty:
             clearCurrent()
             return .ready
         case let .notPersisted(reason):
@@ -211,6 +226,7 @@ final class TaskLifecycle {
             isNotSaved = true
             persistenceFailure = reason
         }
+        diagnostics.beginSession(feature: feature, taskID: current?.id)
 
         guard request.autoStart else {
             if let persistenceFailure {
@@ -356,6 +372,7 @@ final class TaskLifecycle {
 
         switch await store.end(taskID: taskID, entries: transcript, summary: summary) {
         case let .ended(session):
+            endedTask = session
             clearCurrent()
             return .ended(session)
         case .discardedEmpty:
@@ -366,6 +383,33 @@ final class TaskLifecycle {
             sessionState = .paused
             return .notSaved(reason)
         }
+    }
+
+    /// Applies a final translation that arrived after the task ended. The
+    /// in-memory snapshot is updated first so repeated late results accumulate
+    /// even when the store write fails; only the most recently ended task is
+    /// retained. Returns whether the store write persisted.
+    @discardableResult
+    func backfillTranslation(entryID: UUID, text: String) async -> Bool {
+        guard !TextIntegrity.isCorrupted(text),
+              var ended = endedTask,
+              let index = ended.entries.firstIndex(where: { $0.id == entryID }) else {
+            return false
+        }
+        ended.entries[index].translatedText = text
+        endedTask = ended
+        guard case .persisted = await store.updateTranslations(
+            [ended.entries[index]],
+            for: ended.id
+        ) else {
+            #if DEBUG
+            DuiyiLog.translation.debug(
+                "late translation backfill not persisted entry=\(entryID.uuidString, privacy: .public) task=\(ended.id.uuidString, privacy: .public)"
+            )
+            #endif
+            return false
+        }
+        return true
     }
 
     // MARK: - Persistence
@@ -439,6 +483,9 @@ final class TaskLifecycle {
 
     private func clearCurrent() {
         cancelPendingPersist()
+        if let taskID = current?.id {
+            diagnostics.endSession(taskID: taskID)
+        }
         current = nil
         isMemoryOnly = false
         isNotSaved = false

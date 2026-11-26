@@ -125,14 +125,14 @@ struct InterpretationViewModelTests {
         await viewModel.setVoiceOutEnabled(true)
         let id = UUID()
 
-        viewModel.accept(Utterance(id: id, language: .english, text: "hello", isFinal: false))
+        viewModel.accept(Utterance(id: id, language: .english, text: "hello world my friend", isFinal: false))
         #expect(scheduler.scheduledDelays == [.milliseconds(25)])
 
         // Complete the first submission so the next one is a subsequent packet
         // rather than another first packet.
         scheduler.advance(by: .milliseconds(25))
 
-        viewModel.accept(Utterance(id: id, language: .english, text: "hello there", isFinal: false))
+        viewModel.accept(Utterance(id: id, language: .english, text: "hello world my friend again", isFinal: false))
         #expect(scheduler.scheduledDelays == [.milliseconds(25), .milliseconds(50)])
 
         // The pipeline owns debounce firing; here the submitted job proves the
@@ -140,7 +140,7 @@ struct InterpretationViewModelTests {
         scheduler.advance(by: .milliseconds(50))
         #expect(viewModel.outboundJob?.utteranceID == id)
         #expect(viewModel.outboundJob?.target == .korean)
-        #expect(viewModel.outboundJob?.text == "hello there")
+        #expect(viewModel.outboundJob?.text == "hello world my friend again")
     }
 
     @Test("Caption-only interpretation submits 40/90 ms delays and the current target")
@@ -149,20 +149,44 @@ struct InterpretationViewModelTests {
         let viewModel = makeViewModel(targetLanguage: .korean, scheduler: scheduler)
         let id = UUID()
 
-        viewModel.accept(Utterance(id: id, language: .english, text: "hello", isFinal: false))
+        viewModel.accept(Utterance(id: id, language: .english, text: "hello world my friend", isFinal: false))
         #expect(scheduler.scheduledDelays == [.milliseconds(40)])
 
         // Complete the first submission so the next one is a subsequent packet
         // rather than another first packet.
         scheduler.advance(by: .milliseconds(40))
 
-        viewModel.accept(Utterance(id: id, language: .english, text: "hello there", isFinal: false))
+        viewModel.accept(Utterance(id: id, language: .english, text: "hello world my friend again", isFinal: false))
         #expect(scheduler.scheduledDelays == [.milliseconds(40), .milliseconds(90)])
 
         scheduler.advance(by: .milliseconds(90))
         #expect(viewModel.outboundJob?.utteranceID == id)
         #expect(viewModel.outboundJob?.target == .korean)
-        #expect(viewModel.outboundJob?.text == "hello there")
+        #expect(viewModel.outboundJob?.text == "hello world my friend again")
+    }
+
+    @Test("Enqueuing a final bumps the host revision")
+    func enqueuingFinalBumpsRevision() {
+        let viewModel = makeViewModel(scheduler: ManualTranslationScheduler())
+        let startRevision = viewModel.outboundRevision
+
+        viewModel.accept(Utterance(language: .english, text: "First line.", isFinal: true))
+
+        #expect(viewModel.outboundRevision > startRevision)
+    }
+
+    @Test("Every queued final is handed to the host in order")
+    func everyQueuedFinalIsHandedToHost() {
+        let viewModel = makeViewModel(scheduler: ManualTranslationScheduler())
+        let first = Utterance(language: .english, text: "First line.", isFinal: true)
+        let second = Utterance(language: .english, text: "Second line.", isFinal: true)
+
+        viewModel.accept(first)
+        viewModel.accept(second)
+
+        #expect(viewModel.takeNextOutboundJob()?.utteranceID == first.id)
+        #expect(viewModel.takeNextOutboundJob()?.utteranceID == second.id)
+        #expect(viewModel.takeNextOutboundJob() == nil)
     }
 
     @Test("outboundJob is exposed from the pipeline")
@@ -236,7 +260,7 @@ struct InterpretationViewModelTests {
         let scheduler = ManualTranslationScheduler()
         let viewModel = makeViewModel(scheduler: scheduler)
 
-        viewModel.accept(Utterance(language: .english, text: "hello", isFinal: false))
+        viewModel.accept(Utterance(language: .english, text: "hello world my friend", isFinal: false))
         #expect(scheduler.pendingDelays == [.milliseconds(40)])
 
         viewModel.resetCaptions()
@@ -252,7 +276,7 @@ struct InterpretationViewModelTests {
         let scheduler = ManualTranslationScheduler()
         let viewModel = makeViewModel(scheduler: scheduler)
 
-        viewModel.accept(Utterance(language: .english, text: "hello", isFinal: false))
+        viewModel.accept(Utterance(language: .english, text: "hello world my friend", isFinal: false))
         #expect(scheduler.pendingDelays == [.milliseconds(40)])
 
         await viewModel.swapDirection()
@@ -968,6 +992,140 @@ struct InterpretationViewModelTests {
         #expect(captions.contains("Lucy"))
     }
 
+    @Test("Ending a task drains a final emitted when the stream stops")
+    func endTaskDrainsFinalEmittedOnStop() async throws {
+        let store = InMemoryTaskStore()
+        let gate = InterpretationFakeGate(log: InterpretationEventLog())
+        gate.finalOnStop = Utterance(language: .english, text: "最后一句", isFinal: true)
+        let viewModel = makeViewModel(store: store, gate: gate)
+
+        await viewModel.beginTask()
+        await viewModel.start()
+        let ended = try #require(await viewModel.endTask())
+
+        #expect(ended.entries.contains { $0.sourceText == "最后一句" })
+    }
+
+    @Test("A final translation that arrives after endTask is backfilled into the ended task")
+    func lateFinalTranslationIsBackfilled() async throws {
+        let store = InMemoryTaskStore()
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        let utterance = Utterance(language: .english, text: "See you at three.", isFinal: true)
+        viewModel.accept(utterance)
+        let job = try #require(viewModel.outboundJob)
+        let ended = try #require(await viewModel.endTask())
+        #expect(ended.entries.first?.translatedText == "")
+
+        viewModel.fulfill(job: job, text: "三点见。")
+        await viewModel.waitForTranslationBackfill()
+
+        guard case let .value(stored?) = await store.readTask(id: ended.id) else {
+            Issue.record("Expected the ended task in the store")
+            return
+        }
+        #expect(stored.entries.first?.translatedText == "三点见。")
+    }
+
+    @Test("A final arriving while the end write is in flight is backfilled")
+    func finalDuringEndWriteIsBackfilled() async throws {
+        let store = ScriptedTaskStore()
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .english, text: "See you at three.", isFinal: true))
+        let job = try #require(viewModel.outboundJob)
+        var fulfilled = false
+        store.endHook = {
+            guard !fulfilled else { return }
+            fulfilled = true
+            viewModel.fulfill(job: job, text: "三点见。")
+        }
+
+        let ended = try #require(await viewModel.endTask())
+
+        #expect(fulfilled)
+        let stored = try #require(await store.task(id: ended.id))
+        #expect(stored.entries.first?.translatedText == "三点见。")
+    }
+
+    @Test("A preview arriving while the end write is in flight is not backfilled")
+    func previewDuringEndWriteIsNotBackfilled() async throws {
+        let scheduler = ManualTranslationScheduler()
+        let store = ScriptedTaskStore()
+        let viewModel = makeViewModel(store: store, scheduler: scheduler)
+        await viewModel.beginTask()
+        viewModel.accept(
+            Utterance(language: .english, text: "hello world my friend", isFinal: false)
+        )
+        scheduler.advance(by: .milliseconds(40))
+        let job = try #require(viewModel.outboundJob)
+        #expect(!job.isFinal)
+        var fulfilled = false
+        store.endHook = {
+            guard !fulfilled else { return }
+            fulfilled = true
+            viewModel.fulfill(job: job, text: "你好世界我的朋友")
+        }
+
+        let ended = try #require(await viewModel.endTask())
+
+        #expect(fulfilled)
+        let stored = try #require(await store.task(id: ended.id))
+        #expect(stored.entries.first?.translatedText == "")
+    }
+
+    @Test("A preview translation that arrives after endTask is not backfilled")
+    func latePreviewTranslationIsNotBackfilled() async throws {
+        let scheduler = ManualTranslationScheduler()
+        let store = InMemoryTaskStore()
+        let viewModel = makeViewModel(store: store, scheduler: scheduler)
+        await viewModel.beginTask()
+        viewModel.accept(
+            Utterance(language: .english, text: "hello world my friend", isFinal: false)
+        )
+        scheduler.advance(by: .milliseconds(40))
+        let job = try #require(viewModel.outboundJob)
+        #expect(!job.isFinal)
+        let ended = try #require(await viewModel.endTask())
+
+        viewModel.fulfill(job: job, text: "你好世界我的朋友")
+        await viewModel.waitForTranslationBackfill()
+
+        guard case let .value(stored?) = await store.readTask(id: ended.id) else {
+            Issue.record("Expected the ended task in the store")
+            return
+        }
+        #expect(stored.entries.first?.translatedText == "")
+    }
+
+    @Test("Stopping listening drains a final emitted when the stream stops")
+    func stopDrainsFinalEmittedOnStop() async {
+        let gate = InterpretationFakeGate(log: InterpretationEventLog())
+        gate.finalOnStop = Utterance(language: .english, text: "暂停最后一句", isFinal: true)
+        let viewModel = makeViewModel(store: InMemoryTaskStore(), gate: gate)
+
+        await viewModel.beginTask()
+        await viewModel.start()
+        await viewModel.stop(restoreIdleTimerAfterDelay: false)
+
+        #expect(viewModel.transcript.contains { $0.sourceText == "暂停最后一句" })
+    }
+
+    @Test("Beginning a new task drains a final emitted when the old stream stops")
+    func beginTaskDrainsFinalEmittedOnStop() async {
+        let store = InMemoryTaskStore()
+        let gate = InterpretationFakeGate(log: InterpretationEventLog())
+        gate.finalOnStop = Utterance(language: .english, text: "旧任务最后一句", isFinal: true)
+        let viewModel = makeViewModel(store: store, gate: gate)
+
+        await viewModel.beginTask()
+        await viewModel.start()
+        await viewModel.beginTask()
+
+        let ended = await store.list(filter: .simultaneous)
+        #expect(ended.first?.entries.contains { $0.sourceText == "旧任务最后一句" } == true)
+    }
+
     @Test("Beginning a new task stops the old stream before ending it")
     func beginStopsOldStreamBeforeEnding() async {
         let log = InterpretationEventLog()
@@ -1496,6 +1654,7 @@ private final class InterpretationFakeGate: SpeechSessionGating {
     private var continuation: AsyncStream<Utterance>.Continuation?
     private(set) var starts: [FeatureID] = []
     private(set) var stopCount = 0
+    var finalOnStop: Utterance?
 
     init(log: InterpretationEventLog) {
         self.log = log
@@ -1522,6 +1681,10 @@ private final class InterpretationFakeGate: SpeechSessionGating {
         log.record("gate-stop")
         guard currentGeneration == handle.generation else { return }
         currentGeneration = nil
+        if let final = finalOnStop {
+            finalOnStop = nil
+            continuation?.yield(final)
+        }
         continuation?.finish()
         continuation = nil
     }

@@ -34,22 +34,22 @@ struct TranslationPipelineTests {
         let (pipeline, scheduler) = makePipeline()
         let id = UUID()
 
-        pipeline.submit(makeSubmission(id: id, text: "hello"))
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
         #expect(pipeline.outboundJob == nil)
         #expect(scheduler.pendingDelays == [.milliseconds(40)])
 
         scheduler.advance(by: .milliseconds(40))
         #expect(pipeline.outboundJob?.utteranceID == id)
-        #expect(pipeline.outboundJob?.text == "hello")
+        #expect(pipeline.outboundJob?.text == "hello world my friend")
         #expect(pipeline.outboundJob?.target == .zhHans)
         #expect(pipeline.outboundJob?.isFinal == false)
 
-        pipeline.submit(makeSubmission(id: id, text: "helloo"))
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend again"))
         #expect(scheduler.pendingDelays == [.milliseconds(90)])
 
         scheduler.advance(by: .milliseconds(90))
         #expect(pipeline.outboundJob?.utteranceID == id)
-        #expect(pipeline.outboundJob?.text == "helloo")
+        #expect(pipeline.outboundJob?.text == "hello world my friend again")
     }
 
     @Test("Interpretation 25/50 ms delays pass through unchanged")
@@ -60,7 +60,7 @@ struct TranslationPipelineTests {
         pipeline.submit(
             makeSubmission(
                 id: id,
-                text: "你",
+                text: "你好世界你好世界",
                 language: .zhHans,
                 firstDelay: .milliseconds(25),
                 subsequentDelay: .milliseconds(50)
@@ -68,12 +68,12 @@ struct TranslationPipelineTests {
         )
         #expect(scheduler.pendingDelays == [.milliseconds(25)])
         scheduler.advance(by: .milliseconds(25))
-        #expect(pipeline.outboundJob?.text == "你")
+        #expect(pipeline.outboundJob?.text == "你好世界你好世界")
 
         pipeline.submit(
             makeSubmission(
                 id: id,
-                text: "你好",
+                text: "你好世界你好世界你好",
                 language: .zhHans,
                 firstDelay: .milliseconds(25),
                 subsequentDelay: .milliseconds(50)
@@ -81,22 +81,64 @@ struct TranslationPipelineTests {
         )
         #expect(scheduler.pendingDelays == [.milliseconds(50)])
         scheduler.advance(by: .milliseconds(50))
-        #expect(pipeline.outboundJob?.text == "你好")
+        #expect(pipeline.outboundJob?.text == "你好世界你好世界你好")
     }
 
-    @Test("A new line cancels the previous line's debounce")
-    func newLineCancelsPreviousDebounce() {
+    @Test("A new line keeps the previous line's pending debounce")
+    func newLineKeepsPreviousDebounce() {
         let (pipeline, scheduler) = makePipeline()
         let first = UUID()
         let second = UUID()
 
-        pipeline.submit(makeSubmission(id: first, text: "hello"))
-        pipeline.submit(makeSubmission(id: second, text: "world"))
-        #expect(scheduler.pendingDelays == [.milliseconds(40)])
+        pipeline.submit(makeSubmission(id: first, text: "hello world my friend"))
+        pipeline.submit(makeSubmission(id: second, text: "world hello my friend"))
+        #expect(scheduler.pendingDelays == [.milliseconds(40), .milliseconds(40)])
 
         scheduler.advance(by: .milliseconds(40))
-        #expect(pipeline.outboundJob?.utteranceID == second)
-        #expect(pipeline.outboundJob?.text == "world")
+        #expect(pipeline.takeNextOutboundJob()?.utteranceID == first)
+        #expect(pipeline.takeNextOutboundJob()?.utteranceID == second)
+    }
+
+    @Test("A later preview cannot displace a queued final for the same utterance")
+    func previewDoesNotDisplaceQueuedFinal() {
+        let (pipeline, scheduler) = makePipeline()
+        let id = UUID()
+
+        pipeline.submit(makeSubmission(id: id, text: "Final words", isFinal: true))
+        pipeline.submit(makeSubmission(id: id, text: "Final words and more"))
+        scheduler.advance(by: .milliseconds(90))
+
+        #expect(pipeline.takeNextOutboundJob()?.text == "Final words")
+        #expect(pipeline.takeNextOutboundJob() == nil)
+    }
+
+    @Test("A short preview never forms a job and is not scheduled")
+    func shortPreviewIsDropped() {
+        let (pipeline, scheduler) = makePipeline()
+        let id = UUID()
+
+        pipeline.submit(makeSubmission(id: id, text: "hello"))
+        #expect(scheduler.pendingDelays.isEmpty)
+        #expect(pipeline.takeNextOutboundJob() == nil)
+
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
+        #expect(scheduler.pendingDelays == [.milliseconds(40)])
+        scheduler.advance(by: .milliseconds(40))
+        #expect(pipeline.takeNextOutboundJob()?.text == "hello world my friend")
+    }
+
+    @Test("A short revision cancels the line's pending preview")
+    func shortRevisionCancelsPendingPreview() {
+        let (pipeline, scheduler) = makePipeline()
+        let id = UUID()
+
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
+        #expect(scheduler.pendingDelays == [.milliseconds(40)])
+
+        pipeline.submit(makeSubmission(id: id, text: "hello world"))
+        #expect(scheduler.pendingDelays.isEmpty)
+        scheduler.advance(by: .milliseconds(100))
+        #expect(pipeline.outboundJob == nil)
     }
 
     @Test("Clause-terminating text bypasses the debounce")
@@ -118,23 +160,38 @@ struct TranslationPipelineTests {
         #expect(pipeline.outboundJob?.isFinal == true)
     }
 
-    @Test("A final packet wins over a pending volatile packet")
-    func finalPacketWinsOverPendingVolatile() {
+    @Test("A final packet is delivered without cancelling another line's volatile packet")
+    func finalPacketKeepsOtherLinesVolatile() {
         let (pipeline, scheduler) = makePipeline()
         let volatile = UUID()
         let final = UUID()
 
-        pipeline.submit(makeSubmission(id: volatile, text: "hello"))
+        pipeline.submit(makeSubmission(id: volatile, text: "hello world my friend"))
         pipeline.submit(makeSubmission(id: final, text: "hey", isFinal: true))
-        #expect(scheduler.pendingDelays.isEmpty)
-        #expect(pipeline.outboundJob?.utteranceID == final)
+        #expect(scheduler.pendingDelays == [.milliseconds(40)])
+        #expect(pipeline.takeNextOutboundJob()?.utteranceID == final)
 
-        scheduler.advance(by: .milliseconds(100))
-        #expect(pipeline.outboundJob?.utteranceID == final)
+        scheduler.advance(by: .milliseconds(40))
+        #expect(pipeline.takeNextOutboundJob()?.utteranceID == volatile)
     }
 
-    @Test("The outbound job is a single slot that new jobs replace")
-    func outboundJobIsASingleSlot() {
+    @Test("Two finals submitted before the host reads the queue are both delivered in order")
+    func queuedFinalsAreBothDeliveredInOrder() {
+        let (pipeline, scheduler) = makePipeline()
+        let first = UUID()
+        let second = UUID()
+
+        pipeline.submit(makeSubmission(id: first, text: "First.", isFinal: true))
+        pipeline.submit(makeSubmission(id: second, text: "Second.", isFinal: true))
+
+        #expect(scheduler.pendingDelays.isEmpty)
+        #expect(pipeline.takeNextOutboundJob()?.utteranceID == first)
+        #expect(pipeline.takeNextOutboundJob()?.utteranceID == second)
+        #expect(pipeline.takeNextOutboundJob() == nil)
+    }
+
+    @Test("outboundJob reflects the newest queued job")
+    func outboundJobReflectsNewestQueuedJob() {
         let (pipeline, scheduler) = makePipeline()
         let first = UUID()
         let second = UUID()
@@ -166,11 +223,11 @@ struct TranslationPipelineTests {
         let (pipeline, scheduler) = makePipeline()
         let id = UUID()
 
-        pipeline.submit(makeSubmission(id: id, text: "hello"))
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
         scheduler.advance(by: .milliseconds(40))
         let jobID = pipeline.outboundJob?.id
 
-        pipeline.submit(makeSubmission(id: id, text: "hello"))
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
         #expect(pipeline.outboundJob?.id == jobID)
         #expect(scheduler.pendingDelays.isEmpty)
     }
@@ -209,7 +266,7 @@ struct TranslationPipelineTests {
         let (pipeline, scheduler) = makePipeline()
         let id = UUID()
 
-        pipeline.submit(makeSubmission(id: id, text: "hello"))
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
         scheduler.advance(by: .milliseconds(20))
         pipeline.submit(makeSubmission(text: "  ", isFinal: true))
         scheduler.advance(by: .milliseconds(20))
@@ -366,7 +423,7 @@ struct TranslationPipelineTests {
         let (pipeline, scheduler) = makePipeline()
         let id = UUID()
 
-        pipeline.submit(makeSubmission(id: id, text: "hello"))
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
         pipeline.reset()
         #expect(pipeline.outboundJob == nil)
         #expect(scheduler.pendingDelays.isEmpty)
@@ -380,6 +437,71 @@ struct TranslationPipelineTests {
 
         pipeline.submit(makeSubmission(id: id, text: "你好。", language: .zhHans))
         #expect(pipeline.outboundJob?.text == "你好。")
+    }
+
+    @Test("A result older than the last applied sequence for the same utterance is rejected")
+    func olderSequenceIsRejected() throws {
+        let (pipeline, scheduler) = makePipeline()
+        let id = UUID()
+
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
+        scheduler.advance(by: .milliseconds(40))
+        let preview = try #require(pipeline.takeNextOutboundJob())
+
+        pipeline.submit(makeSubmission(id: id, text: "hi", isFinal: true))
+        let final = try #require(pipeline.takeNextOutboundJob())
+        #expect(final.sequence > preview.sequence)
+
+        #expect(pipeline.accept(job: final, text: "你好") != nil)
+        #expect(pipeline.accept(job: preview, text: "你好世界") == nil)
+    }
+
+    @Test("A result for the same job is applied at most once")
+    func duplicateResultIsAppliedOnce() throws {
+        let (pipeline, _) = makePipeline()
+        pipeline.submit(makeSubmission(text: "Final words", isFinal: true))
+        let job = try #require(pipeline.takeNextOutboundJob())
+
+        #expect(pipeline.accept(job: job, text: "最后的话") != nil)
+        #expect(pipeline.accept(job: job, text: "最后的话") == nil)
+    }
+
+    @Test("A replayed result is rejected after the applied-ID window rolls over")
+    func replayAfterAppliedIDWindowIsRejected() throws {
+        let (pipeline, _) = makePipeline()
+        let id = UUID()
+        pipeline.submit(makeSubmission(id: id, text: "hello", isFinal: true))
+        let job = try #require(pipeline.takeNextOutboundJob())
+        #expect(pipeline.accept(job: job, text: "你好") != nil)
+
+        for index in 0..<(TranslationPipeline.appliedJobIDLimit + 16) {
+            let otherID = UUID()
+            pipeline.submit(makeSubmission(id: otherID, text: "line \(index)", isFinal: true))
+            let other = try #require(pipeline.takeNextOutboundJob())
+            #expect(pipeline.accept(job: other, text: "行 \(index)") != nil)
+        }
+
+        // The original job's ID has been evicted, so only the sequence
+        // watermark can reject the replay.
+        #expect(pipeline.accept(job: job, text: "你好") == nil)
+    }
+
+    @Test("The preview backlog is bounded and finals are never evicted")
+    func previewBacklogIsBounded() {
+        let (pipeline, _) = makePipeline()
+        for index in 0..<(TranslationPipeline.outboundQueueLimit + 16) {
+            pipeline.submit(makeSubmission(text: "预览 \(index)。", language: .zhHans))
+        }
+        let finalID = UUID()
+        pipeline.submit(makeSubmission(id: finalID, text: "最后一句。", language: .zhHans, isFinal: true))
+
+        var drained: [TranslationJob] = []
+        while let job = pipeline.takeNextOutboundJob() {
+            drained.append(job)
+        }
+        #expect(drained.count == TranslationPipeline.outboundQueueLimit)
+        #expect(drained.last?.utteranceID == finalID)
+        #expect(drained.last?.isFinal == true)
     }
 
     @Test("reset clears stale counts")

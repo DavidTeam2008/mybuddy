@@ -11,6 +11,8 @@
 - 改这块必须配假引擎并发测试（20 次快速切换 + 10 次前后台）；真机快速切换仍按发布清单验证。
 - 资源不足降级与 `UtteranceAssembler` 语种锁定是现状（`docs/02-architecture.md` §4），不要顺手改听写策略；脚本计数/scalar 判定委托 Domain `ScriptCounts`，不要在 Services 里复制。
 - 真正的单语种 live-caption 请求用 `.trustedLocale`（非空结果不丢，只记录脚本不匹配）；请求了双 locale 但资源降到单路、以及 `meetingNotes` 保持 `.strict`。
+- Range-aware 组装（P1-1）：`SpeechTranscriber.Result` 的 `range`/`isFinal` 是句界事实；current row = finalized phrase 前缀 + 开放 range 的 volatile。不要退回用文本前缀猜句界。空 volatile 撤销尾部；静音先 `analyzer.finalize(through: nil)` 等 350 ms，转写器 final 优先，`silenceTimedOut` 只做 synthetic 兜底；迟到同 range final 由 closed-range 表复用 ID。D8 不变：只有 assembler 发新 ID；crosstalk hold、脚本纯度、greeting name-swap 不登记 closed range。
+- `stop()` 必须先停采集/输入，`finalizeAndFinishThroughEndOfInput()`（1 s 上限），给消费者 300 ms 收 final，再用 `silenceTimedOut()` 兜底，最后取消 transcriber consumers；`resetPipelineKeepingStream`/`restartSingle` 同样 finalize。不要先 cancel consumer，也不要直接 `cancelAndFinishNow()` 丢掉当前 range 的 final。
 
 ## 2. 翻译：Session 只在 Host View
 
@@ -23,6 +25,7 @@
 
 - 存储接缝分两层：`TaskStore` 只负责 `availability`（opening/ready/unavailable）、`prepare()`、`retry()`；`TaskStoreV2` 提供结果化读写（`readActiveTask` / `readUnfinishedTasks` / `readList` / `readTask`、`startNew` / `append` / `updateTranslations` / `setStatus` / `saveSummary` / `end` / `deleteTask`）。不要恢复 success-only 或静默吞错的变体。
 - 实时字幕/`PaneState` 是内存事实；落盘的 250ms debounce 由 `TaskLifecycle.persist` 统一负责，VM 不要各自 schedule；结束、清屏、进后台用 `flush()`。
+- `TaskLifecycle` 在 `endTask` 与 `prepareForNewTask` 两条结束路径都保留最近一个已结束任务的快照；`backfillTranslation` 用 `TaskStoreV2.updateTranslations` 回填结束后到达的 final 译文（允许已结束任务），preview 与损坏文本不写。
 - 读取已存文字稿时 `TaskMapping` 把损坏译文（U+FFFD/可疑控制字符）视为空；导出 `TranscriptExportService` 不渲染损坏译文。不要静默把坏字符替换成其他文字冒充正确译文。
 - `TaskStoreV2.end` 是原子操作：先 upsert pending 条目，再以 store 中持久化内容判空稿；失败返回 `notPersisted` 且任务保持进行中、不删除。空稿判断不要在 VM 里用内存数组另做一套。
 - `DeferredTaskStore` 延迟开库；打开失败保持 `unavailable` 并提供 `retry()`，模块可继续但标记「本次内容不会保存」，**绝不静默回退 `InMemoryTaskStore`**；写失败只重试一次，仍失败即 `notPersisted`，不轮询、不自动回填。不要在 `AppEnvironment.init` 或首帧前同步 open container（D1）。
@@ -36,6 +39,12 @@
 - **不得 mock 能力检查**（如 `SpeechTranscriber.isAvailable`）来让模拟器用例变绿；语音/翻译/TTS/音频/持久化的最终验收在真机。
 - 新协议放 `ServiceProtocols.swift` 或所属目录，由 `AppEnvironment` 注入；预览替身放 `App/PreviewSupport.swift`。
 - 分层：Services 不引用 ViewModel；Domain 不 import SwiftUI/语音/翻译/SwiftData；由 code review 与测试保证（原 `make check-arch` 未随提取保留）。
+
+## 4.1 诊断（P1-4a）
+
+- `DiagnosticsRecorder`（`Services/Diagnostics`）是进程内唯一 sink，`AppEnvironment` 注入；读写都过同一把锁（ASR 来自 speech actor，翻译来自主线程）。`TaskLifecycle` 负责 begin/end 会话：任务开始/恢复时重置，结束后保留快照，迟到事件仍写入最近结束任务。
+- payload 只含 ID、语言、长度、时间、失败类与 App/设备版本元数据（型号、系统版本、App 版本；不含 UDID），**不得写正文或音频**；`source_hash` 只用于关联重复 job。ring buffer 有界（默认 4096），聚合计数增量维护。ASR 的 `range`/`resultsFinalizationTime` 只在引擎消费 `SpeechTranscriber.Result` 处记录，不要为诊断改组装行为。
+- 导出仅 DEBUG：设置页写 Documents JSON 并 ShareLink，不上传、不新增网络路径。测试用 `DiagnosticsRecorder(eventLimit:now:)` 或 no-op；不要把 recorder 变成全局单例。
 
 ## 5. 导出与产物
 
