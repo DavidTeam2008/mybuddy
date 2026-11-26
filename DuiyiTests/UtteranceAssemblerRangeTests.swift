@@ -311,4 +311,52 @@ struct UtteranceAssemblerRangeTests {
             ) == nil
         )
     }
+
+    @Test("A different language after a published final starts a new id")
+    func differentLanguageAfterFinalStartsNewID() throws {
+        let clock = RangeTestClock()
+        var assembler = UtteranceAssembler(now: { clock.now })
+        let first = try requireIngest(
+            &assembler, "Hello there", range(0, 1), isFinal: true
+        )
+        assembler.acknowledgeFinal(language: .english)
+        clock.now.addTimeInterval(1.5)
+        let second = try requireIngest(
+            &assembler,
+            "谢谢你的服务。",
+            range(1.1, 2),
+            isFinal: true,
+            language: .zhHans
+        )
+
+        #expect(second.id != first.id)
+        #expect(second.language == .zhHans)
+    }
+
+    @Test("A late final for the old range revises the old row after a language change")
+    func lateFinalAfterLanguageChangeRevisesOldRow() throws {
+        let clock = RangeTestClock()
+        var assembler = UtteranceAssembler(now: { clock.now })
+        let first = try requireIngest(
+            &assembler, "Hello there", range(0, 1), isFinal: true
+        )
+        assembler.acknowledgeFinal(language: .english)
+        clock.now.addTimeInterval(1.5)
+        _ = try requireIngest(
+            &assembler,
+            "谢谢你的服务。",
+            range(1.1, 2),
+            isFinal: true,
+            language: .zhHans
+        )
+        // The Chinese final ends a sentence and holds other languages for 0.8 s.
+        clock.now.addTimeInterval(1.0)
+        let late = try requireIngest(
+            &assembler, "Hello there!", range(0, 1), isFinal: true
+        )
+
+        #expect(late.id == first.id)
+        #expect(late.language == .english)
+        #expect(late.isRevision == true)
+    }
 }
