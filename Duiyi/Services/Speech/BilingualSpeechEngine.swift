@@ -18,6 +18,7 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     private var analyzerFormat: AVAudioFormat?
     private var usingDual = true
     private var pairLanguages: [AppLanguage] = [.zhHans, .english]
+    private var requestedLanguageCount = 0
     private var singleLanguage: AppLanguage = .english
     private var style: SpeechRecognitionStyle = .liveCaptions
 
@@ -37,6 +38,7 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         let requested = Array(
             Self.normalizedLanguages(languages: languages, fallback: fallbackLanguage).prefix(2)
         )
+        requestedLanguageCount = requested.count
         pairLanguages = requested
         singleLanguage = fallbackLanguage
 
@@ -143,6 +145,9 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private func startDualPipeline() async throws {
+        // Two transcribers: keep rejecting results that look like the other
+        // locale, otherwise the rows can leak into each other.
+        assembler.languagePurity = .strict
         let firstLanguage = pairLanguages[0]
         let secondLanguage = pairLanguages[1]
         let firstLocale = try await resolvedLocale(for: firstLanguage)
@@ -175,6 +180,12 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private func startSinglePipeline(language: AppLanguage) async throws {
+        // Trust the single transcriber only when the session was genuinely
+        // requested as one language. A dual request that degraded after a
+        // resource limit keeps the strict gate, and meeting notes stay strict.
+        assembler.languagePurity = requestedLanguageCount <= 1 && style != .meetingNotes
+            ? .trustedLocale
+            : .strict
         singleLanguage = language
         let locale = try await resolvedLocale(for: language)
         try await reserve([locale])

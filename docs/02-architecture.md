@@ -201,7 +201,7 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 
 纯值 `struct`，核心职责：
 
-- **语言纯度门禁**：`matchesClaimedLanguage` 按脚本统计拒绝明显不属于该路的文本（如中文路收到纯拉丁、英文路收到汉字）。
+- **语言纯度门禁**：`matchesClaimedLanguage` 按脚本统计拒绝明显不属于该路的文本（如中文路收到纯拉丁、英文路收到汉字）。真正的单语种请求用 `.trustedLocale` 信任唯一 transcriber：非空结果都接受，混合脚本/纯数字只记录不匹配、不丢句；请求了双 locale 但资源降到单路、以及会议，保持 `.strict`。
 - **抢占**：锁定语言后，异语候选只有 `nativeUnits` 明显超过当前句才抢占。
 - **同句更新**：同一 `utteranceID` 原地更新；continuation/refinement 合并，不新开行。
 - **短句抑制**：`isConfident` 对短确认语不自信，沿用上一句语种，减少「嗯 / um」误切。

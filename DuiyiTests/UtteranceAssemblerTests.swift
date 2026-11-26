@@ -436,4 +436,46 @@ struct UtteranceAssemblerTests {
         #expect(grown.id == live.id)
         #expect(grown.text == "我想点一杯咖啡带走")
     }
+
+    @Test(
+        "Trusted single-locale mode keeps English with embedded Han text",
+        arguments: [false, true]
+    )
+    func trustedSingleLocaleKeepsMixedScriptEnglish(isFinal: Bool) throws {
+        var assembler = UtteranceAssembler(languagePurity: .trustedLocale)
+        let value = assembler.ingest(
+            language: .english,
+            text: "I studied 中文 at Tsinghua.",
+            isFinal: isFinal
+        )
+        let utterance = try #require(value)
+        #expect(utterance.language == .english)
+        #expect(utterance.text == "I studied 中文 at Tsinghua.")
+        #expect(utterance.isFinal == isFinal)
+    }
+
+    @Test(
+        "Trusted single-locale mode keeps short and numeric results",
+        arguments: [("OK", false), ("OK", true), ("2024", false), ("2024", true)]
+    )
+    func trustedSingleLocaleKeepsShortResults(text: String, isFinal: Bool) throws {
+        var assembler = UtteranceAssembler(languagePurity: .trustedLocale)
+        let value = assembler.ingest(language: .english, text: text, isFinal: isFinal)
+        let utterance = try #require(value)
+        #expect(utterance.language == .english)
+        #expect(utterance.text == text)
+        #expect(utterance.isFinal == isFinal)
+    }
+
+    @Test("Strict dual-locale mode still rejects mixed-script English")
+    func strictDualLocaleRejectsMixedScriptEnglish() {
+        var assembler = UtteranceAssembler()
+        #expect(
+            assembler.ingest(
+                language: .english,
+                text: "I studied 中文 at Tsinghua.",
+                isFinal: false
+            ) == nil
+        )
+    }
 }
