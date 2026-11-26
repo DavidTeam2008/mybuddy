@@ -335,8 +335,7 @@ struct UtteranceAssembler: Sendable {
         // A published final closes the row for identity. A different language
         // is a new utterance; remember the old range so a late final can still
         // revise it, then start the new row.
-        if publishedFinalForCurrentID,
-           let finalized = latestFinal,
+        if let finalized = latestFinal,
            finalized.id == utteranceID,
            language != finalized.language {
             guard Self.isConfident(trimmed, language: language) else { return nil }
