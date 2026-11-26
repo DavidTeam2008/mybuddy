@@ -184,6 +184,10 @@ final class MeetingViewModel {
     /// Two-phase begin: the lifecycle stops the old stream and ends the old
     /// task first; module captions are cleared only after it reports ready.
     func beginTask() async {
+        // Stop and drain the old stream first, so a final published during
+        // stop is part of the snapshot that ends the old task.
+        await lifecycle.pauseListening()
+        await drainSpeechTask()
         // An empty display may be a cleared screen over content the lifecycle
         // already holds; only overwrite its snapshot with real captions.
         if !transcript.isEmpty {
@@ -242,8 +246,10 @@ final class MeetingViewModel {
     }
 
     func endTask() async -> TaskSession? {
-        speechTask?.cancel()
-        speechTask = nil
+        // Stop the stream before ending so the engine can publish its last
+        // final; drain the consumer before the transcript is snapshotted.
+        await lifecycle.pauseListening()
+        await drainSpeechTask()
         isUnsavedTaskPromptPresented = false
         isExportThenContinuePending = false
         let outcome = await lifecycle.endTask(transcript: transcript, summary: summary)
@@ -289,12 +295,11 @@ final class MeetingViewModel {
 
     func stop(restoreIdleTimerAfterDelay: Bool = true) async {
         let wasListening = sessionState == .listening
-        speechTask?.cancel()
-        speechTask = nil
         if stateOverride == .listening {
             stateOverride = nil
         }
         await lifecycle.pauseListening()
+        await drainSpeechTask()
         projection.setSpeakingHint(nil, pane: .user)
         if wasListening {
             if restoreIdleTimerAfterDelay {
@@ -434,6 +439,9 @@ final class MeetingViewModel {
     }
 
     private func createNewTask() async {
+        // The lifecycle already stopped the old stream; drain its consumer so
+        // the stop-time final cannot land in the new task's captions.
+        await drainSpeechTask()
         resetCaptions()
         resumePromptText = nil
         _ = await lifecycle.startNewTask(makeNewTaskRequest())
@@ -492,6 +500,15 @@ final class MeetingViewModel {
             }
             await self?.streamEnded(handle)
         }
+    }
+
+    /// Waits for the speech consumer after the gate has stopped the stream.
+    /// The analyzer publishes its last final during `stop`; cancelling the
+    /// consumer immediately would drop it.
+    private func drainSpeechTask() async {
+        let task = speechTask
+        speechTask = nil
+        await SpeechTaskDrain.wait(for: task)
     }
 
     private func streamEnded(_ handle: SpeechSessionHandle) async {

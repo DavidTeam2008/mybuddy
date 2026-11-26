@@ -250,6 +250,48 @@ struct MeetingViewModelTests {
         #expect(viewModel.transcript.isEmpty)
     }
 
+    @Test("Beginning a new task drains a final emitted when the old stream stops")
+    func beginTaskDrainsFinalEmittedOnStop() async {
+        let store = InMemoryTaskStore()
+        let gate = MeetingFakeGate(log: MeetingEventLog())
+        gate.finalOnStop = Utterance(language: .zhHans, text: "旧会议最后一句", isFinal: true)
+        let viewModel = makeViewModel(store: store, gate: gate)
+
+        await viewModel.beginTask()
+        await viewModel.start()
+        await viewModel.beginTask()
+
+        let ended = await store.list(filter: .meeting)
+        #expect(ended.first?.entries.contains { $0.sourceText == "旧会议最后一句" } == true)
+    }
+
+    @Test("Ending a task drains a final emitted when the stream stops")
+    func endTaskDrainsFinalEmittedOnStop() async throws {
+        let store = InMemoryTaskStore()
+        let gate = MeetingFakeGate(log: MeetingEventLog())
+        gate.finalOnStop = Utterance(language: .zhHans, text: "会议最后一句", isFinal: true)
+        let viewModel = makeViewModel(store: store, gate: gate)
+
+        await viewModel.beginTask()
+        await viewModel.start()
+        let ended = try #require(await viewModel.endTask())
+
+        #expect(ended.entries.contains { $0.sourceText == "会议最后一句" })
+    }
+
+    @Test("Stopping listening drains a final emitted when the stream stops")
+    func stopDrainsFinalEmittedOnStop() async {
+        let gate = MeetingFakeGate(log: MeetingEventLog())
+        gate.finalOnStop = Utterance(language: .zhHans, text: "会议暂停最后一句", isFinal: true)
+        let viewModel = makeViewModel(gate: gate)
+
+        await viewModel.beginTask()
+        await viewModel.start()
+        await viewModel.stop(restoreIdleTimerAfterDelay: false)
+
+        #expect(viewModel.transcript.contains { $0.sourceText == "会议暂停最后一句" })
+    }
+
     @Test("Ending an empty task discards it without history")
     func endDiscardsEmptyTask() async {
         let store = InMemoryTaskStore()
@@ -765,6 +807,7 @@ private final class MeetingFakeGate: SpeechSessionGating {
     private(set) var starts: [Start] = []
     private(set) var stopCount = 0
     var nextStartError: (any Error)?
+    var finalOnStop: Utterance?
 
     init(log: MeetingEventLog) {
         self.log = log
@@ -802,6 +845,10 @@ private final class MeetingFakeGate: SpeechSessionGating {
         log.record("gate-stop")
         guard currentGeneration == handle.generation else { return }
         currentGeneration = nil
+        if let final = finalOnStop {
+            finalOnStop = nil
+            continuation?.yield(final)
+        }
         continuation?.finish()
         continuation = nil
     }

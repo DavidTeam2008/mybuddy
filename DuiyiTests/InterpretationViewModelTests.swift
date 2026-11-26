@@ -968,6 +968,48 @@ struct InterpretationViewModelTests {
         #expect(captions.contains("Lucy"))
     }
 
+    @Test("Ending a task drains a final emitted when the stream stops")
+    func endTaskDrainsFinalEmittedOnStop() async throws {
+        let store = InMemoryTaskStore()
+        let gate = InterpretationFakeGate(log: InterpretationEventLog())
+        gate.finalOnStop = Utterance(language: .english, text: "最后一句", isFinal: true)
+        let viewModel = makeViewModel(store: store, gate: gate)
+
+        await viewModel.beginTask()
+        await viewModel.start()
+        let ended = try #require(await viewModel.endTask())
+
+        #expect(ended.entries.contains { $0.sourceText == "最后一句" })
+    }
+
+    @Test("Stopping listening drains a final emitted when the stream stops")
+    func stopDrainsFinalEmittedOnStop() async {
+        let gate = InterpretationFakeGate(log: InterpretationEventLog())
+        gate.finalOnStop = Utterance(language: .english, text: "暂停最后一句", isFinal: true)
+        let viewModel = makeViewModel(store: InMemoryTaskStore(), gate: gate)
+
+        await viewModel.beginTask()
+        await viewModel.start()
+        await viewModel.stop(restoreIdleTimerAfterDelay: false)
+
+        #expect(viewModel.transcript.contains { $0.sourceText == "暂停最后一句" })
+    }
+
+    @Test("Beginning a new task drains a final emitted when the old stream stops")
+    func beginTaskDrainsFinalEmittedOnStop() async {
+        let store = InMemoryTaskStore()
+        let gate = InterpretationFakeGate(log: InterpretationEventLog())
+        gate.finalOnStop = Utterance(language: .english, text: "旧任务最后一句", isFinal: true)
+        let viewModel = makeViewModel(store: store, gate: gate)
+
+        await viewModel.beginTask()
+        await viewModel.start()
+        await viewModel.beginTask()
+
+        let ended = await store.list(filter: .simultaneous)
+        #expect(ended.first?.entries.contains { $0.sourceText == "旧任务最后一句" } == true)
+    }
+
     @Test("Beginning a new task stops the old stream before ending it")
     func beginStopsOldStreamBeforeEnding() async {
         let log = InterpretationEventLog()
@@ -1496,6 +1538,7 @@ private final class InterpretationFakeGate: SpeechSessionGating {
     private var continuation: AsyncStream<Utterance>.Continuation?
     private(set) var starts: [FeatureID] = []
     private(set) var stopCount = 0
+    var finalOnStop: Utterance?
 
     init(log: InterpretationEventLog) {
         self.log = log
@@ -1522,6 +1565,10 @@ private final class InterpretationFakeGate: SpeechSessionGating {
         log.record("gate-stop")
         guard currentGeneration == handle.generation else { return }
         currentGeneration = nil
+        if let final = finalOnStop {
+            finalOnStop = nil
+            continuation?.yield(final)
+        }
         continuation?.finish()
         continuation = nil
     }

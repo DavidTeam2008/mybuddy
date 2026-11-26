@@ -30,6 +30,7 @@
 - 任务生命周期在 `TaskLifecycle`：`beginTask` 走 `prepareForNewTask()` → 清本模块字幕 → `startNewTask()`；结束走 `endTask`；VM 不自行实现 250ms 防抖、restore 映射或空稿判断。
 - 显式“新任务 → 结束任务”；只有 ended 进历史；空稿由 `TaskStoreV2.end` 按 store 中持久化内容判断后删除；暂停只停麦克风，不结束任务。
 - 清屏用 `clearDisplay()`：先 `flush()`，只清显示（pane/字幕/翻译与总结显示），保留 transcript、总结数据与会议计数；`resetCaptions()` 只用于新任务、结束任务、换语言/方向。
+- 停止/结束/新建任务前：先 `lifecycle.pauseListening()`，再 await 本模块的 `speechTask`（`drainSpeechTask()` → `SpeechTaskDrain.wait`，500 ms 上限），最后 snapshot/reset；不要先 cancel consumer，否则引擎 stop 时发布的 final 会丢。
 - 同传 50 条只裁 pane 显示与恢复回填；面对面每侧 live + 3 条历史、恢复只回填 3 条；transcript / 历史 / 导出始终全量。会议 2 万字按任务累计，清屏不复位。
 - 存储不可用时继续显示已加载内容，用共享横幅 + 重试；当前任务标记「本次内容不会保存」，结束后不写历史但可从内存导出；有内容的未保存任务在新建前必须让用户选择导出或放弃。
 - 后台/切模块只停听，不自动结束；不要把“结束任务”改成自动保存。

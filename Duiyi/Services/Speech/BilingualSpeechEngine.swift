@@ -16,7 +16,11 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     private var ignoreTranscriptionUntil: Date = .distantPast
     private var converter = BufferConverter()
     private var analyzerFormat: AVAudioFormat?
+    private var stopDepth = 0
+    private var isStopping: Bool { stopDepth > 0 }
     private var usingDual = true
+    private static let stopDrain: Duration = .milliseconds(300)
+    private static let finalizeTimeout: Duration = .seconds(1)
     private var pairLanguages: [AppLanguage] = [.zhHans, .english]
     private var requestedLanguageCount = 0
     private var singleLanguage: AppLanguage = .english
@@ -58,21 +62,23 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     func stop() async {
+        stopDepth += 1
+        defer { stopDepth -= 1 }
+
         silenceTask?.cancel()
         silenceTask = nil
         audioTask?.cancel()
         audioTask = nil
+        await capturer.stop()
+        inputContinuation?.finish()
+        inputContinuation = nil
+
+        await finalizeOpenRange()
+
         for task in consumeTasks {
             task.cancel()
         }
         consumeTasks.removeAll()
-        inputContinuation?.finish()
-        inputContinuation = nil
-        await capturer.stop()
-        if let analyzer {
-            await analyzer.cancelAndFinishNow()
-        }
-        analyzer = nil
         converter = BufferConverter()
         utteranceContinuation?.finish()
         utteranceContinuation = nil
@@ -80,6 +86,42 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             _ = await AssetInventory.release(reservedLocale: locale)
         }
         reservedLocales.removeAll()
+    }
+
+    /// Let the analyzer publish the final for the open range, then give the
+    /// transcriber consumers a bounded window to deliver it. A synthetic final
+    /// covers a framework that returns no final at all.
+    private func finalizeOpenRange() async {
+        guard let analyzer else { return }
+        let finalized = await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                do {
+                    try await analyzer.finalizeAndFinishThroughEndOfInput()
+                    return true
+                } catch {
+                    DuiyiLog.speech.error(
+                        "Analyzer finalize failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                    return false
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: Self.finalizeTimeout)
+                return false
+            }
+            let result = await group.next() ?? false
+            group.cancelAll()
+            return result
+        }
+        if !finalized {
+            DuiyiLog.speech.error("Analyzer finalize failed or timed out")
+            await analyzer.cancelAndFinishNow()
+        }
+        self.analyzer = nil
+        try? await Task.sleep(for: Self.stopDrain)
+        if let utterance = assembler.silenceTimedOut() {
+            publish(utterance)
+        }
     }
 
     private func startBestPipeline(languages: [AppLanguage], fallback: AppLanguage) async throws {
@@ -122,21 +164,21 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private func resetPipelineKeepingStream() async {
+        stopDepth += 1
+        defer { stopDepth -= 1 }
+
         silenceTask?.cancel()
         silenceTask = nil
         audioTask?.cancel()
         audioTask = nil
+        await capturer.stop()
+        inputContinuation?.finish()
+        inputContinuation = nil
+        await finalizeOpenRange()
         for task in consumeTasks {
             task.cancel()
         }
         consumeTasks.removeAll()
-        inputContinuation?.finish()
-        inputContinuation = nil
-        await capturer.stop()
-        if let analyzer {
-            await analyzer.cancelAndFinishNow()
-        }
-        analyzer = nil
         converter = BufferConverter()
         for locale in reservedLocales {
             _ = await AssetInventory.release(reservedLocale: locale)
@@ -311,6 +353,7 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private func pingSilenceTimer() {
+        guard !isStopping else { return }
         silenceTask?.cancel()
         silenceTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(ConversationLayout.silenceCommitMilliseconds))
@@ -320,6 +363,7 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private func finalizeFromSilence() {
+        guard !isStopping else { return }
         guard let utterance = assembler.silenceTimedOut() else { return }
         publish(utterance)
         scheduleSingleLocaleSwitchIfNeeded(to: utterance.language)
@@ -341,18 +385,21 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private func scheduleSingleLocaleSwitchIfNeeded(to language: AppLanguage) {
-        guard !usingDual, language != singleLanguage else { return }
+        guard !isStopping, !usingDual, language != singleLanguage else { return }
         Task { [weak self] in
             await self?.restartSingle(language: language)
         }
     }
 
     private func restartSingle(language: AppLanguage) async {
+        guard !isStopping else { return }
         DuiyiLog.speech.info("Switching single transcriber to \(language.rawValue, privacy: .public)")
         await resetPipelineKeepingStream()
+        guard !isStopping else { return }
         assembler.reset()
         do {
             try await startSinglePipeline(language: language)
+            guard !isStopping else { return }
             usingDual = false
         } catch {
             DuiyiLog.speech.error("Single locale restart failed: \(error.localizedDescription, privacy: .public)")

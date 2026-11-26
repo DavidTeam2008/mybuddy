@@ -269,6 +269,10 @@ final class InterpretationViewModel {
     /// Two-phase begin: the lifecycle stops the old stream and ends the old
     /// task first; captions are cleared only after it reports ready.
     func beginTask() async {
+        // Stop and drain the old stream first, so a final published during
+        // stop is part of the snapshot that ends the old task.
+        await lifecycle.pauseListening()
+        await drainSpeechTask()
         // An empty display may be a cleared screen over content the lifecycle
         // already holds; only overwrite its snapshot with real captions.
         if !transcript.isEmpty {
@@ -328,10 +332,11 @@ final class InterpretationViewModel {
 
     func endTask() async -> TaskSession? {
         // Stop this module's stream before cancelling the consumer so the
-        // finished stream is classified as superseded, not interrupted.
+        // finished stream is classified as superseded, not interrupted. Wait
+        // for the consumer so a final published during stop is applied before
+        // the transcript snapshot is written.
         await lifecycle.pauseListening()
-        speechTask?.cancel()
-        speechTask = nil
+        await drainSpeechTask()
         isUnsavedTaskPromptPresented = false
         isExportThenContinuePending = false
         await clearSpeechQueue()
@@ -392,10 +397,11 @@ final class InterpretationViewModel {
             stateOverride = nil
         }
         // Clearing the lifecycle handle first keeps the cancelled stream from
-        // being reported as a recognition interruption.
+        // being reported as a recognition interruption. Drain the consumer so
+        // the engine's stop-time final reaches the transcript before the
+        // speaking hint and queue are cleared.
         await lifecycle.pauseListening()
-        speechTask?.cancel()
-        speechTask = nil
+        await drainSpeechTask()
         await clearSpeechQueue()
         if wasListening {
             if restoreIdleTimerAfterDelay {
@@ -615,10 +621,9 @@ final class InterpretationViewModel {
     }
 
     private func createNewTask() async {
-        // The lifecycle already stopped the old stream; drop any stale buffered
-        // utterances so they cannot land in the new task.
-        speechTask?.cancel()
-        speechTask = nil
+        // The lifecycle already stopped the old stream; drain its consumer so
+        // the stop-time final cannot land in the new task's captions.
+        await drainSpeechTask()
         resetCaptions()
         resumePromptText = nil
         _ = await lifecycle.startNewTask(makeNewTaskRequest())
@@ -675,12 +680,20 @@ final class InterpretationViewModel {
         }
     }
 
+    /// Waits for the speech consumer after the gate has stopped the stream.
+    /// The analyzer publishes its last final during `stop`; cancelling the
+    /// consumer immediately would drop it.
+    private func drainSpeechTask() async {
+        let task = speechTask
+        speechTask = nil
+        await SpeechTaskDrain.wait(for: task)
+    }
+
     /// Stops this feature's capture without touching the task so the audio
     /// route can change underneath the session.
     private func pauseCaptureForReroute() async {
         await lifecycle.pauseListening()
-        speechTask?.cancel()
-        speechTask = nil
+        await drainSpeechTask()
     }
 
     private func rerouteCaptureIfListening() async {
@@ -688,8 +701,8 @@ final class InterpretationViewModel {
             try? await audioSession.activate(currentUseCase)
             return
         }
-        speechTask?.cancel()
-        speechTask = nil
+        await lifecycle.pauseListening()
+        await drainSpeechTask()
         stateOverride = nil
         guard case let .started(handle) = await lifecycle.startListening(makeListeningRequest()) else {
             return
@@ -702,8 +715,7 @@ final class InterpretationViewModel {
     /// on its own.
     private func applyDirectionChange(wasActive: Bool) async {
         await lifecycle.pauseListening()
-        speechTask?.cancel()
-        speechTask = nil
+        await drainSpeechTask()
         projection.archiveLive(pane: .user)
         projection.setSpeakingHint(nil, pane: .user)
         pipeline.reset()
