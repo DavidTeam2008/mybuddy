@@ -1,0 +1,12 @@
+{
+  "fill" : { "solid" : "extended-srgb:1.00000,0.97255,0.94118,1.00000" },
+  "groups" : [
+    {
+      "name" : "Foreground",
+      "layers" : [
+        { "image-name" : "foreground.svg", "name" : "Mark" }
+      ]
+    }
+  ],
+  "supported-platforms" : { "squares" : "shared" }
+}
