@@ -179,10 +179,9 @@ private func generatedCases() -> [FidelityCase] {
 
 // MARK: - Checks
 
-private func runChecks(cases: [FidelityCase]) -> (failures: [Failure], checks: Int, modeling: [String], requiredCases: Int, exhaustiveCount: Int) {
+private func runChecks(cases: [FidelityCase]) -> (failures: [Failure], modeling: [String], requiredCases: Int, exhaustiveCount: Int) {
     var failuresByKey: [String: Failure] = [:]
     var modeling: [String] = []
-    var checks = 0
     var requiredCases = 0
 
     func record(_ failure: Failure) {
@@ -201,7 +200,6 @@ private func runChecks(cases: [FidelityCase]) -> (failures: [Failure], checks: I
         }
     }
 
-    checks += 1
     for scalar in expectedTerminatorScalars where !ClauseSplitter.terminators.contains(scalar) {
         record(
             Failure(
@@ -214,7 +212,6 @@ private func runChecks(cases: [FidelityCase]) -> (failures: [Failure], checks: I
 
     for fidelityCase in cases {
         if !fidelityCase.required.isEmpty { requiredCases += 1 }
-        checks += 1
         let result = consume(fidelityCase.final, spoken: fidelityCase.spoken, fidelityCase.language)
         let emitted = result.clauses.map(\.text).joined()
         let emittedCompact = compact(emitted)
@@ -287,7 +284,6 @@ private func runChecks(cases: [FidelityCase]) -> (failures: [Failure], checks: I
     }
 
     for text in strings {
-        checks += 1
         let first = consume(text, spoken: "", .english)
         let compactText = compact(text)
         for clause in first.clauses {
@@ -315,7 +311,7 @@ private func runChecks(cases: [FidelityCase]) -> (failures: [Failure], checks: I
         }
     }
 
-    return (Array(failuresByKey.values), checks, modeling, requiredCases, strings.count)
+    return (Array(failuresByKey.values), modeling, requiredCases, strings.count)
 }
 
 // MARK: - Reporting
