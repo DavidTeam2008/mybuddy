@@ -2,7 +2,7 @@
 
 > 日期：2026-11-25。对照材料：用户 iPhone 同传导出（2026-11-25 08:58–10:13，English → 中文，175 条）；TED 官方 transcript（Lauren Weinstein, *Don't believe everything you think*, TEDxPaloAlto）。代码基线：`main` = `0b1c626`（Xcode 27.1 / iOS 27.1 SDK）。逐条对照数据与脚本留在本机 `/tmp/simultaneous-comparison.md`，未入库。
 >
-> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78；P0-1 outbound 无损队列 → PR #79；P1-2 稳定单元 preview → PR #80；P0-6a 结束竞态回填 → `feat/p0-6a-late-translation-backfill`（待 PR）。P0-6b、其余 P1/P2 未开始。
+> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78；P0-1 outbound 无损队列 → PR #79；P1-2 稳定单元 preview → PR #80；P0-6a 结束竞态回填 → PR #81。P0-6b、其余 P1/P2 未开始。
 
 ## 0. 结论
 
@@ -259,7 +259,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P0-6. 翻译失败重试与可见状态**
 
-- **状态（2026-11-26，已按用户确认拆成两半）**：**P0-6a（本分支）** 已实现结束竞态回填：`TaskLifecycle.endTask` 与 `prepareForNewTask` 都保留最近一个已结束任务的快照；结束/新建任务/重置后到达的 final 译文通过 `TaskStoreV2.updateTranslations` 回填（preview 不落库，损坏文本拒绝），`fulfill` 不再因为 projection 已 reset 而静默丢掉 final 译文。结束写入在途时到达的 final 由 `LateTranslationBackfill` 先暂存，写入返回后回填，避免快照与 projection 之间的竞态。单测覆盖迟到 final 回填、迟到/在途 preview 不回填、结束写入在途 final、新建任务结束路径、损坏文本、未知条目与只回填最近结束任务；真机未验证，手动步骤：说一句后立即结束任务，确认历史/导出中该行有译文且不重复。**P0-6b（未开始）**：重试分类（取消/资源未就绪/不支持语言对/瞬时错误）与 `permanentFailure` 可见状态，等 P1-4 诊断/设备数据后再做，避免在没有错误分布数据时猜 UI 与重试预算。
+- **状态（2026-11-26，已按用户确认拆成两半）**：**P0-6a（PR #81）** 已实现结束竞态回填：`TaskLifecycle.endTask` 与 `prepareForNewTask` 都保留最近一个已结束任务的快照；结束/新建任务/重置后到达的 final 译文通过 `TaskStoreV2.updateTranslations` 回填（preview 不落库，损坏文本拒绝），`fulfill` 不再因为 projection 已 reset 而静默丢掉 final 译文。结束写入在途时到达的 final 由 `LateTranslationBackfill` 先暂存，写入返回后回填，避免快照与 projection 之间的竞态。单测覆盖迟到 final 回填、迟到/在途 preview 不回填、结束写入在途 final、新建任务结束路径、损坏文本、未知条目与只回填最近结束任务；真机未验证，手动步骤：说一句后立即结束任务，确认历史/导出中该行有译文且不重复。**P0-6b（未开始）**：重试分类（取消/资源未就绪/不支持语言对/瞬时错误）与 `permanentFailure` 可见状态，等 P1-4 诊断/设备数据后再做，避免在没有错误分布数据时猜 UI 与重试预算。
 - 区分取消（不算失败）、语言包/下载/未就绪（提示并保留 job）、不支持语言对（不无限重试）、瞬时错误（2 次短退避）；耗尽后进入 `permanentFailure`，在 UI/文字稿可查，不静默丢。
 
 ### 实验（P2）
