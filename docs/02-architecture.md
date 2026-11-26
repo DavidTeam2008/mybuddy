@@ -66,6 +66,7 @@ DuiyiUITests/     XCUITest 用例（4 个）
 | `TaskStoreV2` | `DeferredTaskStore` | 任务持久化（availability / prepare / retry + 结果化读写） |
 | `ExportSharing` | `TranscriptExportService` | 导出文本 |
 | `LanguageCataloging` | `SystemLanguageCatalog` | 语言目录（系统探针缓存） |
+| `DiagnosticsRecording` | `DiagnosticsRecorder` | 每任务诊断 ring buffer + 聚合（DEBUG 导出，不上传） |
 
 `DuiyiApp` 用 `@State` 持有 `AppEnvironment` 和 `AppCoordinator`，通过 `.environment()` 注入。
 
@@ -192,10 +193,11 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 
 ### 4.2 切句
 
-- 每个 transcriber 的 partial/final 进入 `UtteranceAssembler.ingest`。
+- 每个 transcriber 的 partial/final 带 `range` 进入 `UtteranceAssembler.ingest`。当前行 = 已 final 的 phrase 前缀 + 开放 range 的 volatile 尾部；range 连续性决定续写，句末标点（`.?!。？！`，可带收尾引号/括号）决定换行，range 间隔 >0.75 s 也开新行。
+- 空 volatile 撤销该 range 的开放尾部并回退到 final 前缀；空 final 表示该 range 无语音。
+- 静音（Detector 或 1.1 s 无结果）：引擎先 `analyzer.finalize(through: nil)`，等待 350 ms 让转写器发布自己的 final；超时才用 `silenceTimedOut` 合成 final。合成与迟到 final 都按 range 重叠匹配最近关闭的行并复用 ID（`isRevision`），匹配窗口 12 s、最多保留 8 行。
 - final 后 `acknowledgeFinal` 保持 1.0 秒，抑制同句尾巴被另一路重复接收。
-- Detector 判定无语音超过 `ConversationLayout.silenceCommitMilliseconds = 1100 ms` → `silenceTimedOut` 强制 final，并保持 0.8 秒。
-- `publish` 以 `(language, 归一化文本)` 签名去重 final。
+- `publish` 以 `(utterance.id, language, 归一化文本)` 签名去重 final：同一行的重复 final 只发一次，新行重复同一句仍会发布。
 
 ### 4.3 UtteranceAssembler
 
@@ -203,9 +205,10 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 
 - **语言纯度门禁**：`matchesClaimedLanguage` 按脚本统计拒绝明显不属于该路的文本（如中文路收到纯拉丁、英文路收到汉字）。真正的单语种请求用 `.trustedLocale` 信任唯一 transcriber：非空结果都接受，混合脚本/纯数字只记录不匹配、不丢句；请求了双 locale 但资源降到单路、以及会议，保持 `.strict`。
 - **抢占**：锁定语言后，异语候选只有 `nativeUnits` 明显超过当前句才抢占。
-- **同句更新**：同一 `utteranceID` 原地更新；continuation/refinement 合并，不新开行。
+- **同句更新**：range-aware 路径下，同一 `utteranceID` 原地更新；连续 phrase 按 range 连续性与标点合并，不依赖文本前缀相似度。无 range 的调用保留原文本启发式（测试与兼容路径）。
 - **短句抑制**：`isConfident` 对短确认语不自信，沿用上一句语种，减少「嗯 / um」误切。
 - **六语脚本阈值**：中/日/韩/泰/越/英各有独立计数与阈值；`resolvedLanguage` 可按文本重新判定会议行的实际语言。
+- **诊断**：range/`resultsFinalizationTime` 只在引擎消费结果处记录，assembler 的组装行为不读取诊断 sink。
 
 ### 4.4 流结束
 
@@ -223,6 +226,7 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 - 两个 ViewModel 只保留 feature 策略与副作用：Conversation 做语言路由与 crosstalk，并把结果写入两侧 pane/transcript；Interpretation 选目标语言、写单栏 pane/transcript 并调度 TTS。`fulfill` 是薄适配器：`pipeline.accept` 返回 `TranslationUpdate` 后写 UI。
 - `TranslationTrigger`（Domain 纯函数）回答非 final 文本是立即发送、进入防抖还是丢弃：句末/从句标点立即发送，≥4 estimated words 防抖，更短丢弃；final 旁路属于 pipeline。
 - 六语脚本计数与 scalar 判定放在 Domain 的 `ScriptCounts`；`TranslationTrigger` 与 Services 的 `UtteranceAssembler` 都复用它，Domain 不反向依赖 Services。
+- **诊断（P1-4a）**：`TranslationPipeline` 在 job 形成与结果应用时向 `DiagnosticsRecording` 写 submit/apply 事件；`TranslationJobPump` 写 Response 语言、重试与失败类。记录只含 ID、语言、长度与延迟，不含正文；`TranslationJob` 不加时间字段，提交→应用延迟由 recorder 的 jobID 表计算。
 
 ### 5.1 Host
 
@@ -400,6 +404,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 - **翻译可用性**：`TranslationAvailabilityService` 双向查 `LanguageAvailability` 并合并状态。
 - **权限**：`PermissionService` 映射麦克风/语音识别四态；`requestAccess` 先麦后音后重查。
 - **语言目录**：生产注入 `SystemLanguageCatalog`，由 `SpeechTranscriber.supportedLocale`、`LanguageAvailability`、`AVSpeechSynthesizer` 探针填充缓存；当前只有首页设置消费，v1 扩展到所有语言入口。
+- **诊断（P1-4a）**：`DiagnosticsRecorder` 是唯一实现，`AppEnvironment` 注入；`TaskLifecycle` 在任务开始/恢复/结束处 begin/end 会话，结束后迟到的事件仍归最近结束任务。ring buffer 默认 4096 事件，聚合计数独立累加；DEBUG 设置页写 `Documents/duiyi-diagnostics-<时间>.json` 并 ShareLink，不上传。ASR 事件在引擎消费 `SpeechTranscriber.Result` 处记录 `range`/`resultsFinalizationTime`/synthetic/脚本不匹配，不改组装行为。
 
 ---
 
@@ -418,6 +423,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 | `SystemSpeechSynthesizer` | `@MainActor` + delegate | AVSpeechSynthesizer 代理回调 |
 | `TranslationPipeline` | `@MainActor` + `@Observable` | 翻译 job 生命周期与 UI 状态 |
 | `TranslationJobBridge` | `@unchecked Sendable` + `NSLock` | 跨 View 任务队列与 consumer 唤醒流 |
+| `DiagnosticsRecorder` | `@unchecked Sendable` + `NSLock` | speech actor 与主线程共同写入的 ring buffer |
 
 `SendablePCMBuffer` 用 `@unchecked Sendable` 包装 `AVAudioPCMBuffer`，跨 actor 传递，责任在音频层。
 
@@ -427,12 +433,13 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 
 | 层级 | 覆盖 | 入口 |
 | --- | --- | --- |
-| Domain 纯逻辑 | 路由、assembler、spoken 合并、clause、翻译触发阈值、任务映射 | `DuiyiTests`（Swift Testing） |
+| Domain 纯逻辑 | 路由、assembler（文本与 range-aware）、spoken 合并、clause、翻译触发阈值、任务映射 | `DuiyiTests`（Swift Testing） |
 | 翻译管线 | job 形成、每句防抖、重复抑制、final 权威与 preview 过期、有序 outbound 队列与 drain、sequence/去重、`reset` | `DuiyiTests`（`TranslationPipelineTests`） |
 | 翻译 job bridge / pump | per-`utteranceID` 合并、final 优先、pre-pump wakeup、generation-scoped takeNext、latest-job requeue、drain/取消 | `DuiyiTests`（`TranslationJobBridgeTests`、`TranslationJobPumpTests`） |
 | ViewModel / 生命周期 | 三模块状态机、pipeline 接线、清屏、任务恢复、TTS 队列、`TaskLifecycle`/`SpeechSessionGate` 接缝 | `DuiyiTests` |
 | 音频策略 | 路由快照/回声判定 | `DuiyiTests` |
 | UI | 冷启动、首页导航、同传听写压力、滑动返回 | `DuiyiUITests`（XCTest，4 个用例） |
+| 诊断 | ring buffer 淘汰、聚合计数、会话 begin/end、submit→apply 延迟、拒收原因、JSON 字段 | `DuiyiTests`（`DiagnosticsRecorderTests`、`TranslationPipelineDiagnosticsTests`） |
 | 真机 | 语音、翻译、TTS、持久化、长会话 | 真机手动验证（原 harness 脚本未随提取保留） |
 
 基线：以仓库当前 `DuiyiTests` / `DuiyiUITests` 结果为准；原 harness 的基线计数未随提取保留。模拟器没有 `SpeechTranscriber`，`testSimultaneousListeningPressure` 会 skip，这是预期行为。

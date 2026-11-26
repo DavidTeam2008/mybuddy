@@ -166,7 +166,8 @@ struct RootView: View {
             preferences: environment.preferences,
             summarizer: environment.summarizer,
             audioSession: environment.audioSession,
-            taskStore: environment.taskStore
+            taskStore: environment.taskStore,
+            diagnostics: environment.diagnostics
         )
     }
 
@@ -178,7 +179,8 @@ struct RootView: View {
             summarizer: environment.summarizer,
             audioSession: environment.audioSession,
             synthesizer: environment.synthesizer,
-            taskStore: environment.taskStore
+            taskStore: environment.taskStore,
+            diagnostics: environment.diagnostics
         )
     }
 
@@ -189,7 +191,8 @@ struct RootView: View {
             preferences: environment.preferences,
             summarizer: environment.summarizer,
             audioSession: environment.audioSession,
-            taskStore: environment.taskStore
+            taskStore: environment.taskStore,
+            diagnostics: environment.diagnostics
         )
     }
 }

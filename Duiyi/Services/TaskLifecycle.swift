@@ -67,6 +67,7 @@ final class TaskLifecycle {
     private let permissions: any PermissionGranting
     private let audioSession: any AudioSessionConfiguring
     private let persistDebounce: Duration
+    private let diagnostics: any DiagnosticsRecording
 
     @ObservationIgnored private var activeHandle: SpeechSessionHandle?
     @ObservationIgnored private var pendingPersist: PendingPersist?
@@ -88,7 +89,8 @@ final class TaskLifecycle {
         gate: any SpeechSessionGating,
         permissions: any PermissionGranting,
         audioSession: any AudioSessionConfiguring,
-        persistDebounce: Duration = .milliseconds(250)
+        persistDebounce: Duration = .milliseconds(250),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         self.feature = feature
         self.store = store
@@ -96,6 +98,7 @@ final class TaskLifecycle {
         self.permissions = permissions
         self.audioSession = audioSession
         self.persistDebounce = persistDebounce
+        self.diagnostics = diagnostics
     }
 
     var hasActiveTask: Bool {
@@ -119,6 +122,9 @@ final class TaskLifecycle {
             isMemoryOnly = false
             isNotSaved = false
             sessionState = .ready
+            if let restoredTaskID = task?.id {
+                diagnostics.beginSession(feature: feature, taskID: restoredTaskID)
+            }
             return task
         case .unavailable:
             current = nil
@@ -220,6 +226,7 @@ final class TaskLifecycle {
             isNotSaved = true
             persistenceFailure = reason
         }
+        diagnostics.beginSession(feature: feature, taskID: current?.id)
 
         guard request.autoStart else {
             if let persistenceFailure {
@@ -476,6 +483,9 @@ final class TaskLifecycle {
 
     private func clearCurrent() {
         cancelPendingPersist()
+        if let taskID = current?.id {
+            diagnostics.endSession(taskID: taskID)
+        }
         current = nil
         isMemoryOnly = false
         isNotSaved = false

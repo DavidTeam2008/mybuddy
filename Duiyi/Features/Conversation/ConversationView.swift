@@ -260,7 +260,8 @@ struct ConversationView: View {
                 outboundRevision: viewModel.outboundRevision,
                 takeNextOutboundJob: viewModel.takeNextOutboundJob,
                 onSuccess: viewModel.fulfill,
-                onFailure: viewModel.failTranslation
+                onFailure: viewModel.failTranslation,
+                diagnostics: viewModel.translationDiagnostics
             )
             .id("\(viewModel.userLanguage.rawValue)-\(viewModel.peerLanguage.rawValue)")
         }
