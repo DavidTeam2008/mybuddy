@@ -26,3 +26,9 @@ Single-context: `GLOSSARY.md` at the repo root and the D-series decision record 
 ### Device testing
 
 Physical iPhone builds, signing, UI automation, and acoustic smoke: see `docs/agents/device-testing.md`.
+
+### Formal verification
+
+`verify-utterance-identity` (`.claude/skills/verify-utterance-identity/SKILL.md`) checks the D8 utterance-identity promise with bounded exhaustive replay of the real assembler: `tools/verify-utterance-identity.sh`.
+
+`verify-tts-text-fidelity` (`.claude/skills/verify-tts-text-fidelity/SKILL.md`) checks that settled TTS clauses cover new meaning-bearing content, fabricate nothing, and settle idempotently: `tools/verify-tts-text-fidelity.sh`.
