@@ -38,8 +38,8 @@
 		D01E00000000000000000001 /* Exceptions for "Duiyi" folder in "Duiyi" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Info.plist,
 				Features/AGENTS.md,
+				Info.plist,
 				Services/AGENTS.md,
 			);
 			target = D01T00000000000000000001 /* Duiyi */;
@@ -124,15 +124,6 @@
 			);
 			sourceTree = "<group>";
 		};
-		D03R00000000000000000001 /* Config */ = {
-			isa = PBXGroup;
-			children = (
-				D03F00000000000000000001 /* Shared.xcconfig */,
-				D03F00000000000000000002 /* Local.xcconfig.example */,
-			);
-			path = Config;
-			sourceTree = "<group>";
-		};
 		D01R00000000000000000002 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -151,6 +142,15 @@
 				D02P00000000000000000001 /* DuiyiUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		D03R00000000000000000001 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				D03F00000000000000000001 /* Shared.xcconfig */,
+				D03F00000000000000000002 /* Local.xcconfig.example */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */

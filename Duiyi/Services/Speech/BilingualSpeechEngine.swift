@@ -23,6 +23,9 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     private var usingDual = true
     private static let stopDrain: Duration = .milliseconds(300)
     private static let finalizeTimeout: Duration = .seconds(1)
+    /// How long a silence boundary waits for the transcriber's own final after
+    /// `finalize(through: nil)` before synthesizing one.
+    private static let silenceFinalizeWindow: Duration = .milliseconds(350)
     private var pairLanguages: [AppLanguage] = [.zhHans, .english]
     private var requestedLanguageCount = 0
     private var singleLanguage: AppLanguage = .english
@@ -342,7 +345,14 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             return
         }
         let scriptMismatch = UtteranceAssembler.isScriptMismatch(text, claimed: language)
-        guard let utterance = assembler.ingest(language: language, text: text, isFinal: isFinal) else {
+        let range = SpeechRange(rangeStart: rangeStart, rangeDuration: rangeDuration)
+        guard let utterance = assembler.ingest(
+            language: language,
+            text: text,
+            isFinal: isFinal,
+            range: range,
+            resultsFinalizationTime: resultsFinalizationTime
+        ) else {
             diagnostics.record(
                 ASRDiagnosticsRecord(
                     language: language,
@@ -438,8 +448,23 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         }
     }
 
-    private func finalizeFromSilence() {
-        guard !isStopping else { return }
+    private func finalizeFromSilence() async {
+        guard !isStopping, assembler.hasOpenRange else { return }
+        // Ask the analyzer to finalize the open range. The transcriber's own
+        // final is preferred; the synthetic final below is only a timeout
+        // fallback. `finalize(through: nil)` finalizes everything received so
+        // far while analysis continues.
+        if let analyzer {
+            do {
+                try await analyzer.finalize(through: nil)
+            } catch {
+                DuiyiLog.speech.error(
+                    "Analyzer finalize on silence failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+            try? await Task.sleep(for: Self.silenceFinalizeWindow)
+            guard !Task.isCancelled, !isStopping else { return }
+        }
         guard let utterance = assembler.silenceTimedOut() else { return }
         publishSynthetic(utterance)
         scheduleSingleLocaleSwitchIfNeeded(to: utterance.language)
@@ -523,8 +548,10 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private static func signature(_ utterance: Utterance) -> String {
+        // Include the row id: an identical sentence repeated in a new row must
+        // not be dropped, while duplicate finals for the same row still are.
         let filtered = utterance.text.lowercased().filter { $0.isLetter || $0.isNumber || $0.isWhitespace }
-        return "\(utterance.language.rawValue)-\(filtered)"
+        return "\(utterance.id.uuidString)-\(utterance.language.rawValue)-\(filtered)"
     }
 
     static func normalizedLanguages(languages: [AppLanguage], fallback: AppLanguage) -> [AppLanguage] {

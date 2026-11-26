@@ -219,8 +219,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P1-1. Range-aware ASR 组装**
 
-- 把 `SpeechTranscriber.Result` 建模为 `(text, range, isFinal, resultsFinalizationTime)`，保留 finalized-prefix buffer；用 range 连续性与标点决定 utterance 边界，不再用文本前缀相似度；空 volatile 文本视为撤销。
-- 静音时调用 `analyzer.finalize(through: nil)`，让转写器发布该 range 的 final；合成 final 只做超时兜底并标记 `synthetic`，迟到的同 range final 复用 ID。
+- **状态（2026-11-26，已实现，待真机）**：`UtteranceAssembler` 新增 range-aware `ingest`：每个 `SpeechTranscriber.Result` 以 `(text, range, isFinal)` 进入；当前行 = 已 final 的 phrase 前缀 + 开放 range 的 volatile 尾部，range 连续性决定“续上一条”，句末标点（`.?!。？！`）决定换行；空 volatile 撤销开放尾部并回退到 final 前缀。`SpeechTranscriber.Result` 的 `range`/`resultsFinalizationTime` 只在引擎消费处读取，文本启发式路径仅为无 range 的兼容/测试保留。静音时引擎先 `analyzer.finalize(through: nil)` 并等待 350 ms，转写器自己的 final 优先；超时才合成 final 并标 synthetic。合成/迟到 final 按 range 重叠匹配最近关闭的行并复用 `Utterance.id`（`isRevision`），不再依赖文本前缀窗口；range 间隔 >0.75 s 或新句标点开新行。D8 不变：ID 仍由 assembler 独占；dual-locale 的脚本纯度、抢占、crosstalk hold 与 greeting name-swap 保持（name-swap 不登记为可修订 range）。单测覆盖 volatile 增长、连续 final 合并、标点换行、空 volatile 撤销、静音后迟到 final 复用/超窗新行、range 间隔、中英拼接空格、strict 串音与 name swap；真机未验证。
 - 这是比 P0-2b 更彻底的方案，但改动共享 assembler（Conversation/Meeting 也用），必须保持 D8 与现有 crosstalk 行为。
 
 **P1-4. 诊断与 TED 离线夹具**
