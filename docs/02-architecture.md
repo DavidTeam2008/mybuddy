@@ -221,7 +221,7 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 - `TranslationPipeline`（`Duiyi/Features/Shared/TranslationPipeline.swift`，`@MainActor @Observable`）拥有 job 形成、每 utterance 独立防抖、重复抑制、单调 `sequence` 过期判定、已应用 job 去重、preview 有界且 final 不丢的有序 outbound 队列，以及 `sentSourceText` / `lastAppliedSourceCount` / `lastAppliedSequence`。
 - `TranslationHostView` / `OneWayTranslationHostView` 只是 `.translationTask` 的泵适配器：live 模式按 ViewModel 的 `outboundRevision` 变化 drain `takeNextOutboundJob()` 到空，逐条 `submit` 给共享 bridge；`TranslationJobPump` 每次唤醒逐条 `session.translate`，成功/失败回调 ViewModel。历史详情仍用单个 `job:` 逐条推进。
 - 两个 ViewModel 只保留 feature 策略与副作用：Conversation 做语言路由与 crosstalk，并把结果写入两侧 pane/transcript；Interpretation 选目标语言、写单栏 pane/transcript 并调度 TTS。`fulfill` 是薄适配器：`pipeline.accept` 返回 `TranslationUpdate` 后写 UI。
-- `TranslationTrigger`（Domain 纯函数）只回答非 final 文本是否立即发送；final 旁路属于 pipeline。
+- `TranslationTrigger`（Domain 纯函数）回答非 final 文本是立即发送、进入防抖还是丢弃：句末/从句标点立即发送，≥4 estimated words 防抖，更短丢弃；final 旁路属于 pipeline。
 - 六语脚本计数与 scalar 判定放在 Domain 的 `ScriptCounts`；`TranslationTrigger` 与 Services 的 `UtteranceAssembler` 都复用它，Domain 不反向依赖 Services。
 
 ### 5.1 Host
@@ -261,7 +261,7 @@ TranslationSession.Configuration(
 
 - 接口：`submit(TranslationSubmission)`、`takeNextOutboundJob()`、`outboundRevision`、`accept(job:text:) -> TranslationUpdate?`、`fail(job:)`、`reset()`、`outboundJob`（未 drain 的最新 job，供测试观察）。
 - `TranslationSubmission` 由 feature 在提交时算好行、`isFinal`、目标语言、首包/后续延迟；pipeline 不读取 feature 状态。
-- 非 final 立即发送由 `TranslationTrigger.shouldSendNow(text:isFirst:language:)` 决定（六语脚本阈值 + `ClauseSplitter` 终止符）；final 直接旁路防抖。
+- 非 final 由 `TranslationTrigger.action(for:language:)` 三选一：以 `ClauseSplitter` 终止符（含仅看末字符时的 ASCII `.`）结尾 → `.sendNow`；≥4 estimated words → `.debounce`（首包/后续延迟）；更短 → `.drop`，不翻译两词片段。estimated words：英文按词数；越南语按音节数/2；中/日/韩按脚本字符/2；泰语按字符/3（启发式，随 P1-4 设备数据调整）。final 直接 `.sendNow` 旁路防抖。
 - 防抖按 `utteranceID` 独立：新行/新 final 只取消同一句的待发 preview，不会取消其他句的 preview。空文本直接返回且不改队列。
 - outbound 是**有界有序队列**：同一句最多排一条，替换保留首次位置；已排队 final 不被迟到的 preview 取代；preview 积压上限 `outboundQueueLimit`（超限丢最旧 preview，final 永不丢弃）。每次入队递增 `outboundRevision`，Host 据此 drain `takeNextOutboundJob()` 到空；不要退回单个 `outboundJob` 观察值（SwiftUI 会合并两次渲染之间的 job）。
 - 每个 pipeline job 带单调 `sequence`；`accept` 拒绝同句**不新于**已应用 sequence 的结果（`<=`），因此同一 pipeline job 不会被重放。非 pipeline job（sequence 0）另按 job ID 去重（记录最近 256 个）。

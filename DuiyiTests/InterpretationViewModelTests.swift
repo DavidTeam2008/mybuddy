@@ -125,14 +125,14 @@ struct InterpretationViewModelTests {
         await viewModel.setVoiceOutEnabled(true)
         let id = UUID()
 
-        viewModel.accept(Utterance(id: id, language: .english, text: "hello", isFinal: false))
+        viewModel.accept(Utterance(id: id, language: .english, text: "hello world my friend", isFinal: false))
         #expect(scheduler.scheduledDelays == [.milliseconds(25)])
 
         // Complete the first submission so the next one is a subsequent packet
         // rather than another first packet.
         scheduler.advance(by: .milliseconds(25))
 
-        viewModel.accept(Utterance(id: id, language: .english, text: "hello there", isFinal: false))
+        viewModel.accept(Utterance(id: id, language: .english, text: "hello world my friend again", isFinal: false))
         #expect(scheduler.scheduledDelays == [.milliseconds(25), .milliseconds(50)])
 
         // The pipeline owns debounce firing; here the submitted job proves the
@@ -140,7 +140,7 @@ struct InterpretationViewModelTests {
         scheduler.advance(by: .milliseconds(50))
         #expect(viewModel.outboundJob?.utteranceID == id)
         #expect(viewModel.outboundJob?.target == .korean)
-        #expect(viewModel.outboundJob?.text == "hello there")
+        #expect(viewModel.outboundJob?.text == "hello world my friend again")
     }
 
     @Test("Caption-only interpretation submits 40/90 ms delays and the current target")
@@ -149,20 +149,20 @@ struct InterpretationViewModelTests {
         let viewModel = makeViewModel(targetLanguage: .korean, scheduler: scheduler)
         let id = UUID()
 
-        viewModel.accept(Utterance(id: id, language: .english, text: "hello", isFinal: false))
+        viewModel.accept(Utterance(id: id, language: .english, text: "hello world my friend", isFinal: false))
         #expect(scheduler.scheduledDelays == [.milliseconds(40)])
 
         // Complete the first submission so the next one is a subsequent packet
         // rather than another first packet.
         scheduler.advance(by: .milliseconds(40))
 
-        viewModel.accept(Utterance(id: id, language: .english, text: "hello there", isFinal: false))
+        viewModel.accept(Utterance(id: id, language: .english, text: "hello world my friend again", isFinal: false))
         #expect(scheduler.scheduledDelays == [.milliseconds(40), .milliseconds(90)])
 
         scheduler.advance(by: .milliseconds(90))
         #expect(viewModel.outboundJob?.utteranceID == id)
         #expect(viewModel.outboundJob?.target == .korean)
-        #expect(viewModel.outboundJob?.text == "hello there")
+        #expect(viewModel.outboundJob?.text == "hello world my friend again")
     }
 
     @Test("Enqueuing a final bumps the host revision")
@@ -260,7 +260,7 @@ struct InterpretationViewModelTests {
         let scheduler = ManualTranslationScheduler()
         let viewModel = makeViewModel(scheduler: scheduler)
 
-        viewModel.accept(Utterance(language: .english, text: "hello", isFinal: false))
+        viewModel.accept(Utterance(language: .english, text: "hello world my friend", isFinal: false))
         #expect(scheduler.pendingDelays == [.milliseconds(40)])
 
         viewModel.resetCaptions()
@@ -276,7 +276,7 @@ struct InterpretationViewModelTests {
         let scheduler = ManualTranslationScheduler()
         let viewModel = makeViewModel(scheduler: scheduler)
 
-        viewModel.accept(Utterance(language: .english, text: "hello", isFinal: false))
+        viewModel.accept(Utterance(language: .english, text: "hello world my friend", isFinal: false))
         #expect(scheduler.pendingDelays == [.milliseconds(40)])
 
         await viewModel.swapDirection()
