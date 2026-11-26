@@ -2,7 +2,7 @@
 
 > 日期：2026-11-25。对照材料：用户 iPhone 同传导出（2026-11-25 08:58–10:13，English → 中文，175 条）；TED 官方 transcript（Lauren Weinstein, *Don't believe everything you think*, TEDxPaloAlto）。代码基线：`main` = `0b1c626`（Xcode 27.1 / iOS 27.1 SDK）。逐条对照数据与脚本留在本机 `/tmp/simultaneous-comparison.md`，未入库。
 >
-> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78；P0-1 outbound 无损队列 → PR #79；P1-2 稳定单元 preview → `feat/p1-2-stable-preview`（待 PR）。P0-6、其余 P1/P2 未开始。
+> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78；P0-1 outbound 无损队列 → PR #79；P1-2 稳定单元 preview → PR #80。P0-6、其余 P1/P2 未开始。
 
 ## 0. 结论
 
@@ -205,7 +205,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P1-2. 翻译稳定单元，而不是词片段**
 
-- **状态（2026-11-26）**：已实现 preview 门控于 `feat/p1-2-stable-preview`（待 PR）。`TranslationTrigger.action(for:language:)` 三选一：句末/从句标点（含仅看末字符时的 ASCII `.`；`ClauseSplitter` 本身不加 `.`，避免 TTS 小数分割）→ `.sendNow`；≥4 estimated words（英文按词数，越南语按音节/2，中/日/韩按脚本字符/2，泰语按字符/3）→ `.debounce`（沿用各 feature 的 40/90 ms，voiceOut 25/50 ms）；更短 → `.drop`，不形成 job。首包的有用 preview 过去立即发送，现在也走首包防抖；final 仍旁路。未做 `15:28` 的尾部补全（需要 range/volatile 尾部信息，归 P1-1）。单测覆盖三态、丢弃与短修订取消 pending preview；真机未验证，`有害断句 ≤2%` 指标不能由 preview 门控单独达成，仍需 P1-4 夹具 + P1-1。已知边界：末字符 `.` 会把 `Dr.`/`U.S.`/`3.` 之类当成稳定边界而提前 preview；只影响 preview 的额外成本，final 仍是整句权威，精确判定留 P1-1 的 range/标点组装。
+- **状态（2026-11-26）**：已实现 preview 门控于 PR #80。`TranslationTrigger.action(for:language:)` 三选一：句末/从句标点（含仅看末字符时的 ASCII `.`；`ClauseSplitter` 本身不加 `.`，避免 TTS 小数分割）→ `.sendNow`；≥4 estimated words（英文按词数，越南语按音节/2，中/日/韩按脚本字符/2，泰语按字符/3）→ `.debounce`（沿用各 feature 的 40/90 ms，voiceOut 25/50 ms）；更短 → `.drop`，不形成 job。首包的有用 preview 过去立即发送，现在也走首包防抖；final 仍旁路。未做 `15:28` 的尾部补全（需要 range/volatile 尾部信息，归 P1-1）。单测覆盖三态、丢弃与短修订取消 pending preview；真机未验证，`有害断句 ≤2%` 指标不能由 preview 门控单独达成，仍需 P1-4 夹具 + P1-1。已知边界：末字符 `.` 会把 `Dr.`/`U.S.`/`3.` 之类当成稳定边界而提前 preview；只影响 preview 的额外成本，final 仍是整句权威，精确判定留 P1-1 的 range/标点组装。
 - **真机手动步骤（待设备）**：iPhone 13 同传英→中；先说 2–3 个词后停顿，断言没有新增片段译文；继续说满 ≥4 词，断言首包防抖后出现译文、final 随后覆盖；说 `OK.` 这类句末标点短句，断言立即出现译文；结束任务后确认 final 完整。无法操作设备时保留单测证据并记录原因。
 - final 是权威路径；preview 只在“足够有用”时发（完整从句/≥4–6 个英文词），2 个词的片段不翻译；长句可发从句级 preview，但标记为 preview，final 全句重译并覆盖。
 - 保留句末标点（`.?!。？！`）作为稳定边界；逗号只用于 preview/TTS 分句。不要为“实时感”无限提高频率（roadmap 明确不做）。
