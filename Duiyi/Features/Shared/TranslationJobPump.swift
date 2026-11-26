@@ -5,6 +5,24 @@ enum TranslationIntegrityError: Error, Equatable {
     case corruptedOutput
 }
 
+/// What the pump needs from one translation attempt: the text plus the
+/// framework's reported language pair (diagnostics only, P1-4a).
+struct TranslationPumpResult: Equatable, Sendable {
+    var text: String
+    var responseSourceLanguage: String?
+    var responseTargetLanguage: String?
+
+    init(
+        text: String,
+        responseSourceLanguage: String? = nil,
+        responseTargetLanguage: String? = nil
+    ) {
+        self.text = text
+        self.responseSourceLanguage = responseSourceLanguage
+        self.responseTargetLanguage = responseTargetLanguage
+    }
+}
+
 /// Shared translation-job pump used by both translation hosts.
 ///
 /// Each wakeup drains the bridge consumer until it has no jobs left, so a
@@ -13,9 +31,41 @@ enum TranslationIntegrityError: Error, Equatable {
 /// `TranslationSession`; production passes a thin adapter over
 /// `TranslationSession.translate`.
 struct TranslationJobPump {
-    let translate: (String) async throws -> String
+    let translate: (String) async throws -> TranslationPumpResult
     let onSuccess: @MainActor (TranslationJob, String) -> Void
     let onFailure: @MainActor (TranslationJob, Error) -> Void
+    private let diagnostics: any DiagnosticsRecording
+
+    /// String-only seam kept for existing call sites and tests.
+    init(
+        translate: @escaping (String) async throws -> String,
+        onSuccess: @escaping @MainActor (TranslationJob, String) -> Void,
+        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
+    ) {
+        self.init(
+            translateResponse: { text in
+                TranslationPumpResult(text: try await translate(text))
+            },
+            onSuccess: onSuccess,
+            onFailure: onFailure,
+            diagnostics: diagnostics
+        )
+    }
+
+    /// Production seam: the host returns the framework response's language pair
+    /// so the diagnostics payload can prove which languages the response used.
+    init(
+        translateResponse: @escaping (String) async throws -> TranslationPumpResult,
+        onSuccess: @escaping @MainActor (TranslationJob, String) -> Void,
+        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
+    ) {
+        self.translate = translateResponse
+        self.onSuccess = onSuccess
+        self.onFailure = onFailure
+        self.diagnostics = diagnostics
+    }
 
     func run(_ consumer: TranslationJobBridge.Consumer) async {
         for await _ in consumer.wakeups {
@@ -30,8 +80,9 @@ struct TranslationJobPump {
                 let text = job.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 do {
                     let first = try await translate(text)
-                    let translatedText: String
-                    if TextIntegrity.isCorrupted(first) {
+                    let result: TranslationPumpResult
+                    let retryCount: Int
+                    if TextIntegrity.isCorrupted(first.text) {
                         // A corrupted framework result is retried once with the
                         // same source before it is treated as a failure. A
                         // cancelled pump must requeue instead of reporting a
@@ -41,25 +92,29 @@ struct TranslationJobPump {
                             return
                         }
                         #if DEBUG
-                        logIntegrity("retry", job: job, source: text, translated: first)
+                        logIntegrity("retry", job: job, source: text, translated: first.text)
                         #endif
                         let retry = try await translate(text)
                         if Task.isCancelled {
                             consumer.requeue(job)
                             return
                         }
-                        guard !TextIntegrity.isCorrupted(retry) else {
+                        guard !TextIntegrity.isCorrupted(retry.text) else {
                             #if DEBUG
-                            logIntegrity("rejected", job: job, source: text, translated: retry)
+                            logIntegrity("rejected", job: job, source: text, translated: retry.text)
                             #endif
+                            recordFailure(job: job, failure: "corruptedOutput", retryCount: 1)
                             await onFailure(job, TranslationIntegrityError.corruptedOutput)
                             continue
                         }
-                        translatedText = retry
+                        result = retry
+                        retryCount = 1
                     } else {
-                        translatedText = first
+                        result = first
+                        retryCount = 0
                     }
-                    await onSuccess(job, translatedText)
+                    recordResponse(job: job, result: result, retryCount: retryCount)
+                    await onSuccess(job, result.text)
                 } catch {
                     if Task.isCancelled || error is CancellationError {
                         // A CancellationError that arrives without task
@@ -70,10 +125,54 @@ struct TranslationJobPump {
                         consumer.requeue(job)
                         return
                     }
+                    recordFailure(job: job, failure: Self.failureName(error), retryCount: 0)
                     await onFailure(job, error)
                 }
             }
         }
+    }
+
+    private func recordResponse(
+        job: TranslationJob,
+        result: TranslationPumpResult,
+        retryCount: Int
+    ) {
+        diagnostics.recordResponse(
+            TranslationResponseRecord(
+                jobID: job.id,
+                utteranceID: job.utteranceID,
+                sequence: job.sequence,
+                isFinal: job.isFinal,
+                translatedLength: result.text.count,
+                replacementCharacterCount: TextIntegrity.replacementCharacterCount(result.text),
+                responseSourceLanguage: result.responseSourceLanguage,
+                responseTargetLanguage: result.responseTargetLanguage,
+                retryCount: retryCount
+            )
+        )
+    }
+
+    private func recordFailure(job: TranslationJob, failure: String, retryCount: Int) {
+        diagnostics.recordFailure(
+            TranslationFailureRecord(
+                jobID: job.id,
+                utteranceID: job.utteranceID,
+                sequence: job.sequence,
+                isFinal: job.isFinal,
+                failure: failure,
+                retryCount: retryCount
+            )
+        )
+    }
+
+    private static func failureName(_ error: Error) -> String {
+        if let integrity = error as? TranslationIntegrityError {
+            switch integrity {
+            case .corruptedOutput: return "corruptedOutput"
+            }
+        }
+        let nsError = error as NSError
+        return "\(nsError.domain):\(nsError.code)"
     }
 
     #if DEBUG

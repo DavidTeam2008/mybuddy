@@ -370,6 +370,12 @@ struct UtteranceAssembler: Sendable {
         languageVerdict(text, claimed: claimed, purity: purity).accepted
     }
 
+    /// True when the strict purity gate would reject `text` for `claimed`.
+    /// Trusted single-locale sessions only record this signal for diagnostics.
+    static func isScriptMismatch(_ text: String, claimed: AppLanguage) -> Bool {
+        !strictMatchesClaimedLanguage(text, claimed: claimed)
+    }
+
     private static func strictMatchesClaimedLanguage(_ text: String, claimed: AppLanguage) -> Bool {
         let han = hanCount(text)
         let latin = letterCount(text)

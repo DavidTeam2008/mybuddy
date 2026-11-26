@@ -51,14 +51,16 @@ final class MeetingViewModel {
         summarizer: any ConversationSummarizing,
         audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
-        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds)
+        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         lifecycle = TaskLifecycle(
             feature: .meeting,
             store: taskStore,
             gate: gate,
             permissions: permissions,
-            audioSession: audioSession
+            audioSession: audioSession,
+            diagnostics: diagnostics
         )
         self.permissions = permissions
         self.preferences = preferences
@@ -78,7 +80,8 @@ final class MeetingViewModel {
         summarizer: any ConversationSummarizing,
         audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
-        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds)
+        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         self.init(
             gate: SpeechSessionGate(engine: speech),
@@ -87,7 +90,8 @@ final class MeetingViewModel {
             summarizer: summarizer,
             audioSession: audioSession,
             taskStore: taskStore,
-            idleRestoreDelay: idleRestoreDelay
+            idleRestoreDelay: idleRestoreDelay,
+            diagnostics: diagnostics
         )
     }
 

@@ -72,6 +72,7 @@ final class TaskTranslationScheduler: TranslationScheduler {
 @Observable
 final class TranslationPipeline {
     private let scheduler: any TranslationScheduler
+    private let diagnostics: any DiagnosticsRecording
     private var outboundQueue: [TranslationJob] = []
     /// Bumps whenever a job is handed to the outbound queue. Hosts observe it
     /// and drain `takeNextOutboundJob()`; a plain "latest job" value would let
@@ -95,12 +96,17 @@ final class TranslationPipeline {
     static let outboundQueueLimit = 64
     static let appliedJobIDLimit = 256
 
-    init() {
+    init(diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()) {
         self.scheduler = TaskTranslationScheduler()
+        self.diagnostics = diagnostics
     }
 
-    init(scheduler: any TranslationScheduler) {
+    init(
+        scheduler: any TranslationScheduler,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
+    ) {
         self.scheduler = scheduler
+        self.diagnostics = diagnostics
     }
 
     func submit(_ submission: TranslationSubmission) {
@@ -133,8 +139,10 @@ final class TranslationPipeline {
             // final will carry the line.
             return
         case .sendNow:
+            recordSubmit(job)
             commit(job, text: text, lineID: lineID)
         case .debounce:
+            recordSubmit(job)
             let delay = isFirst ? submission.firstDelay : submission.subsequentDelay
             scheduled[lineID] = scheduler.schedule(after: delay) { [weak self] in
                 guard let self else { return }
@@ -142,6 +150,21 @@ final class TranslationPipeline {
                 self.commit(job, text: text, lineID: lineID)
             }
         }
+    }
+
+    private func recordSubmit(_ job: TranslationJob) {
+        diagnostics.recordSubmit(
+            TranslationSubmitRecord(
+                jobID: job.id,
+                utteranceID: job.utteranceID,
+                sequence: job.sequence,
+                isFinal: job.isFinal,
+                source: job.source,
+                target: job.target,
+                sourceLength: job.text.count,
+                strategy: "lowLatency"
+            )
+        )
     }
 
     private func commit(_ job: TranslationJob, text: String, lineID: UUID) {
@@ -190,18 +213,26 @@ final class TranslationPipeline {
     /// newer job nor be replayed twice.
     func accept(job: TranslationJob, text: String) -> TranslationUpdate? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        guard !appliedJobIDs.contains(job.id) else { return nil }
+        guard !trimmed.isEmpty else {
+            recordApply(job, text: trimmed, applied: false, reason: "empty")
+            return nil
+        }
+        guard !appliedJobIDs.contains(job.id) else {
+            recordApply(job, text: trimmed, applied: false, reason: "duplicate")
+            return nil
+        }
 
         let utteranceID = job.utteranceID
         if job.sequence > 0,
            let appliedSequence = lastAppliedSequence[utteranceID],
            job.sequence <= appliedSequence {
+            recordApply(job, text: trimmed, applied: false, reason: "staleSequence")
             return nil
         }
         if let applied = lastAppliedSourceCount[utteranceID],
            !job.isFinal,
            applied > job.text.count {
+            recordApply(job, text: trimmed, applied: false, reason: "shorterPreview")
             return nil
         }
         lastAppliedSourceCount[utteranceID] = max(
@@ -216,7 +247,28 @@ final class TranslationPipeline {
         }
         rememberApplied(job.id)
         removeQueuedJob(id: job.id)
+        recordApply(job, text: trimmed, applied: true, reason: nil)
         return TranslationUpdate(job: job, utteranceID: utteranceID, translatedText: trimmed)
+    }
+
+    private func recordApply(
+        _ job: TranslationJob,
+        text: String,
+        applied: Bool,
+        reason: String?
+    ) {
+        diagnostics.recordApply(
+            TranslationApplyRecord(
+                jobID: job.id,
+                utteranceID: job.utteranceID,
+                sequence: job.sequence,
+                isFinal: job.isFinal,
+                applied: applied,
+                reason: reason,
+                translatedLength: text.count,
+                replacementCharacterCount: TextIntegrity.replacementCharacterCount(text)
+            )
+        )
     }
 
     private func rememberApplied(_ id: UUID) {

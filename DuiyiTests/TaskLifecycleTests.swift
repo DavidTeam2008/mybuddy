@@ -932,6 +932,43 @@ struct TaskLifecycleTests {
 
     // MARK: - Helpers
 
+    @Test("Task start and end scope one diagnostics session")
+    func diagnosticsSessionFollowsTaskLifecycle() async throws {
+        let log = LifecycleEventLog()
+        let store = LifecycleFakeStore(log: log)
+        let gate = LifecycleFakeGate(log: log)
+        let recorder = DiagnosticsRecorder()
+        let lifecycle = makeLifecycle(store: store, gate: gate, diagnostics: recorder)
+
+        _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
+        let taskID = try #require(lifecycle.taskID)
+        let session = try #require(recorder.snapshot().session)
+        #expect(session.feature == FeatureID.meeting.rawValue)
+        #expect(session.taskID == taskID.uuidString)
+        #expect(session.endedAt == nil)
+
+        let entry = makeEntry("六点见")
+        lifecycle.persist([entry])
+        _ = await lifecycle.endTask(transcript: [entry], summary: nil)
+        #expect(recorder.snapshot().session?.endedAt != nil)
+    }
+
+    @Test("Restoring an unfinished task starts a diagnostics session for it")
+    func restoreStartsDiagnosticsSession() async throws {
+        let log = LifecycleEventLog()
+        let store = LifecycleFakeStore(log: log)
+        let gate = LifecycleFakeGate(log: log)
+        let recorder = DiagnosticsRecorder()
+        let lifecycle = makeLifecycle(store: store, gate: gate, diagnostics: recorder)
+        _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
+        let taskID = try #require(lifecycle.taskID)
+
+        let restored = await lifecycle.restore()
+        #expect(restored?.id == taskID)
+        #expect(recorder.snapshot().session?.taskID == taskID.uuidString)
+        #expect(recorder.snapshot().session?.endedAt == nil)
+    }
+
     private func makeEntry(_ text: String) -> TranscriptEntry {
         TranscriptEntry(
             id: UUID(),
@@ -947,7 +984,8 @@ struct TaskLifecycleTests {
         store: LifecycleFakeStore,
         gate: LifecycleFakeGate,
         audio: LifecycleFakeAudioSession? = nil,
-        permissions: LifecycleFakePermissions = LifecycleFakePermissions()
+        permissions: LifecycleFakePermissions = LifecycleFakePermissions(),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) -> TaskLifecycle {
         let log = store.log
         return TaskLifecycle(
@@ -956,7 +994,8 @@ struct TaskLifecycleTests {
             gate: gate,
             permissions: permissions,
             audioSession: audio ?? LifecycleFakeAudioSession(log: log),
-            persistDebounce: .seconds(3600)
+            persistDebounce: .seconds(3600),
+            diagnostics: diagnostics
         )
     }
 

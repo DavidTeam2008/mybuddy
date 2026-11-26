@@ -58,6 +58,18 @@ enum Copy {
         language.pick(zh: "完成", en: "Done", ja: "完了", ko: "완료", th: "เสร็จ", vi: "Xong")
     }
 
+    /// DEBUG-only diagnostics export entry (P1-4).
+    static func exportDiagnostics(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "导出诊断 JSON",
+            en: "Export diagnostics JSON",
+            ja: "診断 JSON を書き出す",
+            ko: "진단 JSON 내보내기",
+            th: "ส่งออก JSON วินิจฉัย",
+            vi: "Xuất JSON chẩn đoán"
+        )
+    }
+
     static func clearCaptions(for language: AppLanguage) -> String {
         language.pick(zh: "清屏", en: "Clear", ja: "消去", ko: "지우기", th: "ล้าง", vi: "Xóa")
     }

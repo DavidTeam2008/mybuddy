@@ -7,6 +7,7 @@ final class ConversationViewModel {
     private let permissions: any PermissionGranting
     private let preferences: PreferencesStore
     private let summarizer: any ConversationSummarizing
+    private let diagnostics: any DiagnosticsRecording
 
     /// Feature-specific transient states (asset preparation, preparation
     /// failure) layered over the lifecycle-owned session state.
@@ -56,21 +57,24 @@ final class ConversationViewModel {
         summarizer: any ConversationSummarizing,
         audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
-        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds)
+        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         let lifecycle = TaskLifecycle(
             feature: .faceToFace,
             store: taskStore,
             gate: gate,
             permissions: permissions,
-            audioSession: audioSession
+            audioSession: audioSession,
+            diagnostics: diagnostics
         )
         self.lifecycle = lifecycle
         lateTranslation = LateTranslationBackfill(lifecycle: lifecycle)
-        pipeline = TranslationPipeline()
+        pipeline = TranslationPipeline(diagnostics: diagnostics)
         self.permissions = permissions
         self.preferences = preferences
         self.summarizer = summarizer
+        self.diagnostics = diagnostics
         self.idleRestoreDelay = idleRestoreDelay
         userLanguage = preferences.userLanguage
         peerLanguage = preferences.peerLanguage
@@ -89,21 +93,24 @@ final class ConversationViewModel {
         audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
-        scheduler: any TranslationScheduler
+        scheduler: any TranslationScheduler,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         let lifecycle = TaskLifecycle(
             feature: .faceToFace,
             store: taskStore,
             gate: gate,
             permissions: permissions,
-            audioSession: audioSession
+            audioSession: audioSession,
+            diagnostics: diagnostics
         )
         self.lifecycle = lifecycle
         lateTranslation = LateTranslationBackfill(lifecycle: lifecycle)
-        pipeline = TranslationPipeline(scheduler: scheduler)
+        pipeline = TranslationPipeline(scheduler: scheduler, diagnostics: diagnostics)
         self.permissions = permissions
         self.preferences = preferences
         self.summarizer = summarizer
+        self.diagnostics = diagnostics
         self.idleRestoreDelay = idleRestoreDelay
         userLanguage = preferences.userLanguage
         peerLanguage = preferences.peerLanguage
@@ -120,7 +127,8 @@ final class ConversationViewModel {
         summarizer: any ConversationSummarizing,
         audioSession: any AudioSessionConfiguring = NoOpAudioSession(),
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
-        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds)
+        idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         self.init(
             gate: SpeechSessionGate(engine: speech),
@@ -129,7 +137,8 @@ final class ConversationViewModel {
             summarizer: summarizer,
             audioSession: audioSession,
             taskStore: taskStore,
-            idleRestoreDelay: idleRestoreDelay
+            idleRestoreDelay: idleRestoreDelay,
+            diagnostics: diagnostics
         )
     }
 
@@ -137,6 +146,9 @@ final class ConversationViewModel {
     var taskStartedAt: Date? { lifecycle.startedAt }
     var isMemoryOnly: Bool { lifecycle.isMemoryOnly }
     var isNotSaved: Bool { lifecycle.isNotSaved }
+    /// Diagnostics sink handed to the live translation host.
+    var translationDiagnostics: any DiagnosticsRecording { diagnostics }
+
     /// The newest translation job that has not been drained yet; the pipeline
     /// owns the queue. Kept for tests.
     var outboundJob: TranslationJob? { pipeline.outboundJob }

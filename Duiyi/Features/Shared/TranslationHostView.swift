@@ -9,6 +9,7 @@ struct TranslationHostView: View {
     private let takeNextOutboundJob: (@MainActor () -> TranslationJob?)?
     let onSuccess: @MainActor (TranslationJob, String) -> Void
     let onFailure: @MainActor (TranslationJob, Error) -> Void
+    private let diagnostics: any DiagnosticsRecording
 
     @State private var userToPeer: TranslationSession.Configuration
     @State private var peerToUser: TranslationSession.Configuration
@@ -22,7 +23,8 @@ struct TranslationHostView: View {
         peerLanguage: AppLanguage,
         job: TranslationJob?,
         onSuccess: @escaping @MainActor (TranslationJob, String) -> Void,
-        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void
+        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         self.userLanguage = userLanguage
         self.peerLanguage = peerLanguage
@@ -31,6 +33,7 @@ struct TranslationHostView: View {
         self.takeNextOutboundJob = nil
         self.onSuccess = onSuccess
         self.onFailure = onFailure
+        self.diagnostics = diagnostics
         _userToPeer = State(initialValue: translationConfiguration(from: userLanguage, to: peerLanguage))
         _peerToUser = State(initialValue: translationConfiguration(from: peerLanguage, to: userLanguage))
     }
@@ -44,7 +47,8 @@ struct TranslationHostView: View {
         outboundRevision: Int,
         takeNextOutboundJob: @escaping @MainActor () -> TranslationJob?,
         onSuccess: @escaping @MainActor (TranslationJob, String) -> Void,
-        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void
+        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         self.userLanguage = userLanguage
         self.peerLanguage = peerLanguage
@@ -53,6 +57,7 @@ struct TranslationHostView: View {
         self.takeNextOutboundJob = takeNextOutboundJob
         self.onSuccess = onSuccess
         self.onFailure = onFailure
+        self.diagnostics = diagnostics
         _userToPeer = State(initialValue: translationConfiguration(from: userLanguage, to: peerLanguage))
         _peerToUser = State(initialValue: translationConfiguration(from: peerLanguage, to: userLanguage))
     }
@@ -62,12 +67,22 @@ struct TranslationHostView: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
             .translationTask(userToPeer) { session in
-                await TranslationJobPump(session: session, onSuccess: onSuccess, onFailure: onFailure)
-                    .run(userJobs.makeConsumer())
+                await TranslationJobPump(
+                    session: session,
+                    onSuccess: onSuccess,
+                    onFailure: onFailure,
+                    diagnostics: diagnostics
+                )
+                .run(userJobs.makeConsumer())
             }
             .translationTask(peerToUser) { session in
-                await TranslationJobPump(session: session, onSuccess: onSuccess, onFailure: onFailure)
-                    .run(peerJobs.makeConsumer())
+                await TranslationJobPump(
+                    session: session,
+                    onSuccess: onSuccess,
+                    onFailure: onFailure,
+                    diagnostics: diagnostics
+                )
+                .run(peerJobs.makeConsumer())
             }
             .onChange(of: latestJob) { _, newJob in
                 submit(newJob)
@@ -109,6 +124,7 @@ struct OneWayTranslationHostView: View {
     private let takeNextOutboundJob: (@MainActor () -> TranslationJob?)?
     let onSuccess: @MainActor (TranslationJob, String) -> Void
     let onFailure: @MainActor (TranslationJob, Error) -> Void
+    private let diagnostics: any DiagnosticsRecording
 
     @State private var configuration: TranslationSession.Configuration
     @State private var jobs = TranslationJobBridge()
@@ -120,7 +136,8 @@ struct OneWayTranslationHostView: View {
         targetLanguage: AppLanguage,
         job: TranslationJob?,
         onSuccess: @escaping @MainActor (TranslationJob, String) -> Void,
-        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void
+        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         self.sourceLanguage = sourceLanguage
         self.targetLanguage = targetLanguage
@@ -129,6 +146,7 @@ struct OneWayTranslationHostView: View {
         self.takeNextOutboundJob = nil
         self.onSuccess = onSuccess
         self.onFailure = onFailure
+        self.diagnostics = diagnostics
         _configuration = State(initialValue: translationConfiguration(from: sourceLanguage, to: targetLanguage))
     }
 
@@ -141,7 +159,8 @@ struct OneWayTranslationHostView: View {
         outboundRevision: Int,
         takeNextOutboundJob: @escaping @MainActor () -> TranslationJob?,
         onSuccess: @escaping @MainActor (TranslationJob, String) -> Void,
-        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void
+        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         self.sourceLanguage = sourceLanguage
         self.targetLanguage = targetLanguage
@@ -150,6 +169,7 @@ struct OneWayTranslationHostView: View {
         self.takeNextOutboundJob = takeNextOutboundJob
         self.onSuccess = onSuccess
         self.onFailure = onFailure
+        self.diagnostics = diagnostics
         _configuration = State(initialValue: translationConfiguration(from: sourceLanguage, to: targetLanguage))
     }
 
@@ -158,8 +178,13 @@ struct OneWayTranslationHostView: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
             .translationTask(configuration) { session in
-                await TranslationJobPump(session: session, onSuccess: onSuccess, onFailure: onFailure)
-                    .run(jobs.makeConsumer())
+                await TranslationJobPump(
+                    session: session,
+                    onSuccess: onSuccess,
+                    onFailure: onFailure,
+                    diagnostics: diagnostics
+                )
+                .run(jobs.makeConsumer())
             }
             .onChange(of: latestJob) { _, newJob in
                 submit(newJob)
@@ -194,12 +219,21 @@ private extension TranslationJobPump {
     init(
         session: TranslationSession,
         onSuccess: @escaping @MainActor (TranslationJob, String) -> Void,
-        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void
+        onFailure: @escaping @MainActor (TranslationJob, Error) -> Void,
+        diagnostics: any DiagnosticsRecording
     ) {
         self.init(
-            translate: { try await session.translate($0).targetText },
+            translateResponse: { text in
+                let response = try await session.translate(text)
+                return TranslationPumpResult(
+                    text: response.targetText,
+                    responseSourceLanguage: response.sourceLanguage.minimalIdentifier,
+                    responseTargetLanguage: response.targetLanguage.minimalIdentifier
+                )
+            },
             onSuccess: onSuccess,
-            onFailure: onFailure
+            onFailure: onFailure,
+            diagnostics: diagnostics
         )
     }
 }

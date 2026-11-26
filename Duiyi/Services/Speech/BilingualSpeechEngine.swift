@@ -1,9 +1,11 @@
 import AVFAudio
+import CoreMedia
 import Foundation
 import Speech
 
 actor BilingualSpeechEngine: SpeechRecognizing {
     private let capturer: AudioCapturing
+    private let diagnostics: any DiagnosticsRecording
     private var assembler = UtteranceAssembler()
     private var utteranceContinuation: AsyncStream<Utterance>.Continuation?
     private var analyzer: SpeechAnalyzer?
@@ -26,8 +28,12 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     private var singleLanguage: AppLanguage = .english
     private var style: SpeechRecognitionStyle = .liveCaptions
 
-    init(capturer: AudioCapturing = AudioEngineCapturer()) {
+    init(
+        capturer: AudioCapturing = AudioEngineCapturer(),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
+    ) {
         self.capturer = capturer
+        self.diagnostics = diagnostics
     }
 
     func start(
@@ -120,7 +126,7 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         self.analyzer = nil
         try? await Task.sleep(for: Self.stopDrain)
         if let utterance = assembler.silenceTimedOut() {
-            publish(utterance)
+            publishSynthetic(utterance)
         }
     }
 
@@ -292,7 +298,10 @@ actor BilingualSpeechEngine: SpeechRecognizing {
                         await self?.handleTranscription(
                             language: language,
                             text: text,
-                            isFinal: result.isFinal
+                            isFinal: result.isFinal,
+                            rangeStart: Self.seconds(result.range.start),
+                            rangeDuration: Self.seconds(result.range.duration),
+                            resultsFinalizationTime: Self.seconds(result.resultsFinalizationTime)
                         )
                     }
                 } catch is CancellationError {
@@ -321,19 +330,86 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         )
     }
 
-    private func handleTranscription(language: AppLanguage, text: String, isFinal: Bool) {
+    private func handleTranscription(
+        language: AppLanguage,
+        text: String,
+        isFinal: Bool,
+        rangeStart: Double?,
+        rangeDuration: Double?,
+        resultsFinalizationTime: Double?
+    ) {
         if Date() < ignoreTranscriptionUntil {
             return
         }
+        let scriptMismatch = UtteranceAssembler.isScriptMismatch(text, claimed: language)
         guard let utterance = assembler.ingest(language: language, text: text, isFinal: isFinal) else {
+            diagnostics.record(
+                ASRDiagnosticsRecord(
+                    language: language,
+                    textLength: text.count,
+                    isFinal: isFinal,
+                    synthetic: false,
+                    scriptMismatch: scriptMismatch,
+                    accepted: false,
+                    published: false,
+                    utteranceID: nil,
+                    revision: false,
+                    rangeStartSeconds: rangeStart,
+                    rangeDurationSeconds: rangeDuration,
+                    resultsFinalizationTimeSeconds: resultsFinalizationTime,
+                    style: styleName
+                )
+            )
             return
         }
-        publish(utterance)
+        let published = publish(utterance)
+        diagnostics.record(
+            ASRDiagnosticsRecord(
+                language: language,
+                textLength: text.count,
+                isFinal: isFinal,
+                synthetic: false,
+                scriptMismatch: scriptMismatch,
+                accepted: true,
+                published: published,
+                utteranceID: utterance.id,
+                revision: utterance.isRevision,
+                rangeStartSeconds: rangeStart,
+                rangeDurationSeconds: rangeDuration,
+                resultsFinalizationTimeSeconds: resultsFinalizationTime,
+                style: styleName
+            )
+        )
         if Self.shouldAcknowledgeFinal(utterance) {
             assembler.acknowledgeFinal(language: utterance.language)
             scheduleSingleLocaleSwitchIfNeeded(to: utterance.language)
         }
         pingSilenceTimer()
+    }
+
+    private var styleName: String {
+        style == .meetingNotes ? "meetingNotes" : "liveCaptions"
+    }
+
+    private func publishSynthetic(_ utterance: Utterance) {
+        let published = publish(utterance)
+        diagnostics.record(
+            ASRDiagnosticsRecord(
+                language: utterance.language,
+                textLength: utterance.text.count,
+                isFinal: true,
+                synthetic: true,
+                scriptMismatch: false,
+                accepted: true,
+                published: published,
+                utteranceID: utterance.id,
+                revision: false,
+                rangeStartSeconds: nil,
+                rangeDurationSeconds: nil,
+                resultsFinalizationTimeSeconds: nil,
+                style: styleName
+            )
+        )
     }
 
     /// A revision updates an utterance that was already closed; it is not the
@@ -365,19 +441,21 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     private func finalizeFromSilence() {
         guard !isStopping else { return }
         guard let utterance = assembler.silenceTimedOut() else { return }
-        publish(utterance)
+        publishSynthetic(utterance)
         scheduleSingleLocaleSwitchIfNeeded(to: utterance.language)
     }
 
-    private func publish(_ utterance: Utterance) {
+    @discardableResult
+    private func publish(_ utterance: Utterance) -> Bool {
         if utterance.isFinal {
             let signature = Self.signature(utterance)
             if signature == lastFinalSignature {
-                return
+                return false
             }
             lastFinalSignature = signature
         }
         utteranceContinuation?.yield(utterance)
+        return true
     }
 
     private func fail() {
@@ -435,6 +513,13 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             reportingOptions: [.volatileResults, .fastResults],
             attributeOptions: [.transcriptionConfidence]
         )
+    }
+
+    /// CMTime may be indefinite or invalid; only finite seconds are recorded.
+    private static func seconds(_ time: CMTime) -> Double? {
+        guard time.isNumeric else { return nil }
+        let value = time.seconds
+        return value.isFinite ? value : nil
     }
 
     private static func signature(_ utterance: Utterance) -> String {

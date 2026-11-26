@@ -9,6 +9,7 @@ final class InterpretationViewModel {
     private let summarizer: any ConversationSummarizing
     private let audioSession: any AudioSessionConfiguring
     private let synthesizer: any SpeechSynthesizing
+    private let diagnostics: any DiagnosticsRecording
 
     /// Feature-specific transient states (asset preparation, preparation
     /// failure) layered over the lifecycle-owned session state.
@@ -72,14 +73,16 @@ final class InterpretationViewModel {
         synthesizer: any SpeechSynthesizing,
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
-        speechSettleDelay: Duration = .milliseconds(380)
+        speechSettleDelay: Duration = .milliseconds(380),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         let lifecycle = TaskLifecycle(
             feature: .simultaneous,
             store: taskStore,
             gate: gate,
             permissions: permissions,
-            audioSession: audioSession
+            audioSession: audioSession,
+            diagnostics: diagnostics
         )
         self.lifecycle = lifecycle
         lateTranslation = LateTranslationBackfill(lifecycle: lifecycle)
@@ -88,9 +91,10 @@ final class InterpretationViewModel {
         self.summarizer = summarizer
         self.audioSession = audioSession
         self.synthesizer = synthesizer
+        self.diagnostics = diagnostics
         self.idleRestoreDelay = idleRestoreDelay
         self.speechSettleDelay = speechSettleDelay
-        self.pipeline = TranslationPipeline()
+        self.pipeline = TranslationPipeline(diagnostics: diagnostics)
         sourceLanguage = preferences.sourceLanguage
         targetLanguage = preferences.targetLanguage
         fontSize = preferences.fontSize
@@ -111,14 +115,16 @@ final class InterpretationViewModel {
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
         speechSettleDelay: Duration = .milliseconds(380),
-        scheduler: any TranslationScheduler
+        scheduler: any TranslationScheduler,
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         let lifecycle = TaskLifecycle(
             feature: .simultaneous,
             store: taskStore,
             gate: gate,
             permissions: permissions,
-            audioSession: audioSession
+            audioSession: audioSession,
+            diagnostics: diagnostics
         )
         self.lifecycle = lifecycle
         lateTranslation = LateTranslationBackfill(lifecycle: lifecycle)
@@ -127,9 +133,10 @@ final class InterpretationViewModel {
         self.summarizer = summarizer
         self.audioSession = audioSession
         self.synthesizer = synthesizer
+        self.diagnostics = diagnostics
         self.idleRestoreDelay = idleRestoreDelay
         self.speechSettleDelay = speechSettleDelay
-        self.pipeline = TranslationPipeline(scheduler: scheduler)
+        self.pipeline = TranslationPipeline(scheduler: scheduler, diagnostics: diagnostics)
         sourceLanguage = preferences.sourceLanguage
         targetLanguage = preferences.targetLanguage
         fontSize = preferences.fontSize
@@ -148,7 +155,8 @@ final class InterpretationViewModel {
         synthesizer: any SpeechSynthesizing,
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
-        speechSettleDelay: Duration = .milliseconds(380)
+        speechSettleDelay: Duration = .milliseconds(380),
+        diagnostics: any DiagnosticsRecording = NoOpDiagnosticsRecorder()
     ) {
         self.init(
             gate: SpeechSessionGate(engine: speech),
@@ -159,7 +167,8 @@ final class InterpretationViewModel {
             synthesizer: synthesizer,
             taskStore: taskStore,
             idleRestoreDelay: idleRestoreDelay,
-            speechSettleDelay: speechSettleDelay
+            speechSettleDelay: speechSettleDelay,
+            diagnostics: diagnostics
         )
     }
 
@@ -245,6 +254,9 @@ final class InterpretationViewModel {
     var pendingSpeechCount: Int {
         pendingJobs.count
     }
+
+    /// Diagnostics sink handed to the live translation host.
+    var translationDiagnostics: any DiagnosticsRecording { diagnostics }
 
     /// The newest translation job that has not been drained yet; the pipeline
     /// owns the queue. Kept for tests.

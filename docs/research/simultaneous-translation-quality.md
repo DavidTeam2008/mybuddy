@@ -2,7 +2,7 @@
 
 > 日期：2026-11-25。对照材料：用户 iPhone 同传导出（2026-11-25 08:58–10:13，English → 中文，175 条）；TED 官方 transcript（Lauren Weinstein, *Don't believe everything you think*, TEDxPaloAlto）。代码基线：`main` = `0b1c626`（Xcode 27.1 / iOS 27.1 SDK）。逐条对照数据与脚本留在本机 `/tmp/simultaneous-comparison.md`，未入库。
 >
-> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78；P0-1 outbound 无损队列 → PR #79；P1-2 稳定单元 preview → PR #82（#80 因基线分支删除自动关闭，内容相同）；P0-6a 结束竞态回填 → PR #81。P0-6b、其余 P1/P2 未开始。
+> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78；P0-1 outbound 无损队列 → PR #79；P1-2 稳定单元 preview → PR #82（#80 因基线分支删除自动关闭，内容相同）；P0-6a 结束竞态回填 → PR #81；P1-4a 每任务诊断 ring buffer + DEBUG 导出（分支 `feat/p1-4-diagnostics`，待合并）。P1-4b 设备回放、P1-1、P0-6b、其余 P1/P2 未开始。
 
 ## 0. 结论
 
@@ -225,7 +225,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P1-4. 诊断与 TED 离线夹具**
 
-- 每任务内存 ring buffer（可 DEBUG 导出 JSON，不上传）：ASR 的 utterance/range/isFinal/`resultsFinalizationTime`/text 长度/是否合成/脚本不匹配；翻译的 job/utterance/sequence/isFinal/源目标长度/策略/`Response` 语言/提交到应用延迟/重试/失败类/U+FFFD 数；聚合 settled 数、final job 数、final 应用数、永久失败数、被拒损坏数。
+- **状态（2026-11-26，P1-4a 已实现，P1-4b 待设备）**：`DiagnosticsRecorder`（Services）提供每任务有界 ring buffer（默认 4096 事件）+ 增量聚合 + DEBUG JSON 导出；`TaskLifecycle` 在任务开始/恢复/结束时 begin/end 会话，结束后的迟到事件仍写入最近任务。ASR 事件在 `BilingualSpeechEngine` 消费 `SpeechTranscriber.Result` 处记录 `range.start/duration`、`resultsFinalizationTime`、text 长度、isFinal、synthetic、脚本不匹配、accepted/published、utterance/revision；合成 final 标 synthetic。翻译事件由 `TranslationPipeline` 记录 submit（含 sequence/isFinal/源目标/长度/策略）与 apply（applied/原因/U+FFFD/提交→应用延迟），`TranslationJobPump` 记录 Response 语言、translated 长度、U+FFFD、重试次数与失败类；聚合 settled 数、final job 数、final 应用数、永久失败数、被拒损坏数。JSON 只含长度/ID/语言，不含正文；设置页 `#if DEBUG` 的「导出诊断 JSON」写入 Documents 并走 ShareLink，不上传。单测覆盖计数、ring 淘汰、会话保留、延迟、拒收原因与 JSON；真机回放与对齐脚本（P1-4b）未执行。
 - 用同一段 TED 音频（或可授权夹具）回放真机 → 导出 → 跑本次的对齐脚本；指标见 §5。**这是把上面所有假设变成证据的唯一办法。**
 
 **P1-5. `.highFidelity` 翻译评估（需决策）**

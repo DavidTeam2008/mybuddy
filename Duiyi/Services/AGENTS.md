@@ -39,6 +39,12 @@
 - 新协议放 `ServiceProtocols.swift` 或所属目录，由 `AppEnvironment` 注入；预览替身放 `App/PreviewSupport.swift`。
 - 分层：Services 不引用 ViewModel；Domain 不 import SwiftUI/语音/翻译/SwiftData；由 code review 与测试保证（原 `make check-arch` 未随提取保留）。
 
+## 4.1 诊断（P1-4a）
+
+- `DiagnosticsRecorder`（`Services/Diagnostics`）是进程内唯一 sink，`AppEnvironment` 注入；读写都过同一把锁（ASR 来自 speech actor，翻译来自主线程）。`TaskLifecycle` 负责 begin/end 会话：任务开始/恢复时重置，结束后保留快照，迟到事件仍写入最近结束任务。
+- payload 只含 ID、语言、长度、时间与失败类，**不得写正文、音频或用户标识**；ring buffer 有界（默认 4096），聚合计数增量维护。ASR 的 `range`/`resultsFinalizationTime` 只在引擎消费 `SpeechTranscriber.Result` 处记录，不要为诊断改组装行为。
+- 导出仅 DEBUG：设置页写 Documents JSON 并 ShareLink，不上传、不新增网络路径。测试用 `DiagnosticsRecorder(eventLimit:now:)` 或 no-op；不要把 recorder 变成全局单例。
+
 ## 5. 导出与产物
 
 - 导出：快照按 task UUID + 完整内容 SHA-256 命名且不可变；只清理严格超过 7 天且未被本进程准备的本服务普通文件；不得删除全部 `Duiyi-*.txt`；不改共享语义。
