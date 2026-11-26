@@ -112,6 +112,26 @@ struct UtteranceAssembler: Sendable {
             return revised
         }
 
+        // A row that already emitted a final may only accept a same-language
+        // continuation or refinement. Anything else belongs to a new
+        // utterance. `latestFinal` is the source of truth for finality: a
+        // later volatile clears `finals[language]` but cannot un-finalize the
+        // row, and an unconfident final never sets `lockedLanguage`.
+        if let finalized = latestFinal, finalized.id == utteranceID {
+            let sameLanguage = finalized.language == language
+            let isRevision = sameLanguage && (
+                SpokenText.isContinuation(trimmed, of: finalized.text, language: language)
+                    || SpokenText.isRefinement(trimmed, of: finalized.text)
+            )
+            let isNameSwap = sameLanguage && SpokenText.isNameSwap(trimmed, of: finalized.text)
+            if isNameSwap || !isRevision {
+                guard sameLanguage || Self.isConfident(trimmed, language: language) else {
+                    return nil
+                }
+                beginNextUtterance(keeping: language)
+            }
+        }
+
         // A greeting name swap is a different person speaking and must start a
         // new utterance even while both greetings are still volatile. Compute
         // it before a language preemption can replace the lock, so a losing
