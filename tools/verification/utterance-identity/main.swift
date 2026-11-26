@@ -232,67 +232,59 @@ private func applyRange(
     _ event: RangeEvent,
     clock: ClockBox,
     assembler: inout UtteranceAssembler
-) -> (utterance: Utterance?, range: SpeechRange?) {
+) -> Utterance? {
     switch event {
     case .englishFinalA:
-        let range = SpeechRange(start: 0, end: 1)
-        return (
-            assembler.ingest(language: .english, text: "Hello there", isFinal: true, range: range),
-            range
+        return assembler.ingest(
+            language: .english, text: "Hello there", isFinal: true,
+            range: SpeechRange(start: 0, end: 1)
         )
     case .englishVolatileA:
-        let range = SpeechRange(start: 0, end: 1)
-        return (
-            assembler.ingest(language: .english, text: "Hello there", isFinal: false, range: range),
-            range
+        return assembler.ingest(
+            language: .english, text: "Hello there", isFinal: false,
+            range: SpeechRange(start: 0, end: 1)
         )
     case .englishFinalB:
-        let range = SpeechRange(start: 1.1, end: 2)
-        return (
-            assembler.ingest(language: .english, text: "my friend.", isFinal: true, range: range),
-            range
+        return assembler.ingest(
+            language: .english, text: "my friend.", isFinal: true,
+            range: SpeechRange(start: 1.1, end: 2)
         )
     case .englishFinalC:
-        let range = SpeechRange(start: 5, end: 6)
-        return (
-            assembler.ingest(language: .english, text: "How are you?", isFinal: true, range: range),
-            range
+        return assembler.ingest(
+            language: .english, text: "How are you?", isFinal: true,
+            range: SpeechRange(start: 5, end: 6)
         )
     case .englishFinalD:
-        let range = SpeechRange(start: 0, end: 1)
-        return (
-            assembler.ingest(language: .english, text: "Goodbye now", isFinal: true, range: range),
-            range
+        return assembler.ingest(
+            language: .english, text: "Goodbye now", isFinal: true,
+            range: SpeechRange(start: 0, end: 1)
         )
     case .chineseFinalA:
-        let range = SpeechRange(start: 0, end: 1)
-        return (
-            assembler.ingest(language: .zhHans, text: "你好，很高兴认识你", isFinal: true, range: range),
-            range
+        return assembler.ingest(
+            language: .zhHans, text: "你好，很高兴认识你", isFinal: true,
+            range: SpeechRange(start: 0, end: 1)
         )
     case .chineseFinalB:
-        let range = SpeechRange(start: 1.1, end: 2)
-        return (
-            assembler.ingest(language: .zhHans, text: "谢谢你的服务。", isFinal: true, range: range),
-            range
+        return assembler.ingest(
+            language: .zhHans, text: "谢谢你的服务。", isFinal: true,
+            range: SpeechRange(start: 1.1, end: 2)
         )
     case .chineseVolatileA:
-        let range = SpeechRange(start: 0, end: 1)
-        return (
-            assembler.ingest(language: .zhHans, text: "你好", isFinal: false, range: range),
-            range
+        return assembler.ingest(
+            language: .zhHans, text: "你好", isFinal: false,
+            range: SpeechRange(start: 0, end: 1)
         )
     case .silenceTimedOut:
-        return (assembler.silenceTimedOut(), nil)
+        return assembler.silenceTimedOut()
     case .advanceHalfSecond:
         clock.now = clock.now.addingTimeInterval(0.5)
-        return (nil, nil)
+        return nil
     case .advanceThreeAndHalfSeconds:
         clock.now = clock.now.addingTimeInterval(3.5)
-        return (nil, nil)
+        return nil
     case .reset:
         assembler.reset()
-        return (nil, nil)
+        return nil
     }
 }
 
@@ -405,6 +397,17 @@ private func replay(
     return firstViolation
 }
 
+private func advance(_ indices: inout [Int], limit: Int) -> Bool {
+    var position = indices.count - 1
+    while position >= 0 {
+        indices[position] += 1
+        if indices[position] < limit { return true }
+        indices[position] = 0
+        position -= 1
+    }
+    return false
+}
+
 private func explore(depth: Int) -> ExploreResult {
     let alphabet = Event.allCases
     var result = ExploreResult()
@@ -417,14 +420,7 @@ private func explore(depth: Int) -> ExploreResult {
             result.sequencesHit[property, default: 0] += 1
         }
 
-        var position = depth - 1
-        while position >= 0 {
-            indices[position] += 1
-            if indices[position] < alphabet.count { break }
-            indices[position] = 0
-            position -= 1
-        }
-        if position < 0 { break }
+        if !advance(&indices, limit: alphabet.count) { break }
     }
     return result
 }
@@ -444,8 +440,9 @@ private func replayRange(
     for index in indices {
         let event = alphabet[index]
         trace.append(event.label)
-        let output = applyRange(event, clock: clock, assembler: &assembler)
-        guard let utterance = output.utterance else { continue }
+        guard let utterance = applyRange(event, clock: clock, assembler: &assembler) else {
+            continue
+        }
         emissionsByEvent[index, default: 0] += 1
 
         for violation in rangeViolations(
@@ -476,14 +473,7 @@ private func exploreRanges(depth: Int) -> ExploreResult {
             result.sequencesHit[property, default: 0] += 1
         }
 
-        var position = depth - 1
-        while position >= 0 {
-            indices[position] += 1
-            if indices[position] < alphabet.count { break }
-            indices[position] = 0
-            position -= 1
-        }
-        if position < 0 { break }
+        if !advance(&indices, limit: alphabet.count) { break }
     }
     return result
 }
