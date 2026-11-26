@@ -67,4 +67,5 @@
       <path d="M696.70 254.52 A250 250 0 0 1 866.92 410.50" fill="none" stroke="#FFF4E0" stroke-opacity="0.38" stroke-width="5" stroke-linecap="round"/>
     </g>
   </g>
+  <use xlink:href="#exchangeArrow" fill="#8A5A12"/>
 </svg>
