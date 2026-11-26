@@ -1,5 +1,16 @@
 import Foundation
 
+/// How strictly a transcription result's script must match the transcriber's
+/// locale before the assembler accepts it.
+enum SpeechLanguagePurity: Equatable, Sendable {
+    /// Dual-locale pipelines reject results that look like the other locale so
+    /// the two transcribers cannot leak into each other's rows.
+    case strict
+    /// A single-locale pipeline trusts its transcriber. Mixed-script sentences
+    /// and numeric-only results must not be dropped; mismatches are only logged.
+    case trustedLocale
+}
+
 struct UtteranceAssembler: Sendable {
     private struct FinalizedUtterance: Equatable, Sendable {
         let id: UUID
@@ -9,6 +20,7 @@ struct UtteranceAssembler: Sendable {
     }
 
     var lastLanguage: AppLanguage?
+    var languagePurity: SpeechLanguagePurity
     private var utteranceID = UUID()
     private var texts: [AppLanguage: String] = [:]
     private var finals: [AppLanguage: Bool] = [:]
@@ -20,16 +32,24 @@ struct UtteranceAssembler: Sendable {
 
     init(
         reconciliationWindow: TimeInterval = 3,
+        languagePurity: SpeechLanguagePurity = .strict,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.reconciliationWindow = reconciliationWindow
+        self.languagePurity = languagePurity
         self.now = now
     }
 
     mutating func ingest(language: AppLanguage, text: String, isFinal: Bool) -> Utterance? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        guard Self.matchesClaimedLanguage(trimmed, claimed: language) else { return nil }
+        let verdict = Self.languageVerdict(trimmed, claimed: language, purity: languagePurity)
+        guard verdict.accepted else { return nil }
+        if verdict.scriptMismatch, languagePurity == .trustedLocale {
+            DuiyiLog.speech.debug(
+                "Single-locale result script mismatch for \(language.rawValue, privacy: .public)"
+            )
+        }
 
         if now() < suppressOtherUntil, let held = lastLanguage, language != held {
             return nil
@@ -183,6 +203,8 @@ struct UtteranceAssembler: Sendable {
     }
 
     mutating func reset() {
+        // `languagePurity` is configuration owned by the engine; a reset clears
+        // per-utterance state only.
         lastLanguage = nil
         lockedLanguage = nil
         suppressOtherUntil = .distantPast
@@ -314,8 +336,41 @@ struct UtteranceAssembler: Sendable {
         }
     }
 
+    private struct LanguageVerdict {
+        let accepted: Bool
+        let scriptMismatch: Bool
+    }
+
+    /// One policy evaluation for acceptance plus the script-mismatch signal
+    /// used for single-locale diagnostics.
+    private static func languageVerdict(
+        _ text: String,
+        claimed: AppLanguage,
+        purity: SpeechLanguagePurity
+    ) -> LanguageVerdict {
+        let scriptMismatch = !strictMatchesClaimedLanguage(text, claimed: claimed)
+        switch purity {
+        case .strict:
+            return LanguageVerdict(accepted: !scriptMismatch, scriptMismatch: scriptMismatch)
+        case .trustedLocale:
+            return LanguageVerdict(
+                accepted: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                scriptMismatch: scriptMismatch
+            )
+        }
+    }
+
     /// Drop results that do not look like the transcriber's language at all.
-    static func matchesClaimedLanguage(_ text: String, claimed: AppLanguage) -> Bool {
+    /// Dual-locale callers keep the strict default.
+    static func matchesClaimedLanguage(
+        _ text: String,
+        claimed: AppLanguage,
+        purity: SpeechLanguagePurity = .strict
+    ) -> Bool {
+        languageVerdict(text, claimed: claimed, purity: purity).accepted
+    }
+
+    private static func strictMatchesClaimedLanguage(_ text: String, claimed: AppLanguage) -> Bool {
         let han = hanCount(text)
         let latin = letterCount(text)
         let kana = kanaCount(text)
