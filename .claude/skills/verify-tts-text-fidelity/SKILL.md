@@ -47,7 +47,7 @@ Each check line gives its failure count or says `clean`. A failure shows the cas
 
 ## Current baseline (recorded 2026-11-27, sources at `df18973`)
 
-The run exits `1` with 29 distinct failures, fingerprint `101d55531e2df6e8`.
+The run exits `1` with 29 distinct failures, fingerprint `101d55531e2df6e8`. Rechecked after merging `origin/main` at `84a880f`: the same 29 findings and fingerprint. `Clause.swift` is unchanged by the merge.
 
 - **`insertion-coverage`: 26 failures** (5 hand-built, 21 generated).
   - `zh-leading-negation`: spoken `那是3月18日`, final `不，那是3月18日，但他们把它改成了 15日。`, required `不`, emitted `["但他们把它改成了 15日。"]`. The new negation is dropped.
