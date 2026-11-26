@@ -7,6 +7,7 @@
 > 3. 启动图只放纯画布，不放图标 mark 或字标：HIG 要求它几乎等同首帧，mark 会变成 splash。
 > 4. 验证：`actool` 的 partial plist 应含 `CFBundleIconName`/`CFBundleIconFiles`；`assetutil` 应看到 ≥3 个 icon rendition；再构建并在模拟器/真机看 Home Screen 与首帧。
 > 5. 本文件是调研与决策记录；实现落在 `feat/app-icon-launch`。
+> 6. 最终图标底色用浅色 Ivory `#FFF8F0`，箭头 `#8A5A12`；构图仍是 Overlapping Lens。
 
 > Researched 2026-11-26. Environment verified locally: Xcode 27.1 (27A9275), iOS SDK 27.1
 > (`iphoneos27.1`), deployment target `26.4`, SwiftUI iPhone-only target `Duiyi`.
@@ -531,10 +532,11 @@ xcrun simctl terminate booted com.david.Duiyi  # then relaunch for the launch sc
 4. Leave `AccentColor` untouched; it is unrelated to the icon.
 5. Verify with §5.1, then §5.2, then §5.4.
 
-The `.icon` fill uses the brand ink `#0B0C10`, the same value as `TokenPalette.canvas.dark`. It is
-part of the icon artwork, not a UI token: a future canvas change should not silently repaint the
-app icon. The launch colorset, by contrast, must track `Tokens.canvas` and is pinned by
-`LaunchBackgroundTests`.
+The `.icon` fill uses the approved ivory `#FFF8F0` with the solid amber arrow `#8A5A12`. It is part
+of the icon artwork, not a UI token: a future canvas change should not silently repaint the app
+icon. The earlier deep-ink option (`#0B0C10`) was rejected because it read as a dark island against
+the app's light surfaces. The launch colorset, by contrast, must track `Tokens.canvas` and is
+pinned by `LaunchBackgroundTests`.
 
 ### Icon (fallback: documented asset catalog)
 
