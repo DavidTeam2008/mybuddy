@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>对译 App Icon — 浅色底色方案（PROTOTYPE）</title>
+<style>
+  :root {
+    --ink: #0B0C10;
+    --panel: #161920;
+    --amber: #E8B86D;
+    --cream: #FFF4E0;
+    --text: #F4EFE6;
+    --muted: #A9A49B;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 36px 56px;
+    background: var(--ink); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1160px; margin: 0 auto; }
+  .badge {
+    display: inline-block; background: var(--amber); color: #1C1915;
+    font-weight: 800; letter-spacing: .14em; font-size: 11px;
+    padding: 6px 12px; border-radius: 999px; margin-bottom: 16px;
+  }
+  h1 { font-size: 30px; margin: 0 0 8px; letter-spacing: -.02em; }
+  .sub { color: var(--muted); font-size: 14px; line-height: 1.55; max-width: 820px; margin: 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 30px; }
+  .card { background: var(--panel); border: 1px solid rgba(255,244,224,.08); border-radius: 22px; padding: 20px; }
+  .top { display: flex; gap: 18px; align-items: flex-start; }
+  .squircle {
+    width: 200px; height: 200px; border-radius: 22.37%; overflow: hidden; flex: none;
+    box-shadow: 0 12px 34px rgba(0,0,0,.4);
+  }
+  .squircle img { width: 100%; height: 100%; display: block; }
+  h2 { font-size: 18px; margin: 0 0 4px; }
+  .num { color: var(--amber); font-weight: 800; margin-right: 8px; }
+  .colors { font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; color: var(--muted); line-height: 1.7; margin: 6px 0 0; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 5px; border: 1px solid rgba(255,255,255,.2); }
+  p { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 8px 0 0; }
+  .sizes { display: flex; align-items: flex-end; gap: 16px; margin-top: 16px; }
+  .size { text-align: center; }
+  .size img { display: block; margin: 0 auto; border-radius: 18%; }
+  .size span { display: block; color: var(--muted); font-size: 10px; margin-top: 5px; }
+  .note { margin-top: 28px; background: rgba(232,184,109,.08); border: 1px solid rgba(232,184,109,.22); border-radius: 16px; padding: 16px 20px; }
+  .note p { color: var(--text); margin: 0; font-size: 13px; }
+  .footer { margin-top: 26px; color: var(--muted); font-size: 11px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="badge">PROTOTYPE — NOT PRODUCTION</div>
+  <h1>对译 App Icon — 浅色底色方案</h1>
+  <p class="sub">构图与气泡、透镜完全不变，只换底色和双向箭头颜色。箭头现在是实心填充（不再依赖“负空间露底色”），所以两个颜色可以独立调。四组底色都取自 App 的浅色语义色。</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="top">
+        <div class="squircle"><img src="overlapping-lens-v3-ivory-1024.png" alt="Ivory"></div>
+        <div>
+          <h2><span class="num">1</span>Ivory</h2>
+          <div class="colors"><span class="swatch" style="background:#FFF8F0"></span>#FFF8F0 暖米白<br><span class="swatch" style="background:#8A5A12"></span>#8A5A12 深琥珀箭头</div>
+          <p>与 App 的 peerPane / 暖色卡片同族，整体最暖、最像“对话”；箭头明显是深琥珀而不是黑。</p>
+        </div>
+      </div>
+      <div class="sizes">
+        <div class="size"><img src="overlapping-lens-v3-ivory-180.png" width="180" height="180" alt=""><span>180</span></div>
+        <div class="size"><img src="overlapping-lens-v3-ivory-120.png" width="120" height="120" alt=""><span>120</span></div>
+        <div class="size"><img src="overlapping-lens-v3-ivory-60.png" width="60" height="60" alt=""><span>60</span></div>
+        <div class="size"><img src="overlapping-lens-v3-ivory-40.png" width="40" height="40" alt=""><span>40</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="top">
+        <div class="squircle"><img src="overlapping-lens-v3-canvas-1024.png" alt="Canvas"></div>
+        <div>
+          <h2><span class="num">2</span>Canvas</h2>
+          <div class="colors"><span class="swatch" style="background:#F2F2F7"></span>#F2F2F7 App 浅色主画布<br><span class="swatch" style="background:#3A2A18"></span>#3A2A18 暖棕箭头</div>
+          <p>和 App 浅色画布完全一致；冷暖对比最强，小尺寸最清楚。箭头偏深，但仍是暖棕，不是纯黑。</p>
+        </div>
+      </div>
+      <div class="sizes">
+        <div class="size"><img src="overlapping-lens-v3-canvas-180.png" width="180" height="180" alt=""><span>180</span></div>
+        <div class="size"><img src="overlapping-lens-v3-canvas-120.png" width="120" height="120" alt=""><span>120</span></div>
+        <div class="size"><img src="overlapping-lens-v3-canvas-60.png" width="60" height="60" alt=""><span>60</span></div>
+        <div class="size"><img src="overlapping-lens-v3-canvas-40.png" width="40" height="40" alt=""><span>40</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="top">
+        <div class="squircle"><img src="overlapping-lens-v3-peach-1024.png" alt="Peach"></div>
+        <div>
+          <h2><span class="num">3</span>Peach</h2>
+          <div class="colors"><span class="swatch" style="background:#FFF3E5"></span>#FFF3E5 面对面卡片暖杏<br><span class="swatch" style="background:#5A3608"></span>#5A3608 深琥珀棕箭头</div>
+          <p>比 Ivory 更杏、更暖；和面对面卡片的浅色底一致，整体很有“面对面”的场景感。</p>
+        </div>
+      </div>
+      <div class="sizes">
+        <div class="size"><img src="overlapping-lens-v3-peach-180.png" width="180" height="180" alt=""><span>180</span></div>
+        <div class="size"><img src="overlapping-lens-v3-peach-120.png" width="120" height="120" alt=""><span>120</span></div>
+        <div class="size"><img src="overlapping-lens-v3-peach-60.png" width="60" height="60" alt=""><span>60</span></div>
+        <div class="size"><img src="overlapping-lens-v3-peach-40.png" width="40" height="40" alt=""><span>40</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="top">
+        <div class="squircle"><img src="overlapping-lens-v3-mint-1024.png" alt="Mint"></div>
+        <div>
+          <h2><span class="num">4</span>Mint</h2>
+          <div class="colors"><span class="swatch" style="background:#E9F7F5"></span>#E9F7F5 同传卡片薄荷<br><span class="swatch" style="background:#1F6F6B"></span>#1F6F6B 青色箭头</div>
+          <p>琥珀 + 青的互补组合，最清爽、最有“实时传译”的科技感；但会引入第二个品牌色相。</p>
+        </div>
+      </div>
+      <div class="sizes">
+        <div class="size"><img src="overlapping-lens-v3-mint-180.png" width="180" height="180" alt=""><span>180</span></div>
+        <div class="size"><img src="overlapping-lens-v3-mint-120.png" width="120" height="120" alt=""><span>120</span></div>
+        <div class="size"><img src="overlapping-lens-v3-mint-60.png" width="60" height="60" alt=""><span>60</span></div>
+        <div class="size"><img src="overlapping-lens-v3-mint-40.png" width="40" height="40" alt=""><span>40</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <p><strong>建议：1. Ivory</strong> 最贴合 App 的暖色品牌，箭头也最明显不是黑色；如果你更想“和浅色主画布完全一致”，选 <strong>2. Canvas</strong>；想要更清爽、更科技感，选 <strong>4. Mint</strong>。回 <code>1</code>/<code>2</code>/<code>3</code>/<code>4</code> 即可。</p>
+  </div>
+
+  <div class="footer">PROTOTYPE — NOT PRODUCTION · 渲染 rsvg-convert 2.63.2 · 构图与 v2 完全相同，仅底色与箭头填充色不同 · 选定后更新 PR #76 的 AppIcon.icon。</div>
+</div>
+</body>
+</html>
