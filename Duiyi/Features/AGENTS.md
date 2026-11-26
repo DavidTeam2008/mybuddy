@@ -18,7 +18,7 @@
 ## 3. 翻译走 `TranslationPipeline`、锚 View，字幕以内存为准
 
 - 需要翻译时由 VM 调 `Shared/TranslationPipeline.submit(TranslationSubmission)`：行、`isFinal`、目标语言与首包/后续延迟在提交时算好。pipeline 负责 job 形成、每 utterance 独立防抖、重复抑制、单调 `sequence` 过期判定（同句必须递增）、已应用 job 去重（非 pipeline job 窗口 256）与 preview 有界、final 不丢的有序 outbound 队列；VM 不再自持防抖 Task、`sentSourceText` 或 `lastAppliedSourceCount`。
-- 非 final preview 由 `TranslationTrigger.action(for:language:)` 三选一：终止符 → `.sendNow`；≥4 内容单位 → `.debounce`（首包/后续延迟）；更短 → `.drop`。不要绕过去直接提交短片段；final 仍旁路全部 gate。
+- 非 final preview 由 `TranslationTrigger.action(for:language:)` 三选一：终止符 → `.sendNow`；≥4 estimated words → `.debounce`（首包/后续延迟）；更短 → `.drop`。不要绕过去直接提交短片段；final 仍旁路全部 gate。
 - VM 自建 `TranslationPipeline`。结果规则统一：**final 译文一律应用（即使源文更短）**；preview 结果在比上次已应用结果更短或 `sequence` 不新于已应用时丢弃；同一 job 的重复结果不会应用两次。调用方构造器不接收 pipeline 或 scheduler；测试只通过 internal 的 `scheduler:` 初始化器注入调度器。
 - live Host 不接受单个 `outboundJob`：View 把 VM 的 `outboundRevision` 与 `takeNextOutboundJob` 传给 `TranslationHostView` / `OneWayTranslationHostView`，Host 在 revision 变化和 `onAppear` 时 drain 到空再 submit 给 bridge。不要退回只观察“最新 job”：SwiftUI 会合并两次渲染之间的 final，第一个永远到不了 Host。历史详情的逐条翻译保留 `job:` 初始化器。
 - 译文结果在显示/落库前必须过 `TextIntegrity`：含 U+FFFD 或可疑控制字符的 final 由 pump 重试一次；仍坏则走失败（不显示、不落库、不导出）。投影层对任何损坏译文直接拒绝。

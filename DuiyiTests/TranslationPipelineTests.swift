@@ -60,7 +60,7 @@ struct TranslationPipelineTests {
         pipeline.submit(
             makeSubmission(
                 id: id,
-                text: "你好世界",
+                text: "你好世界你好世界",
                 language: .zhHans,
                 firstDelay: .milliseconds(25),
                 subsequentDelay: .milliseconds(50)
@@ -68,12 +68,12 @@ struct TranslationPipelineTests {
         )
         #expect(scheduler.pendingDelays == [.milliseconds(25)])
         scheduler.advance(by: .milliseconds(25))
-        #expect(pipeline.outboundJob?.text == "你好世界")
+        #expect(pipeline.outboundJob?.text == "你好世界你好世界")
 
         pipeline.submit(
             makeSubmission(
                 id: id,
-                text: "你好世界你好",
+                text: "你好世界你好世界你好",
                 language: .zhHans,
                 firstDelay: .milliseconds(25),
                 subsequentDelay: .milliseconds(50)
@@ -81,7 +81,7 @@ struct TranslationPipelineTests {
         )
         #expect(scheduler.pendingDelays == [.milliseconds(50)])
         scheduler.advance(by: .milliseconds(50))
-        #expect(pipeline.outboundJob?.text == "你好世界你好")
+        #expect(pipeline.outboundJob?.text == "你好世界你好世界你好")
     }
 
     @Test("A new line keeps the previous line's pending debounce")

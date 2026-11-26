@@ -17,19 +17,19 @@ enum TranslationTrigger {
         case drop
     }
 
-    /// Minimum content units for a preview without a clause terminator.
-    /// The research baseline is 4–6 English words; script-count languages use
-    /// the same unit count (4 characters/syllables) pending device tuning.
-    private static let minimumPreviewUnits = 4
+    /// Minimum estimated words for a preview without a clause terminator.
+    /// The research baseline is 4–6 English words.
+    private static let minimumPreviewWords = 4
 
-    static func action(for text: String, language: AppLanguage) -> Action {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return .drop
-        }
+    static func action(for rawText: String, language: AppLanguage) -> Action {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return .drop }
         if endsWithClause(text) {
             return .sendNow
         }
-        return isWorthTranslating(text, language: language) ? .debounce : .drop
+        return estimatedWordCount(text, language: language) >= minimumPreviewWords
+            ? .debounce
+            : .drop
     }
 
     /// `ClauseSplitter` omits the ASCII period because it scans interior
@@ -43,24 +43,26 @@ enum TranslationTrigger {
         return last.unicodeScalars.allSatisfy { previewTerminators.contains($0) }
     }
 
-    private static func isWorthTranslating(_ text: String, language: AppLanguage) -> Bool {
-        contentUnits(text, language: language) >= minimumPreviewUnits
-    }
-
-    private static func contentUnits(_ text: String, language: AppLanguage) -> Int {
+    /// Script languages have no whitespace word boundaries, so raw counts are
+    /// divided into approximate words. The divisors keep the 4-word minimum
+    /// comparable to English; they are heuristics to revisit with P1-4 device
+    /// data, not linguistic word segmentation.
+    private static func estimatedWordCount(_ text: String, language: AppLanguage) -> Int {
         switch language {
-        case .zhHans:
-            return ScriptCounts.hanCount(text)
         case .english:
             return ScriptCounts.wordCount(text)
-        case .japanese:
-            return ScriptCounts.kanaCount(text) + ScriptCounts.hanCount(text)
-        case .korean:
-            return ScriptCounts.hangulCount(text)
-        case .thai:
-            return ScriptCounts.thaiCount(text)
         case .vietnamese:
-            return ScriptCounts.wordCount(text)
+            // Vietnamese writes syllables as whitespace tokens; a word is
+            // usually two syllables.
+            return ScriptCounts.wordCount(text) / 2
+        case .zhHans:
+            return ScriptCounts.hanCount(text) / 2
+        case .japanese:
+            return (ScriptCounts.kanaCount(text) + ScriptCounts.hanCount(text)) / 2
+        case .korean:
+            return ScriptCounts.hangulCount(text) / 2
+        case .thai:
+            return ScriptCounts.thaiCount(text) / 3
         }
     }
 }

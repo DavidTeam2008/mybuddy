@@ -133,17 +133,20 @@ final class TranslationPipeline {
             // final will carry the line.
             return
         case .sendNow:
-            sentSourceText[lineID] = text
-            enqueue(job)
+            commit(job, text: text, lineID: lineID)
         case .debounce:
             let delay = isFirst ? submission.firstDelay : submission.subsequentDelay
             scheduled[lineID] = scheduler.schedule(after: delay) { [weak self] in
                 guard let self else { return }
                 self.scheduled[lineID] = nil
-                self.sentSourceText[lineID] = text
-                self.enqueue(job)
+                self.commit(job, text: text, lineID: lineID)
             }
         }
+    }
+
+    private func commit(_ job: TranslationJob, text: String, lineID: UUID) {
+        sentSourceText[lineID] = text
+        enqueue(job)
     }
 
     /// Hands the oldest queued job to the host and removes it from the queue.
