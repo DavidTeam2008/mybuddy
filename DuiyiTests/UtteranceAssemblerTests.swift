@@ -478,4 +478,88 @@ struct UtteranceAssemblerTests {
             ) == nil
         )
     }
+
+    @Test("An unrelated final after a volatile revision of a finalized row starts a new id")
+    func unrelatedFinalAfterVolatileRevisionStartsNewID() throws {
+        var assembler = UtteranceAssembler()
+        let firstValue = assembler.ingest(
+            language: .english,
+            text: "I would like a cup of coffee",
+            isFinal: true
+        )
+        let first = try #require(firstValue)
+        _ = assembler.ingest(
+            language: .english,
+            text: "I would like a cup of coffee with milk",
+            isFinal: false
+        )
+        let secondValue = assembler.ingest(
+            language: .english,
+            text: "The train leaves at seven tomorrow morning",
+            isFinal: true
+        )
+        let second = try #require(secondValue)
+
+        #expect(second.id != first.id)
+        #expect(second.text == "The train leaves at seven tomorrow morning")
+    }
+
+    @Test("A confident other-language final after a finalized row starts a new id")
+    func confidentOtherLanguageAfterFinalStartsNewID() throws {
+        let clock = TestClock()
+        var assembler = UtteranceAssembler(now: { clock.now })
+        let firstValue = assembler.ingest(
+            language: .english,
+            text: "I would like a cup of coffee",
+            isFinal: true
+        )
+        let first = try #require(firstValue)
+        assembler.acknowledgeFinal(language: .english)
+        clock.now.addTimeInterval(1.5)
+        let secondValue = assembler.ingest(
+            language: .zhHans,
+            text: "我想点一杯咖啡，谢谢你的服务",
+            isFinal: true
+        )
+        let second = try #require(secondValue)
+
+        #expect(second.id != first.id)
+        #expect(second.language == .zhHans)
+    }
+
+    @Test("A same-language continuation after a final keeps the row id")
+    func sameLanguageContinuationAfterFinalKeepsID() throws {
+        let clock = TestClock()
+        var assembler = UtteranceAssembler(now: { clock.now })
+        let firstValue = assembler.ingest(
+            language: .english,
+            text: "I would like a cup of coffee",
+            isFinal: true
+        )
+        let first = try #require(firstValue)
+        let secondValue = assembler.ingest(
+            language: .english,
+            text: "I would like a cup of coffee with milk",
+            isFinal: false
+        )
+        let second = try #require(secondValue)
+
+        #expect(second.id == first.id)
+        #expect(second.isFinal == false)
+    }
+
+    @Test("An unrelated final after an unconfident final starts a new id")
+    func unrelatedFinalAfterUnconfidentFinalStartsNewID() throws {
+        var assembler = UtteranceAssembler()
+        let firstValue = assembler.ingest(language: .english, text: "Hi Jack", isFinal: true)
+        let first = try #require(firstValue)
+        let secondValue = assembler.ingest(
+            language: .english,
+            text: "The train leaves at seven tomorrow morning",
+            isFinal: true
+        )
+        let second = try #require(secondValue)
+
+        #expect(second.id != first.id)
+    }
 }
