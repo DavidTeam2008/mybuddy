@@ -23,7 +23,7 @@
 | 同传 P0-5 单语种 trusted locale | 已实现（2026-11-26，PR #77）：真单语种 `.trustedLocale`；双 locale 降级与会议保持 `.strict`；单测全绿；真机未验证 |
 | 同传 P0-4 停止 finalize/drain | 已实现（2026-11-26，PR #78）：stop/reset/restart finalize（1 s 上限）+ 300 ms drain + 兜底 final；三个 VM 在 end/stop/新建任务前 drain consumer（500 ms 上限）；单测全绿；真机未验证 |
 | 同传 P0-1 outbound 无损队列 | 已实现（2026-11-26，PR #79）：单槽改为有界有序队列 + 每 utterance 防抖 + 单调 sequence + 结果去重；Host 按 `outboundRevision` drain；单测全绿；真机未验证 |
-| 同传 P1-2 稳定单元 preview | 已实现（2026-11-26，PR #80）：句末标点立即、≥4 estimated words 防抖、更短丢弃；首包有用 preview 也走防抖；final 旁路；单测全绿；真机未验证 |
+| 同传 P1-2 稳定单元 preview | 已实现（2026-11-26，PR #82；#80 自动关闭）：句末标点立即、≥4 estimated words 防抖、更短丢弃；首包有用 preview 也走防抖；final 旁路；单测全绿；真机未验证 |
 | 同传 P0-6a 结束竞态回填 | 已实现（2026-11-26，PR #81）：endTask/新建任务后迟到的 final 译文经 `updateTranslations` 回填已结束任务；结束写入在途时暂存后回填；preview 不落库；单测全绿；真机未验证；P0-6b 重试/可见状态另开 |
 | Wave 3 C04 字幕/文字稿投影 | 已完成（#28–#31，PR #33–#36；#32 清理+文档+iPhone 13 真机矩阵，用户确认 2026-11-25）；候选台账见 [05-architecture-backlog.md](05-architecture-backlog.md) |
 | 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
