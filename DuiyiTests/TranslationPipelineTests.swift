@@ -437,6 +437,26 @@ struct TranslationPipelineTests {
         #expect(pipeline.accept(job: job, text: "最后的话") == nil)
     }
 
+    @Test("A replayed result is rejected after the applied-ID window rolls over")
+    func replayAfterAppliedIDWindowIsRejected() throws {
+        let (pipeline, _) = makePipeline()
+        let id = UUID()
+        pipeline.submit(makeSubmission(id: id, text: "hello", isFinal: true))
+        let job = try #require(pipeline.takeNextOutboundJob())
+        #expect(pipeline.accept(job: job, text: "你好") != nil)
+
+        for index in 0..<(TranslationPipeline.appliedJobIDLimit + 16) {
+            let otherID = UUID()
+            pipeline.submit(makeSubmission(id: otherID, text: "line \(index)", isFinal: true))
+            let other = try #require(pipeline.takeNextOutboundJob())
+            #expect(pipeline.accept(job: other, text: "行 \(index)") != nil)
+        }
+
+        // The original job's ID has been evicted, so only the sequence
+        // watermark can reject the replay.
+        #expect(pipeline.accept(job: job, text: "你好") == nil)
+    }
+
     @Test("The preview backlog is bounded and finals are never evicted")
     func previewBacklogIsBounded() {
         let (pipeline, _) = makePipeline()

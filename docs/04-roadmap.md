@@ -143,7 +143,7 @@
 
 ### P1-3 切换语言后的旧翻译状态
 
-**现象**：语言对变化时 `ConversationView` / `InterpretationView` 用 `.id` 重建 Host，旧 session 取消；翻译态（`outboundJob`、防抖、`sentSourceText`、`lastAppliedSourceCount`、aliases）现由 `TranslationPipeline` 持有，`reset()` 会一并清空，但 `setUserLanguage` / `handlePairChange` 的调用时序仍可能漏一句。
+**现象**：语言对变化时 `ConversationView` / `InterpretationView` 用 `.id` 重建 Host，旧 session 取消；翻译态（outbound 队列、防抖、`sentSourceText`、`lastAppliedSourceCount`、`lastAppliedSequence`）现由 `TranslationPipeline` 持有，`reset()` 会一并清空，但 `setUserLanguage` / `handlePairChange` 的调用时序仍可能漏一句。
 
 **目标**：`applyDirectionChange` / `setUserLanguage` / `handlePairChange` 在重建配置前统一调用 `pipeline.reset()`。
 

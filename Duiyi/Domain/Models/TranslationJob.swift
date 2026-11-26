@@ -8,8 +8,8 @@ struct TranslationJob: Equatable, Sendable, Identifiable {
     let text: String
     let isFinal: Bool
     /// Monotonic submission order assigned by `TranslationPipeline`. Jobs built
-    /// outside the pipeline (history detail, previews) use 0 and are exempt
-    /// from the stale-sequence check.
+    /// outside the pipeline (history detail, test fixtures) use 0 and are
+    /// exempt from the stale-sequence check.
     let sequence: Int
 
     init(

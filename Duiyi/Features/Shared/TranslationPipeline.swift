@@ -93,7 +93,7 @@ final class TranslationPipeline {
     /// Preview backlog cap. Finals are never evicted; the queue can only grow
     /// past this while it holds nothing but finals, which the host drains.
     static let outboundQueueLimit = 64
-    private static let appliedJobIDLimit = 256
+    static let appliedJobIDLimit = 256
 
     init() {
         self.scheduler = TaskTranslationScheduler()
@@ -146,7 +146,7 @@ final class TranslationPipeline {
     }
 
     /// Hands the oldest queued job to the host and removes it from the queue.
-    /// Jobs are kept in submission order; a newer job for the same utterance
+    /// Jobs are dequeued in enqueue order; a newer job for the same utterance
     /// replaces the older one in place.
     func takeNextOutboundJob() -> TranslationJob? {
         guard !outboundQueue.isEmpty else { return nil }
@@ -181,8 +181,9 @@ final class TranslationPipeline {
     /// Applies the result to the job's utterance. Empty, duplicated, or stale
     /// results return `nil`; a final is always applied, even when its source is
     /// shorter than an earlier preview. Staleness is by monotonic sequence for
-    /// pipeline jobs and by source length for previews, so a late result can
-    /// neither overwrite a newer job nor be replayed twice.
+    /// pipeline jobs (a result must be newer than the last applied one) and by
+    /// source length for previews, so a late result can neither overwrite a
+    /// newer job nor be replayed twice.
     func accept(job: TranslationJob, text: String) -> TranslationUpdate? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -191,7 +192,7 @@ final class TranslationPipeline {
         let utteranceID = job.utteranceID
         if job.sequence > 0,
            let appliedSequence = lastAppliedSequence[utteranceID],
-           job.sequence < appliedSequence {
+           job.sequence <= appliedSequence {
             return nil
         }
         if let applied = lastAppliedSourceCount[utteranceID],

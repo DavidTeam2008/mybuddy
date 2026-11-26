@@ -90,6 +90,9 @@ struct TranslationHostView: View {
         }
     }
 
+    /// Drains the pipeline queue into the direction bridges. `submit` drops a
+    /// job that no longer matches the host pair; language changes reset the
+    /// pipeline and rebuild this host first, so that filter is defensive.
     private func drainQueuedJobs() {
         guard let takeNextOutboundJob else { return }
         while let job = takeNextOutboundJob() {
@@ -176,6 +179,9 @@ struct OneWayTranslationHostView: View {
         jobs.submit(job)
     }
 
+    /// Drains the pipeline queue into the bridge. `submit` drops a job that no
+    /// longer matches the host pair; language changes reset the pipeline and
+    /// rebuild this host first, so that filter is defensive.
     private func drainQueuedJobs() {
         guard let takeNextOutboundJob else { return }
         while let job = takeNextOutboundJob() {
