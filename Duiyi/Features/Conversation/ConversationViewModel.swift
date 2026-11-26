@@ -132,7 +132,17 @@ final class ConversationViewModel {
     var taskStartedAt: Date? { lifecycle.startedAt }
     var isMemoryOnly: Bool { lifecycle.isMemoryOnly }
     var isNotSaved: Bool { lifecycle.isNotSaved }
+    /// The newest translation job that has not been drained yet; the pipeline
+    /// owns the queue. Kept for tests.
     var outboundJob: TranslationJob? { pipeline.outboundJob }
+
+    /// Bumps on every enqueue so the Host drains the pipeline queue instead of
+    /// a single job observed through SwiftUI (which can coalesce two jobs).
+    var outboundRevision: Int { pipeline.outboundRevision }
+
+    func takeNextOutboundJob() -> TranslationJob? {
+        pipeline.takeNextOutboundJob()
+    }
 
     var canSummarize: Bool {
         transcript.contains { !$0.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
