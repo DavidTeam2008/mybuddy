@@ -2,7 +2,7 @@
 
 > 日期：2026-11-25。对照材料：用户 iPhone 同传导出（2026-11-25 08:58–10:13，English → 中文，175 条）；TED 官方 transcript（Lauren Weinstein, *Don't believe everything you think*, TEDxPaloAlto）。代码基线：`main` = `0b1c626`（Xcode 27.1 / iOS 27.1 SDK）。逐条对照数据与脚本留在本机 `/tmp/simultaneous-comparison.md`，未入库。
 >
-> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78；P0-1 outbound 无损队列 → PR #79；P1-2 稳定单元 preview → PR #82（#80 因基线分支删除自动关闭，内容相同）；P0-6a 结束竞态回填 → PR #81；P1-4a 每任务诊断 + P1-1 range-aware 组装 → PR #84（merge `1cc8df6`）。P1-4b 设备回放因环境人声暂停，未验证；P0-6b、其余 P1/P2 未开始。
+> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78；P0-1 outbound 无损队列 → PR #79；P1-2 稳定单元 preview → PR #82（#80 因基线分支删除自动关闭，内容相同）；P0-6a 结束竞态回填 → PR #81；P1-4a 每任务诊断 + P1-1 range-aware 组装 → PR #84（merge `1cc8df6`）。**剩余**：P1-4b 设备回放因环境人声暂停（未验证）、P1-3 ASR 精度 A/B（未开始，等同一夹具）、P0-6b 重试/可见状态（未开始）；P1-5/其余 P2 暂缓。
 
 ## 0. 结论
 
@@ -214,6 +214,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P1-3. ASR 精度选项（在延迟预算内）**
 
+- **状态（2026-11-26）**：未开始。等 P1-4b 的同一段夹具与诊断数据，先做 `.fastResults` 去留 A/B；`AnalysisContext.contextualStrings` 与 `transcriptionConfidence` 只作为诊断/候选，不因低置信度丢 final。改 ASR 选项前先确认 P1-4b 的源文覆盖、重复 final 与 final 延迟基线。
 - A/B 去掉 `.fastResults`（保留 `.volatileResults`）；用 `AnalysisContext.contextualStrings` 提示人名/术语；`transcriptionConfidence` 只做诊断，不因低置信度丢 final。`.etiquetteReplacements` 是否保留按“逐字保真”产品口径决定。
 - 现实上限：本次 ASR 错误多是合法词替换（`shared→Sheer`、`past→pastor`），这些不会被 contextual strings 或更慢的 ASR 稳定修复，需要上下文修复（P2-1）或翻译模型本身带上下文。
 
