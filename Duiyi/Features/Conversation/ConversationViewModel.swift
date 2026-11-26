@@ -47,6 +47,7 @@ final class ConversationViewModel {
     private let idleRestoreDelay: Duration
     private let pipeline: TranslationPipeline
     private var projection = CaptionProjection(policy: .conversation)
+    private let lateTranslation: LateTranslationBackfill
 
     init(
         gate: any SpeechSessionGating,
@@ -57,13 +58,15 @@ final class ConversationViewModel {
         taskStore: any TaskStoreV2 = InMemoryTaskStore(),
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds)
     ) {
-        lifecycle = TaskLifecycle(
+        let lifecycle = TaskLifecycle(
             feature: .faceToFace,
             store: taskStore,
             gate: gate,
             permissions: permissions,
             audioSession: audioSession
         )
+        self.lifecycle = lifecycle
+        lateTranslation = LateTranslationBackfill(lifecycle: lifecycle)
         pipeline = TranslationPipeline()
         self.permissions = permissions
         self.preferences = preferences
@@ -88,13 +91,15 @@ final class ConversationViewModel {
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
         scheduler: any TranslationScheduler
     ) {
-        lifecycle = TaskLifecycle(
+        let lifecycle = TaskLifecycle(
             feature: .faceToFace,
             store: taskStore,
             gate: gate,
             permissions: permissions,
             audioSession: audioSession
         )
+        self.lifecycle = lifecycle
+        lateTranslation = LateTranslationBackfill(lifecycle: lifecycle)
         pipeline = TranslationPipeline(scheduler: scheduler)
         self.permissions = permissions
         self.preferences = preferences
@@ -229,13 +234,19 @@ final class ConversationViewModel {
             lifecycle.persist(transcript)
         }
         stateOverride = nil
-        switch await lifecycle.prepareForNewTask() {
+        lateTranslation.beginEnding()
+        let prepareOutcome = await lifecycle.prepareForNewTask()
+        lateTranslation.endEnding()
+        switch prepareOutcome {
         case .ready:
+            await lateTranslation.flushPending()
             await createNewTask()
         case .blockedByUnsavedTask:
+            lateTranslation.discardPending()
             isUnsavedTaskPromptPresented = true
         case .notSaved:
             // Keep the task and captions; the not-saved banner explains why.
+            lateTranslation.discardPending()
             break
         }
     }
@@ -289,7 +300,9 @@ final class ConversationViewModel {
         await drainSpeechTask()
         isUnsavedTaskPromptPresented = false
         isExportThenContinuePending = false
+        lateTranslation.beginEnding()
         let outcome = await lifecycle.endTask(transcript: transcript, summary: summary)
+        lateTranslation.endEnding()
         stateOverride = nil
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
@@ -297,15 +310,18 @@ final class ConversationViewModel {
         projection.setSpeakingHint(nil, pane: .peer)
         switch outcome {
         case let .ended(session):
+            await lateTranslation.flushPending()
             resetCaptions()
             resumePromptText = nil
             return session
         case .discardedEmpty:
+            lateTranslation.discardPending()
             resetCaptions()
             resumePromptText = nil
             return nil
         case .notSaved:
             // Keep the transcript in memory for export; nothing was written.
+            lateTranslation.discardPending()
             return nil
         }
     }
@@ -484,15 +500,31 @@ final class ConversationViewModel {
 
     func fulfill(job: TranslationJob, text: String) {
         guard let update = pipeline.accept(job: job, text: text) else { return }
+        // A record that is gone means the task was ended and reset while this
+        // translation was in flight. A final result still belongs in the
+        // finished transcript; a preview does not.
+        let hadRecord = projection.contains(utteranceID: update.utteranceID)
         applyTranslation(
             utteranceID: update.utteranceID,
             text: update.translatedText,
             settle: update.job.isFinal
         )
+        if update.job.isFinal {
+            lateTranslation.finalArrived(
+                entryID: update.utteranceID,
+                text: update.translatedText,
+                hasLiveRecord: hadRecord
+            )
+        }
     }
 
     func failTranslation(job: TranslationJob, error: Error) {
         pipeline.fail(job: job)
+    }
+
+    /// Test seam: waits for a late-final backfill drain started by `fulfill`.
+    func waitForTranslationBackfill() async {
+        await lateTranslation.waitForDrain()
     }
 
     func requestSummary() async {

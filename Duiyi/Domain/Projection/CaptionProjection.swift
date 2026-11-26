@@ -89,6 +89,13 @@ struct CaptionProjection: Sendable {
         return line(for: record)
     }
 
+    /// Whether the record store still owns this utterance. Used to tell a
+    /// translation result that missed its display window (record present) from
+    /// one that arrived after the task was reset (record gone).
+    func contains(utteranceID: UUID) -> Bool {
+        index[utteranceID] != nil
+    }
+
     /// Updates the record's translation and returns the canonical line only
     /// while that record is in the pane's display window. A row hidden by a
     /// clear or evicted by the history limit still updates the record and the

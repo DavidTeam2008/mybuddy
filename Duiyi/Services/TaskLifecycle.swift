@@ -77,6 +77,11 @@ final class TaskLifecycle {
         var entries: [TranscriptEntry]
     }
 
+    /// The most recently ended task, kept so a final translation that arrives
+    /// after the task ends can be written back instead of dropped. The store
+    /// allows translation-only writes on ended tasks.
+    @ObservationIgnored private var endedTask: TaskSession?
+
     init(
         feature: FeatureID,
         store: any TaskStoreV2,
@@ -153,7 +158,11 @@ final class TaskLifecycle {
             entries: latestTranscript,
             summary: task.summary
         ) {
-        case .ended, .discardedEmpty:
+        case let .ended(session):
+            endedTask = session
+            clearCurrent()
+            return .ready
+        case .discardedEmpty:
             clearCurrent()
             return .ready
         case let .notPersisted(reason):
@@ -356,6 +365,7 @@ final class TaskLifecycle {
 
         switch await store.end(taskID: taskID, entries: transcript, summary: summary) {
         case let .ended(session):
+            endedTask = session
             clearCurrent()
             return .ended(session)
         case .discardedEmpty:
@@ -366,6 +376,33 @@ final class TaskLifecycle {
             sessionState = .paused
             return .notSaved(reason)
         }
+    }
+
+    /// Applies a final translation that arrived after the task ended. The
+    /// in-memory snapshot is updated first so repeated late results accumulate
+    /// even when the store write fails; only the most recently ended task is
+    /// retained. Returns whether the store write persisted.
+    @discardableResult
+    func backfillTranslation(entryID: UUID, text: String) async -> Bool {
+        guard !TextIntegrity.isCorrupted(text),
+              var ended = endedTask,
+              let index = ended.entries.firstIndex(where: { $0.id == entryID }) else {
+            return false
+        }
+        ended.entries[index].translatedText = text
+        endedTask = ended
+        guard case .persisted = await store.updateTranslations(
+            [ended.entries[index]],
+            for: ended.id
+        ) else {
+            #if DEBUG
+            DuiyiLog.translation.debug(
+                "late translation backfill not persisted entry=\(entryID.uuidString, privacy: .public) task=\(ended.id.uuidString, privacy: .public)"
+            )
+            #endif
+            return false
+        }
+        return true
     }
 
     // MARK: - Persistence
