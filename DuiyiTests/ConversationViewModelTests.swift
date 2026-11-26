@@ -1012,6 +1012,45 @@ struct ConversationViewModelTests {
         return preferences
     }
 
+    @Test("Beginning a new task drains a final emitted when the old stream stops")
+    func beginTaskDrainsFinalEmittedOnStop() async {
+        let store = InMemoryTaskStore()
+        let gate = ConversationFakeGate()
+        gate.finalOnStop = Utterance(language: .english, text: "旧任务最后一句", isFinal: true)
+        let viewModel = makeGateViewModel(gate: gate, store: store)
+
+        await viewModel.beginTask()
+        await viewModel.beginTask()
+
+        let ended = await store.list(filter: .faceToFace)
+        #expect(ended.first?.entries.contains { $0.sourceText == "旧任务最后一句" } == true)
+    }
+
+    @Test("Ending a task drains a final emitted when the stream stops")
+    func endTaskDrainsFinalEmittedOnStop() async throws {
+        let store = InMemoryTaskStore()
+        let gate = ConversationFakeGate()
+        gate.finalOnStop = Utterance(language: .english, text: "最后一句", isFinal: true)
+        let viewModel = makeGateViewModel(gate: gate, store: store)
+
+        await viewModel.beginTask()
+        let ended = try #require(await viewModel.endTask())
+
+        #expect(ended.entries.contains { $0.sourceText == "最后一句" })
+    }
+
+    @Test("Stopping listening drains a final emitted when the stream stops")
+    func stopDrainsFinalEmittedOnStop() async {
+        let gate = ConversationFakeGate()
+        gate.finalOnStop = Utterance(language: .english, text: "暂停最后一句", isFinal: true)
+        let viewModel = makeGateViewModel(gate: gate)
+
+        await viewModel.beginTask()
+        await viewModel.stop(restoreIdleTimerAfterDelay: false)
+
+        #expect(viewModel.transcript.contains { $0.sourceText == "暂停最后一句" })
+    }
+
     private func makeGateViewModel(
         gate: ConversationFakeGate,
         store: any TaskStoreV2 = InMemoryTaskStore(),
@@ -1096,6 +1135,7 @@ private final class ConversationFakeGate: SpeechSessionGating {
     private(set) var starts: [Start] = []
     private(set) var stopCount = 0
     var eventSink: ((String) -> Void)?
+    var finalOnStop: Utterance?
 
     var startCount: Int { starts.count }
 
@@ -1130,6 +1170,10 @@ private final class ConversationFakeGate: SpeechSessionGating {
         eventSink?("gate-stop")
         guard currentGeneration == handle.generation else { return }
         currentGeneration = nil
+        if let final = finalOnStop {
+            finalOnStop = nil
+            continuation?.yield(final)
+        }
         continuation?.finish()
         continuation = nil
     }

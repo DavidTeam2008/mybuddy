@@ -20,7 +20,8 @@
 | 语言目录实查 | 生产注入 `SystemLanguageCatalog`（探针缓存）；当前仅首页设置消费，v1 扩展到所有语言入口 |
 | Wave 1 数据完整性 | 已合并到 `wave-1-data-integrity`（#2–#12，tip `fd820e4`）：TaskStoreV2、SpeechSessionGate、TaskLifecycle、显性存储降级、清屏/50 条/2 万字语义。iPhone 13 真机清单未验证 |
 | P1-1 翻译队列积压 | 已完成（#22–#25，main `37f0a50`）；真机验证 2026-11-24 通过（用户确认）；#21/#26 已关闭 |
-| 同传 P0-5 单语种 trusted locale | 已实现（2026-11-26，`fix/p0-5-trusted-locale`）：真单语种 `.trustedLocale`；双 locale 降级与会议保持 `.strict`；单测全绿；真机未验证 |
+| 同传 P0-5 单语种 trusted locale | 已实现（2026-11-26，PR #77）：真单语种 `.trustedLocale`；双 locale 降级与会议保持 `.strict`；单测全绿；真机未验证 |
+| 同传 P0-4 停止 finalize/drain | 已实现（2026-11-26，PR #78）：stop/reset/restart finalize（1 s 上限）+ 300 ms drain + 兜底 final；三个 VM 在 end/stop/新建任务前 drain consumer（500 ms 上限）；单测全绿；真机未验证 |
 | Wave 3 C04 字幕/文字稿投影 | 已完成（#28–#31，PR #33–#36；#32 清理+文档+iPhone 13 真机矩阵，用户确认 2026-11-25）；候选台账见 [05-architecture-backlog.md](05-architecture-backlog.md) |
 | 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
 

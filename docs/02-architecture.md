@@ -209,7 +209,7 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 
 ### 4.4 流结束
 
-`stop()` cancel 静音任务、finish 外发流、停止 analyzer；VM 的 `for await` 退出后把捕获的 `SpeechSessionHandle` 交给 `TaskLifecycle.handleStreamEnded(_:)`。
+`stop()` 先停采集/输入，调用 `finalizeAndFinishThroughEndOfInput()`（1 s 上限）让转写器发布当前 range 的 final，给消费者 300 ms 收 final，再用 `silenceTimedOut()` 兜底，最后取消剩余任务并 finish 外发流；`resetPipelineKeepingStream`/`restartSingle` 也走同一个 finalize。VM 在 `stop`/`endTask`/`beginTask` 前 await `speechTask`（500 ms 上限），确保 final 进入快照。VM 的 `for await` 退出后把捕获的 `SpeechSessionHandle` 交给 `TaskLifecycle.handleStreamEnded(_:)`。
 生命周期先向 gate 查 `isCurrent(handle)`：当前句柄非预期结束 = `recognitionInterrupted`；被新 owner 取代的句柄静默转 `pausedListening`，不报假错误。`fail()` 仍只 finish 流、不带错误；权限/资源错误在生命周期启动阶段单独映射。
 
 ---
@@ -453,7 +453,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 | --- | --- |
 | 入口/组装 | `Duiyi/App/DuiyiApp.swift`、`AppEnvironment.swift`、`RootView.swift`、`AppCoordinator.swift`、`FeatureRegistry.swift`、`PreferencesStore.swift` |
 | 音频 | `Duiyi/Services/Audio/AudioEngineCapturer.swift`、`BufferConverter.swift`、`AudioSessionPolicy.swift` |
-| 听写 | `Duiyi/Services/Speech/BilingualSpeechEngine.swift`、`SpeechSessionGate.swift`、`UtteranceAssembler.swift`、`Duiyi/Services/ServiceProtocols.swift` |
+| 听写 | `Duiyi/Services/Speech/BilingualSpeechEngine.swift`、`SpeechSessionGate.swift`、`UtteranceAssembler.swift`、`Duiyi/Services/ServiceProtocols.swift`、`Duiyi/Features/Shared/SpeechTaskDrain.swift` |
 | 翻译 | `Duiyi/Features/Shared/TranslationPipeline.swift`、`Duiyi/Domain/Models/TranslationTrigger.swift`、`Duiyi/Domain/Models/ScriptCounts.swift`、`Duiyi/Features/Shared/TranslationHostView.swift`、`Duiyi/Domain/Models/TranslationJob.swift`、`Duiyi/Services/Translation/TranslationAvailabilityService.swift` |
 | 面对面 | `Duiyi/Features/Conversation/ConversationView.swift`、`ConversationViewModel.swift`、`CaptionPaneView.swift`、`ListeningControl.swift` |
 | 同传 | `Duiyi/Features/Interpretation/InterpretationView.swift`、`InterpretationViewModel.swift`、`DirectionBar.swift`、`VoiceOutControl.swift`、`Duiyi/Domain/Models/Clause.swift` |

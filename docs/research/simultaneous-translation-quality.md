@@ -2,7 +2,7 @@
 
 > 日期：2026-11-25。对照材料：用户 iPhone 同传导出（2026-11-25 08:58–10:13，English → 中文，175 条）；TED 官方 transcript（Lauren Weinstein, *Don't believe everything you think*, TEDxPaloAlto）。代码基线：`main` = `0b1c626`（Xcode 27.1 / iOS 27.1 SDK）。逐条对照数据与脚本留在本机 `/tmp/simultaneous-comparison.md`，未入库。
 >
-> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77。P1/P2 与其余 P0 未开始。
+> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78。P1/P2 与其余 P0 未开始。
 
 ## 0. 结论
 
@@ -147,7 +147,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 这些路径在本次 TED 导出中没有成为主因（源文覆盖 99.12%，也没有空译行），但它们直接违反“不丢句/不漏翻译”，必须作为正确性项修复。
 
-> 2026-11-26：脚本纯度门已在单路同传改为 `.trustedLocale`（P0-5），双路仍为 `.strict`；其余三条路径仍未修。
+> 2026-11-26：脚本纯度门（P0-5）与停止/结束/新建任务以及 `resetPipelineKeepingStream`/`restartSingle` 的 finalize+drain（P0-4）已修；单槽 outbound、翻译失败/结束竞态仍未修。
 
 ### 2.4 U+FFFD
 
@@ -241,6 +241,8 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P0-4. 停止时 finalize，结束任务前 drain**
 
+- **状态（2026-11-26）**：已实现于 `fix/p0-4-stop-finalize`（待 PR）。`stop()` 先停采集/输入，调用 `finalizeAndFinishThroughEndOfInput()`（1 s 上限），给消费者 300 ms 收 final，再用 `silenceTimedOut()` 做兜底；`resetPipelineKeepingStream`/`restartSingle` 走同样的 finalize；三个 VM 在 `endTask`/`stop`/`beginTask` 前 await `speechTask`（500 ms 上限），不再先 cancel consumer。单测覆盖 end/stop/新建任务三条路径；真机验收**未执行**（设备已连接，但需人工声学/暂停时序，且设备上可能有未结束任务；待用户确认后执行）。本票只保证 ASR final 进入快照；在途翻译的回填仍归 P0-6。
+- **真机手动步骤（待设备）**：iPhone 13 上在同传/面对面/会议各说一句，在 final 到达前点暂停、结束或新建任务；断言最后一句进入文字稿/历史/导出且不重复；再验证暂停后继续不丢行。无法操作设备时记录原因并保留单测证据。
 - `stop()`：先停采集/输入，`inputContinuation.finish()`，`analyzer.finalizeAndFinishThroughEndOfInput()`（或 `finalize(through:)` 再 finish），给消费者有限窗口（300–500 ms）收 final，再取消剩余任务；不要先取消消费者。
 - 结束任务：在 `endTask` 前等待在途 final（有界超时），或让迟到的 final 通过 `TaskStoreV2.updateTranslations` 回填已结束任务；不要在 final 在途时 `resetCaptions()`。
 
