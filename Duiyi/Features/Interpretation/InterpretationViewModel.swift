@@ -241,9 +241,20 @@ final class InterpretationViewModel {
         pendingJobs.count
     }
 
-    /// The single translation job waiting for the Host; the pipeline owns it.
+    /// The newest translation job that has not been drained yet; the pipeline
+    /// owns the queue. Kept for tests.
     var outboundJob: TranslationJob? {
         pipeline.outboundJob
+    }
+
+    /// Bumps on every enqueue so the Host drains the pipeline queue instead of
+    /// a single job observed through SwiftUI (which can coalesce two jobs).
+    var outboundRevision: Int {
+        pipeline.outboundRevision
+    }
+
+    func takeNextOutboundJob() -> TranslationJob? {
+        pipeline.takeNextOutboundJob()
     }
 
     func bootstrap() async {

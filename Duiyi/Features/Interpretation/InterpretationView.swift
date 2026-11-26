@@ -253,7 +253,8 @@ struct InterpretationView: View {
             OneWayTranslationHostView(
                 sourceLanguage: viewModel.sourceLanguage,
                 targetLanguage: viewModel.targetLanguage,
-                job: viewModel.outboundJob,
+                outboundRevision: viewModel.outboundRevision,
+                takeNextOutboundJob: viewModel.takeNextOutboundJob,
                 onSuccess: viewModel.fulfill,
                 onFailure: viewModel.failTranslation
             )

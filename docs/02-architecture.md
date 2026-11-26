@@ -218,8 +218,8 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 
 翻译 job 的生命周期与 Host 执行分离：
 
-- `TranslationPipeline`（`Duiyi/Features/Shared/TranslationPipeline.swift`，`@MainActor @Observable`）拥有 job 形成、防抖/取消、重复抑制、过期判定、单槽 `outboundJob`，以及 `sentSourceText` / `lastAppliedSourceCount` / utterance aliases。
-- `TranslationHostView` / `OneWayTranslationHostView` 只是 `.translationTask` 的泵适配器：从 ViewModel 取得 `outboundJob` 后 `submit` 给共享 bridge，`TranslationJobPump` 每次唤醒逐条 `session.translate`，成功/失败回调 ViewModel。
+- `TranslationPipeline`（`Duiyi/Features/Shared/TranslationPipeline.swift`，`@MainActor @Observable`）拥有 job 形成、每 utterance 独立防抖、重复抑制、单调 `sequence` 过期判定、已应用 job 去重、有界有序 outbound 队列，以及 `sentSourceText` / `lastAppliedSourceCount` / `lastAppliedSequence`。
+- `TranslationHostView` / `OneWayTranslationHostView` 只是 `.translationTask` 的泵适配器：live 模式按 ViewModel 的 `outboundRevision` 变化 drain `takeNextOutboundJob()` 到空，逐条 `submit` 给共享 bridge；`TranslationJobPump` 每次唤醒逐条 `session.translate`，成功/失败回调 ViewModel。历史详情仍用单个 `job:` 逐条推进。
 - 两个 ViewModel 只保留 feature 策略与副作用：Conversation 做语言路由与 crosstalk，并把结果写入两侧 pane/transcript；Interpretation 选目标语言、写单栏 pane/transcript 并调度 TTS。`fulfill` 是薄适配器：`pipeline.accept` 返回 `TranslationUpdate` 后写 UI。
 - `TranslationTrigger`（Domain 纯函数）只回答非 final 文本是否立即发送；final 旁路属于 pipeline。
 - 六语脚本计数与 scalar 判定放在 Domain 的 `ScriptCounts`；`TranslationTrigger` 与 Services 的 `UtteranceAssembler` 都复用它，Domain 不反向依赖 Services。
@@ -230,6 +230,7 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 
 - `TranslationHostView`：面对面双向，两个 `TranslationSession.Configuration`（user→peer、peer→user），两个 `TranslationJobBridge`。
 - `OneWayTranslationHostView`：同传/会议详情单向，一个 configuration、一个 bridge。
+- 两个 Host 都有两种 job 入口：live 模块用 `outboundRevision` + `takeNextOutboundJob`，每次 revision 变化与 `onAppear` 时 drain 到空；历史详情用 `job:`，调用方逐条推进并按 job 重建 Host。
 - `TranslationPrepareHost`：引导/换语言时 `prepareTranslation()`，成功后回调。
 
 configuration 使用：
@@ -250,21 +251,23 @@ TranslationSession.Configuration(
 
 - **每句合并**：同一 `utteranceID` 最多保留一条 pending job；替换时保留该 ID 首次出现的位置，不同 ID 之间保持 FIFO。
 - **final 优先**：已排队的 final 不会被后续 non-final 覆盖；non-final 可被新的 non-final 覆盖；任何新 final 可覆盖旧 job（final 被更新 final 取代）。
-- **Host 未就绪**：不设“单槽”特殊模式，未安装 consumer 时同样按 ID 合并；`makeConsumer()` 安装时若队列非空立即产生一次 wakeup，历史详情逐条翻译不会因为 `onAppear` 先于 `.translationTask` 而卡住。
+- **Host 未就绪**：不设“只保留一条”的特殊模式，未安装 consumer 时同样按 ID 合并；`makeConsumer()` 安装时若队列非空立即产生一次 wakeup，历史详情逐条翻译不会因为 `onAppear` 先于 `.translationTask` 而卡住。
 - **generation-scoped consumer**：`Consumer` 暴露 `wakeups`（`.bufferingNewest(1)` 的 `AsyncStream<Void>`）与 `takeNext()` / `requeue(_:)`。只有最新 generation 能取 job；旧 generation 的 `takeNext()` 返回 nil，旧 `onTermination` 不清新 continuation。`requeue` 不受 generation 限制：bridge 记录每个 `utteranceID` 最新入队 job 的 ID，只有该 job 仍是该句最新提交且队列中没有同 ID job 时才接受 requeue，插入队首并在锁外 wake 当前 consumer——旧 pump 取消的 final 仍能被新 consumer 翻译。`yield` / `finish` 在锁外执行，`submit` 多次可合并为一次唤醒。
 - **pump drain 与取消**：`for await` 每次 wakeup 后循环 `takeNext()` 直到空（一次唤醒 drain 多条，不按 submit 次数排队）。每取一条先检查任务取消；已取消时若该 job 已被同 ID 新提交取代则丢弃，否则 `requeue` 到队首并退出。正常 in-flight 翻译不主动取消，结果仍经 `TranslationPipeline.accept` 判定（preview 可丢更短结果，final 一律应用）；`Task.isCancelled` / `CancellationError` 不调用 `onFailure`，真实错误仍走 `onFailure`；空白文本由 bridge 在 `submit` 时过滤（pump 只做 trim）。非任务取消的 `CancellationError` 同样让当前 pump 退出；随后 Host 的 `.translationTask` 重启安装新 consumer，drain 已 requeue 的 job（单测覆盖，无 sleep）。
-- **时序保持**：40/90 ms、voiceOut 25/50 ms、380 ms TTS settle、1.1 s 静音 final、crosstalk、emit 顺序与单槽 `outboundJob` 均不变。
+- **时序保持**：40/90 ms、voiceOut 25/50 ms、380 ms TTS settle、1.1 s 静音 final、crosstalk 与 emit 顺序均不变。outbound 队列只保证连续 job 都能到达 Host，不改变 bridge 的 per-ID 合并与 final 优先。
 - **测试接缝**：bridge 接口同步验证合并、顺序、final 优先级、pre-pump wakeup、generation-scoped takeNext 与 latest-job requeue（含唤醒已等待的新 consumer）；pump 通过注入 `translate` / `onSuccess` / `onFailure` 验证 drain、取消、requeue、in-flight 完成与非任务取消后的新 consumer 接管。生产路径用 `TranslationSession.translate` 适配，不新增 session 替身。
 
 ### 5.3 TranslationPipeline
 
-- 接口：`submit(TranslationSubmission)`、`accept(job:text:) -> TranslationUpdate?`、`fail(job:)`、`reset()`、`outboundJob`、`registerAlias(_:to:)`。
+- 接口：`submit(TranslationSubmission)`、`takeNextOutboundJob()`、`outboundRevision`、`accept(job:text:) -> TranslationUpdate?`、`fail(job:)`、`reset()`、`outboundJob`（未 drain 的最新 job，供测试观察）。
 - `TranslationSubmission` 由 feature 在提交时算好行、`isFinal`、目标语言、首包/后续延迟；pipeline 不读取 feature 状态。
 - 非 final 立即发送由 `TranslationTrigger.shouldSendNow(text:isFirst:language:)` 决定（六语脚本阈值 + `ClauseSplitter` 终止符）；final 直接旁路防抖。
-- 空文本直接返回且不清 `outboundJob`；同一行同文本的非 final 不重复提交，重复 final 仍提交；新提交取消上一防抖。
-- 结果应用规则统一：**final 译文一律应用（即使源文更短）**；preview 结果在比上次已应用结果更短时丢弃。不再按 feature 注入不同策略。
-- `accept` / `fail` 只在 job ID 匹配时清空 `outboundJob`，迟到的失败不会清掉新 job；`reset()` 取消防抖并清空 `outboundJob`、`sentSourceText`、`lastAppliedSourceCount` 与 aliases。
-- `accept` 解析 alias 并返回 canonical `utteranceID`；feature 不再维护自己的 alias 表或 `canonicalID` 辅助函数。
+- 防抖按 `utteranceID` 独立：新行/新 final 只取消同一句的待发 preview，不会取消其他句的 preview。空文本直接返回且不改队列。
+- outbound 是**有界有序队列**：同一句最多排一条，替换保留首次位置；已排队 final 不被迟到的 preview 取代；preview 积压上限 `outboundQueueLimit`（超限丢最旧 preview，final 永不丢弃）。每次入队递增 `outboundRevision`，Host 据此 drain `takeNextOutboundJob()` 到空；不要退回单个 `outboundJob` 观察值（SwiftUI 会合并两次渲染之间的 job）。
+- 每个 pipeline job 带单调 `sequence`；`accept` 拒绝同句更旧 sequence 的结果，并按 job ID 保证同一结果只应用一次。
+- 结果应用规则统一：**final 译文一律应用（即使源文更短）**；preview 结果在比上次已应用结果更短或 sequence 更旧时丢弃。不再按 feature 注入不同策略。
+- `reset()` 取消全部防抖并清空队列、`sentSourceText`、`lastAppliedSourceCount`、`lastAppliedSequence` 与已应用 ID 表。`fail(job:)` 只把尚未 drain 的该 job 移出队列，不影响其他 job。
+- `accept` 返回 job 的 `utteranceID`；行身份就是 `Utterance.id`（D8），pipeline 不做跨 ID 文本合并。
 - 调度器只通过 ViewModel 的 internal 测试初始化器注入；生产构造器不暴露它。生产用 `Task.sleep`，测试用手动调度器确定性驱动防抖窗口。
 - 两个 ViewModel 各自构造 pipeline；任何构造器都不接收 pipeline。final 权威规则由 pipeline 自身负责。
 
@@ -272,8 +275,8 @@ TranslationSession.Configuration(
 
 | feature | 目标语言 | 首包/后续延迟 | 结果应用 |
 | --- | --- | --- | --- |
-| 面对面 | `LanguageRouter.targetLanguage(detected:userLanguage:peerLanguage:)` | 40/90 ms | final 一律应用；preview 丢短 |
-| 同传 | 用户选中的目标语言 | voiceOut 开 25/50 ms；否则 40/90 ms | final 一律应用；preview 丢短 |
+| 面对面 | `LanguageRouter.targetLanguage(detected:userLanguage:peerLanguage:)` | 40/90 ms | final 一律应用；preview 丢短/旧 sequence；同一结果只应用一次 |
+| 同传 | 用户选中的目标语言 | voiceOut 开 25/50 ms；否则 40/90 ms | final 一律应用；preview 丢短/旧 sequence；同一结果只应用一次 |
 
 - ViewModel 在提交时计算目标与延迟，调用 `pipeline.submit`，自身不再持有防抖 Task、`sentSourceText`、`lastAppliedSourceCount` 或 aliases。
 - 结果经 `pipeline.accept` 解析 canonical 行并判过期；Conversation 先写两侧 pane 再更新 transcript，Interpretation 先写字幕再按既有 380 ms 结算调度 TTS。
@@ -424,7 +427,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 | 层级 | 覆盖 | 入口 |
 | --- | --- | --- |
 | Domain 纯逻辑 | 路由、assembler、spoken 合并、clause、翻译触发阈值、任务映射 | `DuiyiTests`（Swift Testing） |
-| 翻译管线 | job 形成、防抖/取消、重复抑制、final 权威与 preview 过期、单槽 `outboundJob`、别名、`reset` | `DuiyiTests`（`TranslationPipelineTests`） |
+| 翻译管线 | job 形成、每句防抖、重复抑制、final 权威与 preview 过期、有序 outbound 队列与 drain、sequence/去重、别名、`reset` | `DuiyiTests`（`TranslationPipelineTests`） |
 | 翻译 job bridge / pump | per-`utteranceID` 合并、final 优先、pre-pump wakeup、generation-scoped takeNext、latest-job requeue、drain/取消 | `DuiyiTests`（`TranslationJobBridgeTests`、`TranslationJobPumpTests`） |
 | ViewModel / 生命周期 | 三模块状态机、pipeline 接线、清屏、任务恢复、TTS 队列、`TaskLifecycle`/`SpeechSessionGate` 接缝 | `DuiyiTests` |
 | 音频策略 | 路由快照/回声判定 | `DuiyiTests` |

@@ -257,7 +257,8 @@ struct ConversationView: View {
             TranslationHostView(
                 userLanguage: viewModel.userLanguage,
                 peerLanguage: viewModel.peerLanguage,
-                job: viewModel.outboundJob,
+                outboundRevision: viewModel.outboundRevision,
+                takeNextOutboundJob: viewModel.takeNextOutboundJob,
                 onSuccess: viewModel.fulfill,
                 onFailure: viewModel.failTranslation
             )

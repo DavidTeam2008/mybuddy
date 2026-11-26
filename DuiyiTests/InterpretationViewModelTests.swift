@@ -165,6 +165,22 @@ struct InterpretationViewModelTests {
         #expect(viewModel.outboundJob?.text == "hello there")
     }
 
+    @Test("Every queued final is handed to the host in order")
+    func everyQueuedFinalIsHandedToHost() {
+        let viewModel = makeViewModel(scheduler: ManualTranslationScheduler())
+        let first = Utterance(language: .english, text: "First line.", isFinal: true)
+        let second = Utterance(language: .english, text: "Second line.", isFinal: true)
+
+        let startRevision = viewModel.outboundRevision
+        viewModel.accept(first)
+        viewModel.accept(second)
+        #expect(viewModel.outboundRevision > startRevision)
+
+        #expect(viewModel.takeNextOutboundJob()?.utteranceID == first.id)
+        #expect(viewModel.takeNextOutboundJob()?.utteranceID == second.id)
+        #expect(viewModel.takeNextOutboundJob() == nil)
+    }
+
     @Test("outboundJob is exposed from the pipeline")
     func outboundJobIsExposedFromPipeline() throws {
         let viewModel = makeViewModel()
