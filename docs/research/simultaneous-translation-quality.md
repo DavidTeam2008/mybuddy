@@ -2,7 +2,7 @@
 
 > 日期：2026-11-25。对照材料：用户 iPhone 同传导出（2026-11-25 08:58–10:13，English → 中文，175 条）；TED 官方 transcript（Lauren Weinstein, *Don't believe everything you think*, TEDxPaloAlto）。代码基线：`main` = `0b1c626`（Xcode 27.1 / iOS 27.1 SDK）。逐条对照数据与脚本留在本机 `/tmp/simultaneous-comparison.md`，未入库。
 >
-> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78；P0-1 outbound 无损队列 → `fix/p0-1-outbound-queue`（待 PR）。P0-6、P1/P2 未开始。
+> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78；P0-1 outbound 无损队列 → PR #79。P0-6、P1/P2 未开始。
 
 ## 0. 结论
 
@@ -235,7 +235,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P0-1. final 交付无损（队列 + ledger）**
 
-- **状态（2026-11-26）**：已实现于 `fix/p0-1-outbound-queue`（待 PR）。`TranslationPipeline` 的单槽 `outboundJob` 改为有界有序 outbound 队列（同句最多一条、替换保留首位、final 不被迟到 preview 取代、preview 积压上限 64 且 final 不丢）；防抖按 `utteranceID` 独立；`TranslationJob` 加单调 `sequence`，`accept` 拒绝同句更旧 sequence、按 job ID 去重；`outboundRevision` + `takeNextOutboundJob()` 让 Host 每次渲染后 drain 到空。Bridge/pump 未改；final 对 preview 的权威规则不变。单测覆盖连续 final 双到达、跨句防抖互不取消、final 不被 preview 取代、旧 sequence 拒绝、重复结果拒绝、preview 上限；真机/真翻译验收**未执行**（需要 burst 说话与设备声学环境；待用户确认后执行）。真机手动步骤：iPhone 13 上连续快速说两句、在两句话之间**暂停**（Host 仍在），确认两句 final 译文都出现且不重复；结束任务时的在途译文回填归 P0-6，本票不承诺。再观察长会话 p95（当前无诊断数据，归 P1-4）。
+- **状态（2026-11-26）**：已实现于 PR #79。`TranslationPipeline` 的单槽 `outboundJob` 改为有界有序 outbound 队列（同句最多一条、替换保留首位、final 不被迟到 preview 取代、preview 积压上限 64 且 final 不丢）；防抖按 `utteranceID` 独立；`TranslationJob` 加单调 `sequence`，`accept` 拒绝同句更旧 sequence、按 job ID 去重；`outboundRevision` + `takeNextOutboundJob()` 让 Host 每次渲染后 drain 到空。Bridge/pump 未改；final 对 preview 的权威规则不变。单测覆盖连续 final 双到达、跨句防抖互不取消、final 不被 preview 取代、旧 sequence 拒绝、重复结果拒绝、preview 上限；真机/真翻译验收**未执行**（需要 burst 说话与设备声学环境；待用户确认后执行）。真机手动步骤：iPhone 13 上连续快速说两句、在两句话之间**暂停**（Host 仍在），确认两句 final 译文都出现且不重复；结束任务时的在途译文回填归 P0-6，本票不承诺。再观察长会话 p95（当前无诊断数据，归 P1-4）。
 - 实现要点：用有界有序 outbound 队列 + 每 utterance 防抖替代单槽；final 永不被 preview 取消；`TranslationJob` 加单调 `sequence`，`accept` 只拒绝更旧 sequence，并记录已应用 job ID 防重复。
 - Bridge/pump 保持现状（它的 per-utterance 合并/final 优先是对的），只保证更多 job 能到达它。
 - 这会修改 `Duiyi/Features/AGENTS.md` §3 与 `docs/02-architecture.md` §5.3 的“单槽”不变量，需要显式改文档。
