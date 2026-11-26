@@ -2,7 +2,7 @@
 
 > 日期：2026-11-25。对照材料：用户 iPhone 同传导出（2026-11-25 08:58–10:13，English → 中文，175 条）；TED 官方 transcript（Lauren Weinstein, *Don't believe everything you think*, TEDxPaloAlto）。代码基线：`main` = `0b1c626`（Xcode 27.1 / iOS 27.1 SDK）。逐条对照数据与脚本留在本机 `/tmp/simultaneous-comparison.md`，未入库。
 >
-> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → `fix/p0-5-trusted-locale`（待 PR）。P1/P2 与其余 P0 未开始。
+> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77。P1/P2 与其余 P0 未开始。
 
 ## 0. 结论
 
@@ -246,7 +246,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P0-5. 单语种信任 locale**
 
-- **状态（2026-11-26）**：已实现于 `fix/p0-5-trusted-locale`；真正的单语种 live-caption 请求使用 `.trustedLocale`；请求了双 locale 但资源降级、以及 `meetingNotes` 保持 `.strict`。单测覆盖混合脚本、`OK`/纯数字（volatile 与 final）及 strict 对照；真机验收**未验证**（本环境无物理设备）。
+- **状态（2026-11-26）**：已实现于 PR #77；真正的单语种 live-caption 请求使用 `.trustedLocale`；请求了双 locale 但资源降级、以及 `meetingNotes` 保持 `.strict`。单测覆盖混合脚本、`OK`/纯数字（volatile 与 final）及 strict 对照；真机验收**未验证**（本环境无物理设备）。
 - **范围说明**：Meeting 行级的 `resolvedLanguage` 过滤保持现状，本票未改。
 - **真机手动步骤（待设备）**：在 iPhone 13 上让双 locale 资源预留失败、或选一个只有单语资源的语言对进入单路同传；说 `I studied 中文 at Tsinghua.` 与 `2024`，确认两行都出现且不整句丢弃；恢复双路资源后重跑，确认 Conversation/Meeting 双路仍按 `.strict` 拒绝明显异语、不串侧。若无法稳定触发单路，记录原因并保留单测证据。
 - 给 assembler 加 `languagePurity`：单语种同传用 `.trustedLocale`（非空结果都接受，只记录脚本不匹配），双 locale 的 Conversation/Meeting 保持 `.strict`。
