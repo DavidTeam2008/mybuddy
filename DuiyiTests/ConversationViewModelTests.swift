@@ -860,14 +860,14 @@ struct ConversationViewModelTests {
         let viewModel = makeScheduledViewModel(scheduler: scheduler)
         let id = UUID()
 
-        viewModel.accept(Utterance(id: id, language: .english, text: "hello", isFinal: false))
+        viewModel.accept(Utterance(id: id, language: .english, text: "hello world my friend", isFinal: false))
         #expect(scheduler.scheduledDelays == [.milliseconds(40)])
 
         // Complete the first submission so the next one is a subsequent packet
         // rather than another first packet.
         scheduler.advance(by: .milliseconds(40))
 
-        viewModel.accept(Utterance(id: id, language: .english, text: "helloo", isFinal: false))
+        viewModel.accept(Utterance(id: id, language: .english, text: "hello world my friend again", isFinal: false))
         #expect(scheduler.scheduledDelays == [.milliseconds(40), .milliseconds(90)])
 
         // The pipeline owns debounce firing; here the submitted job proves the
@@ -876,7 +876,7 @@ struct ConversationViewModelTests {
         #expect(viewModel.outboundJob?.utteranceID == id)
         #expect(viewModel.outboundJob?.source == .english)
         #expect(viewModel.outboundJob?.target == .zhHans)
-        #expect(viewModel.outboundJob?.text == "helloo")
+        #expect(viewModel.outboundJob?.text == "hello world my friend again")
         #expect(viewModel.outboundJob?.isFinal == false)
     }
 
@@ -904,7 +904,7 @@ struct ConversationViewModelTests {
         let scheduler = ManualTranslationScheduler()
         let viewModel = makeScheduledViewModel(scheduler: scheduler)
         let id = UUID()
-        let text = "hello"
+        let text = "hello world my friend"
 
         // A pending debounce is cancelled by the reset.
         viewModel.accept(Utterance(id: id, language: .english, text: text, isFinal: false))
@@ -937,7 +937,7 @@ struct ConversationViewModelTests {
         let scheduler = ManualTranslationScheduler()
         let viewModel = makeScheduledViewModel(scheduler: scheduler)
 
-        viewModel.accept(Utterance(language: .english, text: "hello", isFinal: false))
+        viewModel.accept(Utterance(language: .english, text: "hello world my friend", isFinal: false))
         #expect(scheduler.pendingDelays == [.milliseconds(40)])
 
         await viewModel.setPeerLanguage(.japanese)

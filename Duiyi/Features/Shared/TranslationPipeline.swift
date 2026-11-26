@@ -119,29 +119,30 @@ final class TranslationPipeline {
             isFinal: submission.isFinal,
             sequence: nextSequence
         )
-        let isFirst = sentSourceText[submission.line.id] == nil
-        let shouldSendNow = submission.isFinal
-            || TranslationTrigger.shouldSendNow(
-                text: text,
-                isFirst: isFirst,
-                language: submission.line.source
-            )
-
         let lineID = submission.line.id
+        let isFirst = sentSourceText[lineID] == nil
+        let action: TranslationTrigger.Action = submission.isFinal
+            ? .sendNow
+            : TranslationTrigger.action(for: text, language: submission.line.source)
+
         scheduled[lineID]?.cancel()
         scheduled[lineID] = nil
-        if shouldSendNow {
+        switch action {
+        case .drop:
+            // A too-short preview never forms a job; the next volatile or the
+            // final will carry the line.
+            return
+        case .sendNow:
             sentSourceText[lineID] = text
             enqueue(job)
-            return
-        }
-
-        let delay = isFirst ? submission.firstDelay : submission.subsequentDelay
-        scheduled[lineID] = scheduler.schedule(after: delay) { [weak self] in
-            guard let self else { return }
-            self.scheduled[lineID] = nil
-            self.sentSourceText[lineID] = text
-            self.enqueue(job)
+        case .debounce:
+            let delay = isFirst ? submission.firstDelay : submission.subsequentDelay
+            scheduled[lineID] = scheduler.schedule(after: delay) { [weak self] in
+                guard let self else { return }
+                self.scheduled[lineID] = nil
+                self.sentSourceText[lineID] = text
+                self.enqueue(job)
+            }
         }
     }
 

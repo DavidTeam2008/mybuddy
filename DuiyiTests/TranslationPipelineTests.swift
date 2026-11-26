@@ -34,22 +34,22 @@ struct TranslationPipelineTests {
         let (pipeline, scheduler) = makePipeline()
         let id = UUID()
 
-        pipeline.submit(makeSubmission(id: id, text: "hello"))
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
         #expect(pipeline.outboundJob == nil)
         #expect(scheduler.pendingDelays == [.milliseconds(40)])
 
         scheduler.advance(by: .milliseconds(40))
         #expect(pipeline.outboundJob?.utteranceID == id)
-        #expect(pipeline.outboundJob?.text == "hello")
+        #expect(pipeline.outboundJob?.text == "hello world my friend")
         #expect(pipeline.outboundJob?.target == .zhHans)
         #expect(pipeline.outboundJob?.isFinal == false)
 
-        pipeline.submit(makeSubmission(id: id, text: "helloo"))
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend again"))
         #expect(scheduler.pendingDelays == [.milliseconds(90)])
 
         scheduler.advance(by: .milliseconds(90))
         #expect(pipeline.outboundJob?.utteranceID == id)
-        #expect(pipeline.outboundJob?.text == "helloo")
+        #expect(pipeline.outboundJob?.text == "hello world my friend again")
     }
 
     @Test("Interpretation 25/50 ms delays pass through unchanged")
@@ -60,7 +60,7 @@ struct TranslationPipelineTests {
         pipeline.submit(
             makeSubmission(
                 id: id,
-                text: "你",
+                text: "你好世界",
                 language: .zhHans,
                 firstDelay: .milliseconds(25),
                 subsequentDelay: .milliseconds(50)
@@ -68,12 +68,12 @@ struct TranslationPipelineTests {
         )
         #expect(scheduler.pendingDelays == [.milliseconds(25)])
         scheduler.advance(by: .milliseconds(25))
-        #expect(pipeline.outboundJob?.text == "你")
+        #expect(pipeline.outboundJob?.text == "你好世界")
 
         pipeline.submit(
             makeSubmission(
                 id: id,
-                text: "你好",
+                text: "你好世界你好",
                 language: .zhHans,
                 firstDelay: .milliseconds(25),
                 subsequentDelay: .milliseconds(50)
@@ -81,7 +81,7 @@ struct TranslationPipelineTests {
         )
         #expect(scheduler.pendingDelays == [.milliseconds(50)])
         scheduler.advance(by: .milliseconds(50))
-        #expect(pipeline.outboundJob?.text == "你好")
+        #expect(pipeline.outboundJob?.text == "你好世界你好")
     }
 
     @Test("A new line keeps the previous line's pending debounce")
@@ -90,8 +90,8 @@ struct TranslationPipelineTests {
         let first = UUID()
         let second = UUID()
 
-        pipeline.submit(makeSubmission(id: first, text: "hello"))
-        pipeline.submit(makeSubmission(id: second, text: "world"))
+        pipeline.submit(makeSubmission(id: first, text: "hello world my friend"))
+        pipeline.submit(makeSubmission(id: second, text: "world hello my friend"))
         #expect(scheduler.pendingDelays == [.milliseconds(40), .milliseconds(40)])
 
         scheduler.advance(by: .milliseconds(40))
@@ -110,6 +110,35 @@ struct TranslationPipelineTests {
 
         #expect(pipeline.takeNextOutboundJob()?.text == "Final words")
         #expect(pipeline.takeNextOutboundJob() == nil)
+    }
+
+    @Test("A short preview never forms a job and is not scheduled")
+    func shortPreviewIsDropped() {
+        let (pipeline, scheduler) = makePipeline()
+        let id = UUID()
+
+        pipeline.submit(makeSubmission(id: id, text: "hello"))
+        #expect(scheduler.pendingDelays.isEmpty)
+        #expect(pipeline.takeNextOutboundJob() == nil)
+
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
+        #expect(scheduler.pendingDelays == [.milliseconds(40)])
+        scheduler.advance(by: .milliseconds(40))
+        #expect(pipeline.takeNextOutboundJob()?.text == "hello world my friend")
+    }
+
+    @Test("A short revision cancels the line's pending preview")
+    func shortRevisionCancelsPendingPreview() {
+        let (pipeline, scheduler) = makePipeline()
+        let id = UUID()
+
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
+        #expect(scheduler.pendingDelays == [.milliseconds(40)])
+
+        pipeline.submit(makeSubmission(id: id, text: "hello world"))
+        #expect(scheduler.pendingDelays.isEmpty)
+        scheduler.advance(by: .milliseconds(100))
+        #expect(pipeline.outboundJob == nil)
     }
 
     @Test("Clause-terminating text bypasses the debounce")
@@ -137,7 +166,7 @@ struct TranslationPipelineTests {
         let volatile = UUID()
         let final = UUID()
 
-        pipeline.submit(makeSubmission(id: volatile, text: "hello"))
+        pipeline.submit(makeSubmission(id: volatile, text: "hello world my friend"))
         pipeline.submit(makeSubmission(id: final, text: "hey", isFinal: true))
         #expect(scheduler.pendingDelays == [.milliseconds(40)])
         #expect(pipeline.takeNextOutboundJob()?.utteranceID == final)
@@ -194,11 +223,11 @@ struct TranslationPipelineTests {
         let (pipeline, scheduler) = makePipeline()
         let id = UUID()
 
-        pipeline.submit(makeSubmission(id: id, text: "hello"))
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
         scheduler.advance(by: .milliseconds(40))
         let jobID = pipeline.outboundJob?.id
 
-        pipeline.submit(makeSubmission(id: id, text: "hello"))
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
         #expect(pipeline.outboundJob?.id == jobID)
         #expect(scheduler.pendingDelays.isEmpty)
     }
@@ -237,7 +266,7 @@ struct TranslationPipelineTests {
         let (pipeline, scheduler) = makePipeline()
         let id = UUID()
 
-        pipeline.submit(makeSubmission(id: id, text: "hello"))
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
         scheduler.advance(by: .milliseconds(20))
         pipeline.submit(makeSubmission(text: "  ", isFinal: true))
         scheduler.advance(by: .milliseconds(20))
@@ -394,7 +423,7 @@ struct TranslationPipelineTests {
         let (pipeline, scheduler) = makePipeline()
         let id = UUID()
 
-        pipeline.submit(makeSubmission(id: id, text: "hello"))
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
         pipeline.reset()
         #expect(pipeline.outboundJob == nil)
         #expect(scheduler.pendingDelays.isEmpty)
@@ -415,7 +444,7 @@ struct TranslationPipelineTests {
         let (pipeline, scheduler) = makePipeline()
         let id = UUID()
 
-        pipeline.submit(makeSubmission(id: id, text: "hello world"))
+        pipeline.submit(makeSubmission(id: id, text: "hello world my friend"))
         scheduler.advance(by: .milliseconds(40))
         let preview = try #require(pipeline.takeNextOutboundJob())
 

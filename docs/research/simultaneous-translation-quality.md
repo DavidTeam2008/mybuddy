@@ -2,7 +2,7 @@
 
 > 日期：2026-11-25。对照材料：用户 iPhone 同传导出（2026-11-25 08:58–10:13，English → 中文，175 条）；TED 官方 transcript（Lauren Weinstein, *Don't believe everything you think*, TEDxPaloAlto）。代码基线：`main` = `0b1c626`（Xcode 27.1 / iOS 27.1 SDK）。逐条对照数据与脚本留在本机 `/tmp/simultaneous-comparison.md`，未入库。
 >
-> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78；P0-1 outbound 无损队列 → PR #79。P0-6、P1/P2 未开始。
+> 落地状态（2026-11-26）：P0-2b 合并前缀 final → #70 / PR #73；P0-2 final 权威 → #71 / PR #74；P0-3 U+FFFD 完整性闸门 → #72 / PR #75；P0-5 trusted locale → PR #77；P0-4 停止 finalize/drain → PR #78；P0-1 outbound 无损队列 → PR #79；P1-2 稳定单元 preview → `feat/p1-2-stable-preview`（待 PR）。P0-6、其余 P1/P2 未开始。
 
 ## 0. 结论
 
@@ -205,6 +205,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P1-2. 翻译稳定单元，而不是词片段**
 
+- **状态（2026-11-26）**：已实现 preview 门控于 `feat/p1-2-stable-preview`（待 PR）。`TranslationTrigger.action(for:language:)` 三选一：句末/从句标点（含仅看末字符时的 ASCII `.`；`ClauseSplitter` 本身不加 `.`，避免 TTS 小数分割）→ `.sendNow`；≥4 内容单位（英/越词数，中/日/韩/泰脚本字符）→ `.debounce`（首包 40/25 ms、后续 90/50 ms）；更短 → `.drop`，不形成 job。首包的有用 preview 过去立即发送，现在也走首包防抖；final 仍旁路。未做 `15:28` 的尾部补全（需要 range/volatile 尾部信息，归 P1-1）。单测覆盖三态、丢弃与短修订取消 pending preview；真机未验证，`有害断句 ≤2%` 指标不能由 preview 门控单独达成，仍需 P1-4 夹具 + P1-1。
 - final 是权威路径；preview 只在“足够有用”时发（完整从句/≥4–6 个英文词），2 个词的片段不翻译；长句可发从句级 preview，但标记为 preview，final 全句重译并覆盖。
 - 保留句末标点（`.?!。？！`）作为稳定边界；逗号只用于 preview/TTS 分句。不要为“实时感”无限提高频率（roadmap 明确不做）。
 - 对 15:28 这类“静音 final 丢尾巴”，优先用后续 volatile/final 的尾部补全再翻译，而不是全局延迟端点。
@@ -269,7 +270,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 ## 5. 验证与指标
 
-- 单测：final-wins（pipeline + projection source/translation）、迟到 volatile 不降级、重复 final 合并/非重叠不合并、U+FFFD 拒绝/重试/永久失败、单语种 trusted locale、结束任务 drain/回填、连续 final 双到达、跨句防抖互不取消、旧 sequence 与重复结果拒绝、preview 积压上限。
+- 单测：final-wins（pipeline + projection source/translation）、迟到 volatile 不降级、重复 final 合并/非重叠不合并、U+FFFD 拒绝/重试/永久失败、单语种 trusted locale、结束任务 drain/回填、连续 final 双到达、跨句防抖互不取消、旧 sequence 与重复结果拒绝、preview 积压上限、preview 三态门控（立即/防抖/丢弃）。
 - UI/真机：现有套件保持全绿；新增“回放固定音频 → 导出 → 对齐”的设备验证记录；语音/翻译最终验收按仓库规则写“未验证”或真机结果。
 - TED 夹具指标（同一段音频，改动前后对比）：
 
