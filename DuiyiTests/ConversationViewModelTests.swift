@@ -1039,6 +1039,26 @@ struct ConversationViewModelTests {
         #expect(ended.entries.contains { $0.sourceText == "最后一句" })
     }
 
+    @Test("A final translation that arrives after endTask is backfilled into the ended task")
+    func lateFinalTranslationIsBackfilled() async throws {
+        let store = InMemoryTaskStore()
+        let viewModel = makeGateViewModel(gate: ConversationFakeGate(), store: store)
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .english, text: "See you at three.", isFinal: true))
+        let job = try #require(viewModel.outboundJob)
+        let ended = try #require(await viewModel.endTask())
+        #expect(ended.entries.first?.translatedText == "")
+
+        viewModel.fulfill(job: job, text: "三点见。")
+        await viewModel.waitForTranslationBackfill()
+
+        guard case let .value(stored?) = await store.readTask(id: ended.id) else {
+            Issue.record("Expected the ended task in the store")
+            return
+        }
+        #expect(stored.entries.first?.translatedText == "三点见。")
+    }
+
     @Test("Stopping listening drains a final emitted when the stream stops")
     func stopDrainsFinalEmittedOnStop() async {
         let gate = ConversationFakeGate()

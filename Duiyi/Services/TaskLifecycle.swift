@@ -77,6 +77,17 @@ final class TaskLifecycle {
         var entries: [TranscriptEntry]
     }
 
+    /// The most recently ended task, kept so a final translation that arrives
+    /// after `endTask` can be written back instead of dropped. The store allows
+    /// translation-only writes on ended tasks.
+    private struct EndedTranscript {
+        var taskID: UUID
+        var entries: [TranscriptEntry]
+        var isMemoryOnly: Bool
+    }
+
+    @ObservationIgnored private var endedTranscript: EndedTranscript?
+
     init(
         feature: FeatureID,
         store: any TaskStoreV2,
@@ -354,8 +365,14 @@ final class TaskLifecycle {
             return .discardedEmpty
         }
 
+        let wasMemoryOnly = isMemoryOnly
         switch await store.end(taskID: taskID, entries: transcript, summary: summary) {
         case let .ended(session):
+            endedTranscript = EndedTranscript(
+                taskID: session.id,
+                entries: session.entries,
+                isMemoryOnly: wasMemoryOnly
+            )
             clearCurrent()
             return .ended(session)
         case .discardedEmpty:
@@ -366,6 +383,29 @@ final class TaskLifecycle {
             sessionState = .paused
             return .notSaved(reason)
         }
+    }
+
+    /// Applies a final translation that arrived after the task ended. The
+    /// in-memory snapshot is updated first so repeated late results accumulate
+    /// even when the store write fails; only the most recently ended task is
+    /// retained. Returns whether the store write persisted.
+    @discardableResult
+    func backfillTranslation(entryID: UUID, text: String) async -> Bool {
+        guard !TextIntegrity.isCorrupted(text),
+              var ended = endedTranscript,
+              !ended.isMemoryOnly,
+              let index = ended.entries.firstIndex(where: { $0.id == entryID }) else {
+            return false
+        }
+        ended.entries[index].translatedText = text
+        endedTranscript = ended
+        guard case .persisted = await store.updateTranslations(
+            [ended.entries[index]],
+            for: ended.taskID
+        ) else {
+            return false
+        }
+        return true
     }
 
     // MARK: - Persistence

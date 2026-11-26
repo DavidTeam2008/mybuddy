@@ -95,6 +95,13 @@ struct CaptionProjection: Sendable {
     /// transcript, but returns nil so callers (notably interpretation TTS)
     /// never act on a row the user cannot see.
     @discardableResult
+    /// Whether the record store still owns this utterance. Used to tell a
+    /// translation result that missed its display window (record present) from
+    /// one that arrived after the task was reset (record gone).
+    func contains(utteranceID: UUID) -> Bool {
+        index[utteranceID] != nil
+    }
+
     mutating func applyTranslation(
         utteranceID: UUID,
         text: String,

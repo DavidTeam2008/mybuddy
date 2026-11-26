@@ -46,6 +46,9 @@ final class InterpretationViewModel {
 
     private let pipeline: TranslationPipeline
     private var projection = CaptionProjection(policy: .interpretation)
+    /// Store write started by a final translation that arrived after the task
+    /// ended; tests await it through `waitForTranslationBackfill()`.
+    @ObservationIgnored private var backfillTask: Task<Void, Never>?
 
     private var speechTask: Task<Void, Never>?
     private var idleRestoreTask: Task<Void, Never>?
@@ -581,6 +584,10 @@ final class InterpretationViewModel {
 
     func fulfill(job: TranslationJob, text: String) {
         guard let update = pipeline.accept(job: job, text: text) else { return }
+        // A record that is gone means the task was ended and reset while this
+        // translation was in flight. A final result still belongs in the
+        // finished transcript; a preview does not.
+        let hadRecord = projection.contains(utteranceID: update.utteranceID)
         let line = projection.applyTranslation(
             utteranceID: update.utteranceID,
             text: update.translatedText,
@@ -588,6 +595,14 @@ final class InterpretationViewModel {
         )
         if job.isFinal {
             lifecycle.persist(projection.transcript)
+            if !hadRecord {
+                backfillTask = Task {
+                    await lifecycle.backfillTranslation(
+                        entryID: update.utteranceID,
+                        text: update.translatedText
+                    )
+                }
+            }
         }
         guard let line else { return }
         scheduleSpeech(
@@ -599,6 +614,11 @@ final class InterpretationViewModel {
 
     func failTranslation(job: TranslationJob, error: Error) {
         pipeline.fail(job: job)
+    }
+
+    /// Test seam: waits for a late-final backfill started by `fulfill`.
+    func waitForTranslationBackfill() async {
+        await backfillTask?.value
     }
 
     func requestSummary() async {
