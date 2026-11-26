@@ -3,6 +3,8 @@ import Foundation
 /// Default diagnostics sink for tests and previews. Production injects the
 /// shared `DiagnosticsRecorder` from `AppEnvironment`.
 final class NoOpDiagnosticsRecorder: DiagnosticsRecording, @unchecked Sendable {
+    var hasSession: Bool { false }
+
     func beginSession(feature: FeatureID, taskID: UUID?) {}
     func endSession(taskID: UUID?) {}
     func record(_ record: ASRDiagnosticsRecord) {}

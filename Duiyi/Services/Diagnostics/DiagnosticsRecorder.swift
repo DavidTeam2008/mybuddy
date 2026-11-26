@@ -49,10 +49,24 @@ final class DiagnosticsRecorder: DiagnosticsRecording, @unchecked Sendable {
 
     // MARK: - Session
 
+    var hasSession: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return session != nil
+    }
+
     func beginSession(feature: FeatureID, taskID: UUID?) {
         #if DEBUG
         lock.lock()
         defer { lock.unlock() }
+        // Bootstrap/restore can run again for an already-active task (module
+        // re-entry). Keep its events; only a different or ended session resets.
+        if let session,
+           session.feature == feature.rawValue,
+           session.taskID == taskID?.uuidString,
+           session.endedAt == nil {
+            return
+        }
         session = DiagnosticsSessionInfo(
             feature: feature.rawValue,
             taskID: taskID?.uuidString,
@@ -100,6 +114,7 @@ final class DiagnosticsRecorder: DiagnosticsRecording, @unchecked Sendable {
                 at: now(),
                 feature: session?.feature,
                 utteranceID: record.utteranceID?.uuidString,
+                language: record.language.rawValue,
                 isFinal: record.isFinal,
                 textLength: record.textLength,
                 synthetic: record.synthetic,
@@ -140,7 +155,8 @@ final class DiagnosticsRecorder: DiagnosticsRecording, @unchecked Sendable {
                 style: record.strategy,
                 sourceLanguage: record.source.rawValue,
                 targetLanguage: record.target.rawValue,
-                sourceLength: record.sourceLength
+                sourceLength: record.sourceLength,
+                sourceHash: record.sourceHash
             )
         )
         #endif
@@ -207,7 +223,6 @@ final class DiagnosticsRecorder: DiagnosticsRecording, @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         ensureSessionLocked()
-        summary.translationFailureCount += 1
         summary.permanentFailureCount += 1
         if record.failure == "corruptedOutput" {
             summary.rejectedCorruptionCount += 1

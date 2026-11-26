@@ -95,17 +95,19 @@ struct HomeSettingsSheet: View {
     /// `devicectl` can both retrieve the JSON. Nothing is uploaded.
     private var diagnosticsSection: some View {
         Group {
-            if environment.diagnostics.snapshot().session != nil {
+            if environment.diagnostics.hasSession {
                 if let diagnosticsFileURL {
                     ShareLink(item: diagnosticsFileURL) {
                         Text(Copy.exportDiagnostics(for: language))
                             .foregroundStyle(Tokens.accentText)
                     }
+                    .accessibilityIdentifier("diagnostics-export")
                 } else {
                     Button(Copy.exportDiagnostics(for: language)) {
                         diagnosticsFileURL = environment.diagnostics.makeExportFile()
                     }
                     .foregroundStyle(Tokens.accentText)
+                    .accessibilityIdentifier("diagnostics-export")
                 }
             }
         }

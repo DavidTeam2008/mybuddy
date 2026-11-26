@@ -162,7 +162,8 @@ final class TranslationPipeline {
                 source: job.source,
                 target: job.target,
                 sourceLength: job.text.count,
-                strategy: "lowLatency"
+                strategy: "lowLatency",
+                sourceHash: DiagnosticsHash.fnv1a(job.text)
             )
         )
     }

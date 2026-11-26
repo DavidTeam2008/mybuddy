@@ -66,6 +66,7 @@ DuiyiUITests/     XCUITest 用例（4 个）
 | `TaskStoreV2` | `DeferredTaskStore` | 任务持久化（availability / prepare / retry + 结果化读写） |
 | `ExportSharing` | `TranscriptExportService` | 导出文本 |
 | `LanguageCataloging` | `SystemLanguageCatalog` | 语言目录（系统探针缓存） |
+| `DiagnosticsRecording` | `DiagnosticsRecorder` | 每任务诊断 ring buffer + 聚合（DEBUG 导出，不上传） |
 
 `DuiyiApp` 用 `@State` 持有 `AppEnvironment` 和 `AppCoordinator`，通过 `.environment()` 注入。
 
@@ -422,6 +423,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 | `SystemSpeechSynthesizer` | `@MainActor` + delegate | AVSpeechSynthesizer 代理回调 |
 | `TranslationPipeline` | `@MainActor` + `@Observable` | 翻译 job 生命周期与 UI 状态 |
 | `TranslationJobBridge` | `@unchecked Sendable` + `NSLock` | 跨 View 任务队列与 consumer 唤醒流 |
+| `DiagnosticsRecorder` | `@unchecked Sendable` + `NSLock` | speech actor 与主线程共同写入的 ring buffer |
 
 `SendablePCMBuffer` 用 `@unchecked Sendable` 包装 `AVAudioPCMBuffer`，跨 actor 传递，责任在音频层。
 

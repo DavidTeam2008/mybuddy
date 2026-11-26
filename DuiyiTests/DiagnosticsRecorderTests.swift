@@ -48,12 +48,11 @@ struct DiagnosticsRecorderTests {
         )
     }
 
-    @Test("Summary counts settled utterances, final jobs and applications, and failures")
-    func summaryCounts() {
+    @Test("ASR counters count distinct settled utterances and keep the language")
+    func summaryCountsASR() throws {
         let recorder = DiagnosticsRecorder()
         recorder.beginSession(feature: .simultaneous, taskID: UUID())
         let utteranceID = UUID()
-        let jobID = UUID()
 
         recorder.record(makeASR(utteranceID: utteranceID))
         // A revision of the same utterance must not settle it twice.
@@ -61,6 +60,22 @@ struct DiagnosticsRecorderTests {
         // A volatile or rejected result never counts as settled.
         recorder.record(makeASR(isFinal: false, textLength: 12))
         recorder.record(makeASR(accepted: false, published: false))
+
+        let snapshot = recorder.snapshot()
+        #expect(snapshot.summary.settledUtterances == 1)
+        #expect(snapshot.summary.asrResultCount == 4)
+        let event = try #require(snapshot.events.first)
+        #expect(event.language == AppLanguage.english.rawValue)
+        #expect(event.rangeStart == 12.5)
+        #expect(event.resultsFinalizationTime == 13.9)
+    }
+
+    @Test("Translation counters count final jobs, applications, and failures")
+    func summaryCountsTranslation() {
+        let recorder = DiagnosticsRecorder()
+        recorder.beginSession(feature: .simultaneous, taskID: UUID())
+        let utteranceID = UUID()
+        let jobID = UUID()
 
         recorder.recordSubmit(
             TranslationSubmitRecord(
@@ -71,7 +86,8 @@ struct DiagnosticsRecorderTests {
                 source: .english,
                 target: .zhHans,
                 sourceLength: 24,
-                strategy: "lowLatency"
+                strategy: "lowLatency",
+                sourceHash: DiagnosticsHash.fnv1a("hello world")
             )
         )
         recorder.recordResponse(
@@ -111,19 +127,17 @@ struct DiagnosticsRecorderTests {
         )
 
         let snapshot = recorder.snapshot()
-        #expect(snapshot.summary.settledUtterances == 1)
         #expect(snapshot.summary.finalJobCount == 1)
         #expect(snapshot.summary.finalAppliedCount == 1)
         #expect(snapshot.summary.permanentFailureCount == 1)
         #expect(snapshot.summary.rejectedCorruptionCount == 1)
-        #expect(snapshot.summary.asrResultCount == 4)
         #expect(snapshot.summary.translationSubmitCount == 1)
         #expect(snapshot.summary.translationResponseCount == 1)
         #expect(snapshot.events.map(\.kind) == [
-            "asr.result", "asr.result", "asr.result", "asr.result",
             "translation.submit", "translation.result", "translation.apply",
             "translation.failure"
         ])
+        #expect(snapshot.events.first?.sourceHash == DiagnosticsHash.fnv1a("hello world"))
     }
 
     @Test("The ring buffer keeps the newest events and counts the evicted ones")
@@ -139,6 +153,20 @@ struct DiagnosticsRecorderTests {
         #expect(snapshot.events.map(\.textLength) == [3, 4, 5])
         #expect(snapshot.summary.asrResultCount == 5)
         #expect(snapshot.summary.droppedEventCount == 2)
+    }
+
+    @Test("Beginning the same active task again keeps its events")
+    func beginSessionIsIdempotentForActiveTask() {
+        let recorder = DiagnosticsRecorder()
+        let taskID = UUID()
+        recorder.beginSession(feature: .simultaneous, taskID: taskID)
+        recorder.record(makeASR())
+
+        // Module re-entry bootstraps and restores the same active task.
+        recorder.beginSession(feature: .simultaneous, taskID: taskID)
+
+        #expect(recorder.snapshot().events.count == 1)
+        #expect(recorder.snapshot().summary.asrResultCount == 1)
     }
 
     @Test("A closed session keeps its events until a new task begins")

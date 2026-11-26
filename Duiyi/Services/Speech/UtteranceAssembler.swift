@@ -85,7 +85,6 @@ struct UtteranceAssembler: Sendable {
     private static let rangeGapLimit: TimeInterval = 0.75
     /// Recently closed rows remembered for a late same-range final.
     private static let closedRangeHistoryLimit = 8
-    private static let closedRangeWindow: TimeInterval = 12
 
     var lastLanguage: AppLanguage?
     var languagePurity: SpeechLanguagePurity
@@ -114,21 +113,14 @@ struct UtteranceAssembler: Sendable {
     /// Text-only seam kept for call sites and tests that do not have audio
     /// ranges. The engine uses the range-aware overload.
     mutating func ingest(language: AppLanguage, text: String, isFinal: Bool) -> Utterance? {
-        ingest(
-            language: language,
-            text: text,
-            isFinal: isFinal,
-            range: nil,
-            resultsFinalizationTime: nil
-        )
+        ingest(language: language, text: text, isFinal: isFinal, range: nil)
     }
 
     mutating func ingest(
         language: AppLanguage,
         text: String,
         isFinal: Bool,
-        range: SpeechRange?,
-        resultsFinalizationTime: Double?
+        range: SpeechRange?
     ) -> Utterance? {
         guard let range else {
             return ingestByText(language: language, text: text, isFinal: isFinal)
@@ -141,13 +133,10 @@ struct UtteranceAssembler: Sendable {
         )
     }
 
-    /// True while the current row has volatile text the silence timer can
-    /// finalize. A row that already received a transcriber final is closed.
+    /// True while a row has volatile text the silence timer can finalize.
+    /// A row that already received only transcriber finals is closed.
     var hasOpenRange: Bool {
-        guard rangeStates.values.contains(where: { !$0.finalized.isEmpty || $0.volatile != nil }) else {
-            return false
-        }
-        return rangeStates.values.contains { $0.volatile != nil }
+        rangeStates.values.contains { $0.volatile != nil }
     }
 
     private mutating func ingestByText(
@@ -157,19 +146,9 @@ struct UtteranceAssembler: Sendable {
     ) -> Utterance? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let verdict = Self.languageVerdict(trimmed, claimed: language, purity: languagePurity)
-        guard verdict.accepted else { return nil }
-        if verdict.scriptMismatch, languagePurity == .trustedLocale {
-            DuiyiLog.speech.debug(
-                "Single-locale result script mismatch for \(language.rawValue, privacy: .public)"
-            )
-        }
-
-        if now() < suppressOtherUntil, let held = lastLanguage, language != held {
+        guard passesPurityGate(trimmed, language: language),
+              passesSuppressionGate(language: language) else {
             return nil
-        }
-        if now() >= suppressOtherUntil, lockedLanguage != nil, texts.values.allSatisfy(\.isEmpty) {
-            lockedLanguage = nil
         }
 
         // A replay of the just-closed range can arrive as a volatile before
@@ -235,19 +214,7 @@ struct UtteranceAssembler: Sendable {
             && !previousInLanguage.isEmpty
             && SpokenText.isNameSwap(trimmed, of: previousInLanguage)
 
-        if let locked = lockedLanguage, language != locked {
-            let incumbent = textFor(locked)
-            guard Self.shouldPreempt(
-                challenger: trimmed,
-                challengerLanguage: language,
-                incumbent: incumbent,
-                incumbentLanguage: locked
-            ) else {
-                return nil
-            }
-            clearText(for: locked)
-            lockedLanguage = language
-        }
+        guard preemptsIfNeeded(language: language, text: trimmed) else { return nil }
 
         if isGreetingNameSwap {
             beginNextUtterance(keeping: language)
@@ -312,19 +279,9 @@ struct UtteranceAssembler: Sendable {
             return revokeRange(language: language, range: range)
         }
 
-        let verdict = Self.languageVerdict(trimmed, claimed: language, purity: languagePurity)
-        guard verdict.accepted else { return nil }
-        if verdict.scriptMismatch, languagePurity == .trustedLocale {
-            DuiyiLog.speech.debug(
-                "Single-locale result script mismatch for \(language.rawValue, privacy: .public)"
-            )
-        }
-
-        if now() < suppressOtherUntil, let held = lastLanguage, language != held {
+        guard passesPurityGate(trimmed, language: language),
+              passesSuppressionGate(language: language) else {
             return nil
-        }
-        if now() >= suppressOtherUntil, lockedLanguage != nil, texts.values.allSatisfy(\.isEmpty) {
-            lockedLanguage = nil
         }
 
         // A late volatile for an already-closed range must not revive or
@@ -337,23 +294,19 @@ struct UtteranceAssembler: Sendable {
         // row even while a newer row is live. This replaces the old prefix
         // heuristic with the audio range Apple actually sent.
         if isFinal, let closed = closedRangeMatch(language: language, range: range) {
-            let revisedText: String
-            if closed.text.count > trimmed.count, !range.contains(closed.range) {
-                revisedText = closed.text
-            } else {
-                revisedText = trimmed
-            }
-            updateClosedRange(id: closed.id, language: language, range: range, text: revisedText)
+            // A late final is authoritative even when it is shorter than the
+            // synthetic text it replaces (P0-2 final-wins).
+            updateClosedRange(id: closed.id, language: language, range: range, text: trimmed)
             latestFinal = FinalizedUtterance(
                 id: closed.id,
                 language: language,
-                text: revisedText,
+                text: trimmed,
                 at: now()
             )
             return Utterance(
                 id: closed.id,
                 language: language,
-                text: revisedText,
+                text: trimmed,
                 isFinal: true,
                 isRevision: true
             )
@@ -372,27 +325,13 @@ struct UtteranceAssembler: Sendable {
             state = LanguageRangeState()
         }
 
-        if let locked = lockedLanguage, language != locked {
-            let incumbent = textFor(locked)
-            guard Self.shouldPreempt(
-                challenger: trimmed,
-                challengerLanguage: language,
-                incumbent: incumbent,
-                incumbentLanguage: locked
-            ) else {
-                return nil
-            }
-            rangeStates.removeValue(forKey: locked)
-            clearText(for: locked)
-            lockedLanguage = language
-        }
+        guard preemptsIfNeeded(language: language, text: trimmed) else { return nil }
 
-        // A final phrase after a real audio gap starts a new utterance even
-        // when the transcriber did not add sentence punctuation.
-        if isFinal,
-           state.volatile == nil,
-           let last = state.finalized.last,
-           range.start > last.range.end + Self.rangeGapLimit {
+        // A phrase after a real audio gap starts a new utterance even when the
+        // transcriber did not add sentence punctuation. This covers both a new
+        // volatile phrase and a final that follows the gap.
+        let lastEnd = state.volatile?.range.end ?? state.finalized.last?.range.end
+        if let lastEnd, range.start > lastEnd + Self.rangeGapLimit {
             closeCurrentRangeRow(language: language, text: textFor(language))
             beginNextUtterance(keeping: language)
             state = LanguageRangeState()
@@ -454,11 +393,15 @@ struct UtteranceAssembler: Sendable {
         }
         let text = textFor(language)
         guard !text.isEmpty else { return nil }
+        // The finalized prefix is authoritative, so publish it as a final
+        // revision; the projection ignores a volatile update on a settled row
+        // and would otherwise keep the revoked tail on screen.
         return Utterance(
             id: utteranceID,
             language: language,
             text: text,
-            isFinal: false
+            isFinal: true,
+            isRevision: true
         )
     }
 
@@ -522,11 +465,10 @@ struct UtteranceAssembler: Sendable {
         language: AppLanguage,
         range: SpeechRange
     ) -> ClosedRangeUtterance? {
-        let cutoff = now().addingTimeInterval(-Self.closedRangeWindow)
-        return closedRanges.last { closed in
-            closed.language == language
-                && closed.at >= cutoff
-                && closed.range.overlaps(range)
+        // Audio ranges are monotonic on one timeline, so a matching range is
+        // always the same audio; only the bounded history limits the match.
+        closedRanges.last { closed in
+            closed.language == language && closed.range.overlaps(range)
         }
     }
 
@@ -572,8 +514,6 @@ struct UtteranceAssembler: Sendable {
         if closedRanges.count > Self.closedRangeHistoryLimit {
             closedRanges.removeFirst(closedRanges.count - Self.closedRangeHistoryLimit)
         }
-        let cutoff = now().addingTimeInterval(-Self.closedRangeWindow)
-        closedRanges.removeAll { $0.at < cutoff }
     }
 
     private mutating func silenceTimedOutForRanges() -> Utterance? {
@@ -691,6 +631,44 @@ struct UtteranceAssembler: Sendable {
         latestFinal = nil
         closedRanges.removeAll()
         beginNextUtterance(keeping: nil)
+    }
+
+    private mutating func passesPurityGate(_ text: String, language: AppLanguage) -> Bool {
+        let verdict = Self.languageVerdict(text, claimed: language, purity: languagePurity)
+        guard verdict.accepted else { return false }
+        if verdict.scriptMismatch, languagePurity == .trustedLocale {
+            DuiyiLog.speech.debug(
+                "Single-locale result script mismatch for \(language.rawValue, privacy: .public)"
+            )
+        }
+        return true
+    }
+
+    private mutating func passesSuppressionGate(language: AppLanguage) -> Bool {
+        if now() < suppressOtherUntil, let held = lastLanguage, language != held {
+            return false
+        }
+        if now() >= suppressOtherUntil, lockedLanguage != nil, texts.values.allSatisfy(\.isEmpty) {
+            lockedLanguage = nil
+        }
+        return true
+    }
+
+    private mutating func preemptsIfNeeded(language: AppLanguage, text: String) -> Bool {
+        guard let locked = lockedLanguage, language != locked else { return true }
+        let incumbent = textFor(locked)
+        guard Self.shouldPreempt(
+            challenger: text,
+            challengerLanguage: language,
+            incumbent: incumbent,
+            incumbentLanguage: locked
+        ) else {
+            return false
+        }
+        rangeStates.removeValue(forKey: locked)
+        clearText(for: locked)
+        lockedLanguage = language
+        return true
     }
 
     private mutating func hold(_ language: AppLanguage, for seconds: TimeInterval) {

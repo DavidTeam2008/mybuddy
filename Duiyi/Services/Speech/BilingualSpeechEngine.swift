@@ -350,45 +350,36 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             language: language,
             text: text,
             isFinal: isFinal,
-            range: range,
-            resultsFinalizationTime: resultsFinalizationTime
+            range: range
         ) else {
-            diagnostics.record(
-                ASRDiagnosticsRecord(
-                    language: language,
-                    textLength: text.count,
-                    isFinal: isFinal,
-                    synthetic: false,
-                    scriptMismatch: scriptMismatch,
-                    accepted: false,
-                    published: false,
-                    utteranceID: nil,
-                    revision: false,
-                    rangeStartSeconds: rangeStart,
-                    rangeDurationSeconds: rangeDuration,
-                    resultsFinalizationTimeSeconds: resultsFinalizationTime,
-                    style: styleName
-                )
-            )
-            return
-        }
-        let published = publish(utterance)
-        diagnostics.record(
-            ASRDiagnosticsRecord(
+            recordASR(
                 language: language,
                 textLength: text.count,
                 isFinal: isFinal,
                 synthetic: false,
                 scriptMismatch: scriptMismatch,
-                accepted: true,
-                published: published,
-                utteranceID: utterance.id,
-                revision: utterance.isRevision,
-                rangeStartSeconds: rangeStart,
-                rangeDurationSeconds: rangeDuration,
-                resultsFinalizationTimeSeconds: resultsFinalizationTime,
-                style: styleName
+                accepted: false,
+                published: false,
+                utterance: nil,
+                rangeStart: rangeStart,
+                rangeDuration: rangeDuration,
+                resultsFinalizationTime: resultsFinalizationTime
             )
+            return
+        }
+        let published = publish(utterance)
+        recordASR(
+            language: language,
+            textLength: text.count,
+            isFinal: isFinal,
+            synthetic: false,
+            scriptMismatch: scriptMismatch,
+            accepted: true,
+            published: published,
+            utterance: utterance,
+            rangeStart: rangeStart,
+            rangeDuration: rangeDuration,
+            resultsFinalizationTime: resultsFinalizationTime
         )
         if Self.shouldAcknowledgeFinal(utterance) {
             assembler.acknowledgeFinal(language: utterance.language)
@@ -403,20 +394,48 @@ actor BilingualSpeechEngine: SpeechRecognizing {
 
     private func publishSynthetic(_ utterance: Utterance) {
         let published = publish(utterance)
+        recordASR(
+            language: utterance.language,
+            textLength: utterance.text.count,
+            isFinal: true,
+            synthetic: true,
+            scriptMismatch: false,
+            accepted: true,
+            published: published,
+            utterance: utterance,
+            rangeStart: nil,
+            rangeDuration: nil,
+            resultsFinalizationTime: nil
+        )
+    }
+
+    private func recordASR(
+        language: AppLanguage,
+        textLength: Int,
+        isFinal: Bool,
+        synthetic: Bool,
+        scriptMismatch: Bool,
+        accepted: Bool,
+        published: Bool,
+        utterance: Utterance?,
+        rangeStart: Double?,
+        rangeDuration: Double?,
+        resultsFinalizationTime: Double?
+    ) {
         diagnostics.record(
             ASRDiagnosticsRecord(
-                language: utterance.language,
-                textLength: utterance.text.count,
-                isFinal: true,
-                synthetic: true,
-                scriptMismatch: false,
-                accepted: true,
+                language: language,
+                textLength: textLength,
+                isFinal: isFinal,
+                synthetic: synthetic,
+                scriptMismatch: scriptMismatch,
+                accepted: accepted,
                 published: published,
-                utteranceID: utterance.id,
-                revision: false,
-                rangeStartSeconds: nil,
-                rangeDurationSeconds: nil,
-                resultsFinalizationTimeSeconds: nil,
+                utteranceID: utterance?.id,
+                revision: utterance?.isRevision ?? false,
+                rangeStartSeconds: rangeStart,
+                rangeDurationSeconds: rangeDuration,
+                resultsFinalizationTimeSeconds: resultsFinalizationTime,
                 style: styleName
             )
         )

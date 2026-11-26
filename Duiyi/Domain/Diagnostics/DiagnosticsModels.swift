@@ -35,6 +35,7 @@ struct TranslationSubmitRecord: Equatable, Sendable {
     var target: AppLanguage
     var sourceLength: Int
     var strategy: String
+    var sourceHash: String? = nil
 }
 
 struct TranslationApplyRecord: Equatable, Sendable {
@@ -97,6 +98,7 @@ struct DiagnosticsEvent: Codable, Equatable, Sendable {
     var sourceLanguage: String?
     var targetLanguage: String?
     var sourceLength: Int?
+    var sourceHash: String?
     var translatedLength: Int?
     var replacementCharacters: Int?
     var responseSourceLanguage: String?
@@ -117,7 +119,6 @@ struct DiagnosticsSummary: Codable, Equatable, Sendable {
     var finalJobCount = 0
     var translationResponseCount = 0
     var finalAppliedCount = 0
-    var translationFailureCount = 0
     var permanentFailureCount = 0
     var rejectedCorruptionCount = 0
     var droppedEventCount = 0
@@ -135,24 +136,4 @@ struct DiagnosticsSnapshot: Codable, Equatable, Sendable {
     var session: DiagnosticsSessionInfo?
     var summary: DiagnosticsSummary
     var events: [DiagnosticsEvent]
-}
-
-/// Diagnostics sink shared by the speech engine, translation pipeline, and
-/// translation pump. Implementations must be thread-safe: ASR events arrive
-/// from the speech actor while translation events arrive on the main actor.
-protocol DiagnosticsRecording: AnyObject, Sendable {
-    func beginSession(feature: FeatureID, taskID: UUID?)
-    func endSession(taskID: UUID?)
-    func record(_ record: ASRDiagnosticsRecord)
-    func recordSubmit(_ record: TranslationSubmitRecord)
-    func recordApply(_ record: TranslationApplyRecord)
-    func recordResponse(_ record: TranslationResponseRecord)
-    func recordFailure(_ record: TranslationFailureRecord)
-    func snapshot() -> DiagnosticsSnapshot
-    /// JSON for the DEBUG export, or nil when the build or session has nothing
-    /// to export. Never uploads anything.
-    func makeExportJSON() -> Data?
-    /// Writes the export JSON to the app's Documents directory and returns the
-    /// file URL so the device can pull it with `devicectl` or share it.
-    func makeExportFile() -> URL?
 }

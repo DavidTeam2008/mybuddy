@@ -22,8 +22,7 @@ struct UtteranceAssemblerRangeTests {
             language: language,
             text: text,
             isFinal: isFinal,
-            range: range,
-            resultsFinalizationTime: range.end
+            range: range
         )
         return try #require(value)
     }
@@ -110,7 +109,8 @@ struct UtteranceAssemblerRangeTests {
         let retracted = try requireIngest(&assembler, "", range(2, 3))
         #expect(retracted.id == finalized.id)
         #expect(retracted.text == "I was astounded")
-        #expect(retracted.isFinal == false)
+        #expect(retracted.isFinal == true)
+        #expect(retracted.isRevision == true)
     }
 
     @Test("A late final for a silence-closed range revises the same row")
@@ -143,8 +143,7 @@ struct UtteranceAssemblerRangeTests {
             language: .english,
             text: "They also",
             isFinal: false,
-            range: range(0, 1.5),
-            resultsFinalizationTime: 1.5
+            range: range(0, 1.5)
         )
         #expect(stale == nil)
 
@@ -152,8 +151,8 @@ struct UtteranceAssemblerRangeTests {
         #expect(next.text == "And then")
     }
 
-    @Test("A late final outside the closed-range window starts a new row")
-    func lateFinalOutsideWindowStartsNewRow() throws {
+    @Test("A late final long after silence still reuses the closed row")
+    func lateFinalLongAfterSilenceStillReusesRow() throws {
         let clock = RangeTestClock()
         var assembler = UtteranceAssembler(now: { clock.now })
         _ = try requireIngest(&assembler, "See you at three", range(0, 2))
@@ -164,7 +163,38 @@ struct UtteranceAssemblerRangeTests {
         let late = try requireIngest(
             &assembler, "See you at three.", range(0, 2), isFinal: true
         )
-        #expect(late.id != synthetic.id)
+        #expect(late.id == synthetic.id)
+        #expect(late.text == "See you at three.")
+    }
+
+    @Test("A late final replaces a longer synthetic guess even when shorter")
+    func lateFinalIsAuthoritativeWhenShorter() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "They also cause us to bump into each other maybe",
+            range(0, 3)
+        )
+        let synthetic = try requireSilenceFinal(&assembler)
+
+        let late = try requireIngest(
+            &assembler,
+            "They also cause us to bump into each other.",
+            range(0, 3),
+            isFinal: true
+        )
+        #expect(late.id == synthetic.id)
+        #expect(late.text == "They also cause us to bump into each other.")
+    }
+
+    @Test("A volatile after an audio gap starts a new row")
+    func volatileAfterGapStartsNewRow() throws {
+        var assembler = UtteranceAssembler()
+        let first = try requireIngest(&assembler, "First phrase", range(0, 2))
+        let second = try requireIngest(&assembler, "Second phrase", range(3, 5))
+
+        #expect(first.id != second.id)
+        #expect(second.text == "Second phrase")
     }
 
     @Test("A final after an audio gap starts a new row")
@@ -241,8 +271,7 @@ struct UtteranceAssemblerRangeTests {
             language: .zhHans,
             text: "你是对的",
             isFinal: true,
-            range: range(0, 2),
-            resultsFinalizationTime: 2
+            range: range(0, 2)
         )
 
         #expect(english.language == .english)
@@ -278,8 +307,7 @@ struct UtteranceAssemblerRangeTests {
                 language: .english,
                 text: "   ",
                 isFinal: true,
-                range: range(0, 1),
-                resultsFinalizationTime: 1
+                range: range(0, 1)
             ) == nil
         )
     }
