@@ -46,9 +46,7 @@ final class InterpretationViewModel {
 
     private let pipeline: TranslationPipeline
     private var projection = CaptionProjection(policy: .interpretation)
-    /// Store write started by a final translation that arrived after the task
-    /// ended; tests await it through `waitForTranslationBackfill()`.
-    @ObservationIgnored private var backfillTask: Task<Void, Never>?
+    private let lateTranslation: LateTranslationBackfill
 
     private var speechTask: Task<Void, Never>?
     private var idleRestoreTask: Task<Void, Never>?
@@ -76,13 +74,15 @@ final class InterpretationViewModel {
         idleRestoreDelay: Duration = .seconds(ConversationLayout.idleRestoreSeconds),
         speechSettleDelay: Duration = .milliseconds(380)
     ) {
-        lifecycle = TaskLifecycle(
+        let lifecycle = TaskLifecycle(
             feature: .simultaneous,
             store: taskStore,
             gate: gate,
             permissions: permissions,
             audioSession: audioSession
         )
+        self.lifecycle = lifecycle
+        lateTranslation = LateTranslationBackfill(lifecycle: lifecycle)
         self.permissions = permissions
         self.preferences = preferences
         self.summarizer = summarizer
@@ -113,13 +113,15 @@ final class InterpretationViewModel {
         speechSettleDelay: Duration = .milliseconds(380),
         scheduler: any TranslationScheduler
     ) {
-        lifecycle = TaskLifecycle(
+        let lifecycle = TaskLifecycle(
             feature: .simultaneous,
             store: taskStore,
             gate: gate,
             permissions: permissions,
             audioSession: audioSession
         )
+        self.lifecycle = lifecycle
+        lateTranslation = LateTranslationBackfill(lifecycle: lifecycle)
         self.permissions = permissions
         self.preferences = preferences
         self.summarizer = summarizer
@@ -293,13 +295,19 @@ final class InterpretationViewModel {
             lifecycle.persist(transcript)
         }
         stateOverride = nil
-        switch await lifecycle.prepareForNewTask() {
+        lateTranslation.beginEnding()
+        let prepareOutcome = await lifecycle.prepareForNewTask()
+        lateTranslation.endEnding()
+        switch prepareOutcome {
         case .ready:
+            await lateTranslation.flushPending()
             await createNewTask()
         case .blockedByUnsavedTask:
+            lateTranslation.discardPending()
             isUnsavedTaskPromptPresented = true
         case .notSaved:
             // Keep the task and captions; the not-saved banner explains why.
+            lateTranslation.discardPending()
             break
         }
     }
@@ -354,22 +362,27 @@ final class InterpretationViewModel {
         isUnsavedTaskPromptPresented = false
         isExportThenContinuePending = false
         await clearSpeechQueue()
+        lateTranslation.beginEnding()
         let outcome = await lifecycle.endTask(transcript: transcript, summary: summary)
+        lateTranslation.endEnding()
         stateOverride = nil
         holdScreenAfterPause = false
         idleRestoreTask?.cancel()
         projection.setSpeakingHint(nil, pane: .user)
         switch outcome {
         case let .ended(session):
+            await lateTranslation.flushPending()
             resetCaptions()
             resumePromptText = nil
             return session
         case .discardedEmpty:
+            lateTranslation.discardPending()
             resetCaptions()
             resumePromptText = nil
             return nil
         case .notSaved:
             // Keep the transcript in memory for export; nothing was written.
+            lateTranslation.discardPending()
             return nil
         }
     }
@@ -595,16 +608,13 @@ final class InterpretationViewModel {
         )
         if job.isFinal {
             lifecycle.persist(projection.transcript)
-            if !hadRecord {
-                backfillTask = Task {
-                    await lifecycle.backfillTranslation(
-                        entryID: update.utteranceID,
-                        text: update.translatedText
-                    )
-                }
-            }
+            lateTranslation.finalArrived(
+                entryID: update.utteranceID,
+                text: update.translatedText,
+                hasLiveRecord: hadRecord
+            )
         }
-        guard let line else { return }
+        guard let line, !lateTranslation.isEnding else { return }
         scheduleSpeech(
             utteranceID: update.utteranceID,
             translated: line.translatedText,
@@ -616,9 +626,9 @@ final class InterpretationViewModel {
         pipeline.fail(job: job)
     }
 
-    /// Test seam: waits for a late-final backfill started by `fulfill`.
+    /// Test seam: waits for a late-final backfill drain started by `fulfill`.
     func waitForTranslationBackfill() async {
-        await backfillTask?.value
+        await lateTranslation.waitForDrain()
     }
 
     func requestSummary() async {

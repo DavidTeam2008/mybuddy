@@ -259,7 +259,7 @@ e9 a9 9a   ef bf bd   ef bf bd   e7 84 b6
 
 **P0-6. 翻译失败重试与可见状态**
 
-- **状态（2026-11-26，已按用户确认拆成两半）**：**P0-6a（本分支）** 已实现结束竞态回填：`TaskLifecycle.endTask` 保留最近一个已结束任务的快照；结束/重置后到达的 final 译文通过 `TaskStoreV2.updateTranslations` 回填（preview 不落库，损坏文本拒绝），`fulfill` 不再因为 projection 已 reset 而静默丢掉 final 译文。单测覆盖迟到 final 回填、迟到 preview 不回填、未知条目与只回填最近结束任务；真机未验证，手动步骤：说一句后立即结束任务，确认历史/导出中该行有译文且不重复。**P0-6b（未开始）**：重试分类（取消/资源未就绪/不支持语言对/瞬时错误）与 `permanentFailure` 可见状态，等 P1-4 诊断/设备数据后再做，避免在没有错误分布数据时猜 UI 与重试预算。
+- **状态（2026-11-26，已按用户确认拆成两半）**：**P0-6a（本分支）** 已实现结束竞态回填：`TaskLifecycle.endTask` 与 `prepareForNewTask` 都保留最近一个已结束任务的快照；结束/新建任务/重置后到达的 final 译文通过 `TaskStoreV2.updateTranslations` 回填（preview 不落库，损坏文本拒绝），`fulfill` 不再因为 projection 已 reset 而静默丢掉 final 译文。结束写入在途时到达的 final 由 `LateTranslationBackfill` 先暂存，写入返回后回填，避免快照与 projection 之间的竞态。单测覆盖迟到 final 回填、迟到/在途 preview 不回填、结束写入在途 final、新建任务结束路径、损坏文本、未知条目与只回填最近结束任务；真机未验证，手动步骤：说一句后立即结束任务，确认历史/导出中该行有译文且不重复。**P0-6b（未开始）**：重试分类（取消/资源未就绪/不支持语言对/瞬时错误）与 `permanentFailure` 可见状态，等 P1-4 诊断/设备数据后再做，避免在没有错误分布数据时猜 UI 与重试预算。
 - 区分取消（不算失败）、语言包/下载/未就绪（提示并保留 job）、不支持语言对（不无限重试）、瞬时错误（2 次短退避）；耗尽后进入 `permanentFailure`，在 UI/文字稿可查，不静默丢。
 
 ### 实验（P2）

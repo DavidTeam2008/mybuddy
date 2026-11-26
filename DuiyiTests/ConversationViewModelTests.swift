@@ -991,13 +991,15 @@ struct ConversationViewModelTests {
     }
 
     private func makeScheduledViewModel(
-        scheduler: ManualTranslationScheduler
+        scheduler: ManualTranslationScheduler,
+        store: any TaskStoreV2 = InMemoryTaskStore()
     ) -> ConversationViewModel {
         ConversationViewModel(
             gate: ConversationFakeGate(),
             permissions: MockPermissions(),
             preferences: makePreferences(userLanguage: .zhHans, peerLanguage: .english),
             summarizer: MockSummarizer(),
+            taskStore: store,
             scheduler: scheduler
         )
     }
@@ -1057,6 +1059,48 @@ struct ConversationViewModelTests {
             return
         }
         #expect(stored.entries.first?.translatedText == "三点见。")
+    }
+
+    @Test("A final arriving while the end write is in flight is backfilled")
+    func finalDuringEndWriteIsBackfilled() async throws {
+        let store = ScriptedTaskStore()
+        let viewModel = makeGateViewModel(gate: ConversationFakeGate(), store: store)
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .english, text: "See you at three.", isFinal: true))
+        let job = try #require(viewModel.outboundJob)
+        var fulfilled = false
+        store.endHook = {
+            guard !fulfilled else { return }
+            fulfilled = true
+            viewModel.fulfill(job: job, text: "三点见。")
+        }
+
+        let ended = try #require(await viewModel.endTask())
+
+        #expect(fulfilled)
+        let stored = try #require(await store.task(id: ended.id))
+        #expect(stored.entries.first?.translatedText == "三点见。")
+    }
+
+    @Test("A preview translation that arrives after endTask is not backfilled")
+    func latePreviewTranslationIsNotBackfilled() async throws {
+        let scheduler = ManualTranslationScheduler()
+        let store = InMemoryTaskStore()
+        let viewModel = makeScheduledViewModel(scheduler: scheduler, store: store)
+        await viewModel.beginTask()
+        viewModel.accept(
+            Utterance(language: .english, text: "hello world my friend", isFinal: false)
+        )
+        scheduler.advance(by: .milliseconds(40))
+        let job = try #require(viewModel.outboundJob)
+        #expect(!job.isFinal)
+        let ended = try #require(await viewModel.endTask())
+
+        viewModel.fulfill(job: job, text: "你好世界我的朋友")
+        await viewModel.waitForTranslationBackfill()
+
+        let stored = try #require(await store.task(id: ended.id))
+        #expect(stored.entries.first?.translatedText == "")
     }
 
     @Test("Stopping listening drains a final emitted when the stream stops")

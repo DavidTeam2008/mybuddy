@@ -388,7 +388,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 - 尚无 `SchemaMigrationPlan`（P3）。
 
 写入点统一：settled 时由 `TaskLifecycle` 做 250 ms 防抖、暂停/后台 `flush()`、结束全量交给 `end`、清屏前 `flush()`。实时字幕始终以内存为准，View 不直接读 SwiftData。
-`endTask` 保留最近一个已结束任务的快照；结束/重置后到达的 final 译文由 `TaskLifecycle.backfillTranslation` 通过 `TaskStoreV2.updateTranslations` 回填（store 允许对已结束任务只写译文），preview 不落库。
+`endTask` 与新建任务的 `prepareForNewTask` 都保留最近一个已结束任务的快照；结束/重置后到达的 final 译文由 `TaskLifecycle.backfillTranslation` 通过 `TaskStoreV2.updateTranslations` 回填（store 允许对已结束任务只写译文），preview 不落库。结束写入在途时到达的 final 由 `LateTranslationBackfill` 暂存，写入返回后回填。
 
 ---
 

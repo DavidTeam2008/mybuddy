@@ -89,12 +89,6 @@ struct CaptionProjection: Sendable {
         return line(for: record)
     }
 
-    /// Updates the record's translation and returns the canonical line only
-    /// while that record is in the pane's display window. A row hidden by a
-    /// clear or evicted by the history limit still updates the record and the
-    /// transcript, but returns nil so callers (notably interpretation TTS)
-    /// never act on a row the user cannot see.
-    @discardableResult
     /// Whether the record store still owns this utterance. Used to tell a
     /// translation result that missed its display window (record present) from
     /// one that arrived after the task was reset (record gone).
@@ -102,6 +96,12 @@ struct CaptionProjection: Sendable {
         index[utteranceID] != nil
     }
 
+    /// Updates the record's translation and returns the canonical line only
+    /// while that record is in the pane's display window. A row hidden by a
+    /// clear or evicted by the history limit still updates the record and the
+    /// transcript, but returns nil so callers (notably interpretation TTS)
+    /// never act on a row the user cannot see.
+    @discardableResult
     mutating func applyTranslation(
         utteranceID: UUID,
         text: String,

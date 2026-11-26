@@ -122,6 +122,10 @@ final class ScriptedTaskStore: TaskStoreV2 {
         return await base.saveSummary(summary, for: taskID)
     }
 
+    /// Runs inside the awaited `end` call, before the store updates and returns.
+    /// Lets tests deliver a translation while an end is in flight.
+    var endHook: (() -> Void)?
+
     func end(
         taskID: UUID,
         entries: [TranscriptEntry],
@@ -130,6 +134,7 @@ final class ScriptedTaskStore: TaskStoreV2 {
         endCalls += 1
         eventSink?("store-end")
         if let endFailure { return .notPersisted(endFailure) }
+        endHook?()
         return await base.end(taskID: taskID, entries: entries, summary: summary)
     }
 

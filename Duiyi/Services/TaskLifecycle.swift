@@ -78,15 +78,9 @@ final class TaskLifecycle {
     }
 
     /// The most recently ended task, kept so a final translation that arrives
-    /// after `endTask` can be written back instead of dropped. The store allows
-    /// translation-only writes on ended tasks.
-    private struct EndedTranscript {
-        var taskID: UUID
-        var entries: [TranscriptEntry]
-        var isMemoryOnly: Bool
-    }
-
-    @ObservationIgnored private var endedTranscript: EndedTranscript?
+    /// after the task ends can be written back instead of dropped. The store
+    /// allows translation-only writes on ended tasks.
+    @ObservationIgnored private var endedTask: TaskSession?
 
     init(
         feature: FeatureID,
@@ -164,7 +158,11 @@ final class TaskLifecycle {
             entries: latestTranscript,
             summary: task.summary
         ) {
-        case .ended, .discardedEmpty:
+        case let .ended(session):
+            endedTask = session
+            clearCurrent()
+            return .ready
+        case .discardedEmpty:
             clearCurrent()
             return .ready
         case let .notPersisted(reason):
@@ -365,14 +363,9 @@ final class TaskLifecycle {
             return .discardedEmpty
         }
 
-        let wasMemoryOnly = isMemoryOnly
         switch await store.end(taskID: taskID, entries: transcript, summary: summary) {
         case let .ended(session):
-            endedTranscript = EndedTranscript(
-                taskID: session.id,
-                entries: session.entries,
-                isMemoryOnly: wasMemoryOnly
-            )
+            endedTask = session
             clearCurrent()
             return .ended(session)
         case .discardedEmpty:
@@ -392,17 +385,21 @@ final class TaskLifecycle {
     @discardableResult
     func backfillTranslation(entryID: UUID, text: String) async -> Bool {
         guard !TextIntegrity.isCorrupted(text),
-              var ended = endedTranscript,
-              !ended.isMemoryOnly,
+              var ended = endedTask,
               let index = ended.entries.firstIndex(where: { $0.id == entryID }) else {
             return false
         }
         ended.entries[index].translatedText = text
-        endedTranscript = ended
+        endedTask = ended
         guard case .persisted = await store.updateTranslations(
             [ended.entries[index]],
-            for: ended.taskID
+            for: ended.id
         ) else {
+            #if DEBUG
+            DuiyiLog.translation.debug(
+                "late translation backfill not persisted entry=\(entryID.uuidString, privacy: .public) task=\(ended.id.uuidString, privacy: .public)"
+            )
+            #endif
             return false
         }
         return true

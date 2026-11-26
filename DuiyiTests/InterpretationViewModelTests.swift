@@ -1027,6 +1027,53 @@ struct InterpretationViewModelTests {
         #expect(stored.entries.first?.translatedText == "三点见。")
     }
 
+    @Test("A final arriving while the end write is in flight is backfilled")
+    func finalDuringEndWriteIsBackfilled() async throws {
+        let store = ScriptedTaskStore()
+        let viewModel = makeViewModel(store: store)
+        await viewModel.beginTask()
+        viewModel.accept(Utterance(language: .english, text: "See you at three.", isFinal: true))
+        let job = try #require(viewModel.outboundJob)
+        var fulfilled = false
+        store.endHook = {
+            guard !fulfilled else { return }
+            fulfilled = true
+            viewModel.fulfill(job: job, text: "三点见。")
+        }
+
+        let ended = try #require(await viewModel.endTask())
+
+        #expect(fulfilled)
+        let stored = try #require(await store.task(id: ended.id))
+        #expect(stored.entries.first?.translatedText == "三点见。")
+    }
+
+    @Test("A preview arriving while the end write is in flight is not backfilled")
+    func previewDuringEndWriteIsNotBackfilled() async throws {
+        let scheduler = ManualTranslationScheduler()
+        let store = ScriptedTaskStore()
+        let viewModel = makeViewModel(store: store, scheduler: scheduler)
+        await viewModel.beginTask()
+        viewModel.accept(
+            Utterance(language: .english, text: "hello world my friend", isFinal: false)
+        )
+        scheduler.advance(by: .milliseconds(40))
+        let job = try #require(viewModel.outboundJob)
+        #expect(!job.isFinal)
+        var fulfilled = false
+        store.endHook = {
+            guard !fulfilled else { return }
+            fulfilled = true
+            viewModel.fulfill(job: job, text: "你好世界我的朋友")
+        }
+
+        let ended = try #require(await viewModel.endTask())
+
+        #expect(fulfilled)
+        let stored = try #require(await store.task(id: ended.id))
+        #expect(stored.entries.first?.translatedText == "")
+    }
+
     @Test("A preview translation that arrives after endTask is not backfilled")
     func latePreviewTranslationIsNotBackfilled() async throws {
         let scheduler = ManualTranslationScheduler()

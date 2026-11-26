@@ -386,6 +386,52 @@ struct TaskLifecycleTests {
         )
     }
 
+    @Test("A task ended by the new-task flow can still receive a late translation")
+    func lateTranslationBackfillsTaskEndedByPrepareForNewTask() async throws {
+        let log = LifecycleEventLog()
+        let store = LifecycleFakeStore(log: log)
+        let gate = LifecycleFakeGate(log: log)
+        let lifecycle = makeLifecycle(store: store, gate: gate)
+        _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
+        let entry = makeEntry("旧任务最后一句")
+        lifecycle.persist([entry])
+
+        let outcome = await lifecycle.prepareForNewTask()
+        #expect(outcome == .ready)
+        let didBackfill = await lifecycle.backfillTranslation(
+            entryID: entry.id,
+            text: "The old last line."
+        )
+
+        #expect(didBackfill)
+        let ended = await store.base.list(filter: .meeting)
+        #expect(ended.first?.entries.first?.translatedText == "The old last line.")
+    }
+
+    @Test("A corrupted late translation is rejected")
+    func corruptedLateTranslationIsRejected() async throws {
+        let log = LifecycleEventLog()
+        let store = LifecycleFakeStore(log: log)
+        let gate = LifecycleFakeGate(log: log)
+        let lifecycle = makeLifecycle(store: store, gate: gate)
+        _ = await lifecycle.startNewTask(makeRequest(autoStart: false))
+        let entry = makeEntry("六点见")
+        lifecycle.persist([entry])
+        let outcome = await lifecycle.endTask(transcript: [entry], summary: nil)
+        guard case let .ended(session) = outcome else {
+            Issue.record("Expected ended, got \(outcome)")
+            return
+        }
+
+        let didBackfill = await lifecycle.backfillTranslation(
+            entryID: entry.id,
+            text: "坏\u{FFFD}字"
+        )
+
+        #expect(!didBackfill)
+        #expect(await store.base.task(id: session.id)?.entries.first?.translatedText == "")
+    }
+
     @Test("A late translation for an unknown entry is ignored")
     func lateTranslationUnknownEntryIsIgnored() async throws {
         let log = LifecycleEventLog()
