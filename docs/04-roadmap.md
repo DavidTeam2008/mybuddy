@@ -25,8 +25,9 @@
 | 同传 P0-1 outbound 无损队列 | 已实现（2026-11-26，PR #79）：单槽改为有界有序队列 + 每 utterance 防抖 + 单调 sequence + 结果去重；Host 按 `outboundRevision` drain；单测全绿；真机未验证 |
 | 同传 P1-2 稳定单元 preview | 已实现（2026-11-26，PR #82；#80 自动关闭）：句末标点立即、≥4 estimated words 防抖、更短丢弃；首包有用 preview 也走防抖；final 旁路；单测全绿；真机未验证 |
 | 同传 P0-6a 结束竞态回填 | 已实现（2026-11-26，PR #81）：endTask/新建任务后迟到的 final 译文经 `updateTranslations` 回填已结束任务；结束写入在途时暂存后回填；preview 不落库；单测全绿；真机未验证；P0-6b 重试/可见状态另开 |
-| 同传 P1-4a 每任务诊断 | 已实现（2026-11-26，分支 `feat/p1-4-diagnostics`）：内存 ring buffer + 聚合 + DEBUG JSON 导出；ASR 记录 range/resultsFinalizationTime/synthetic/脚本不匹配，翻译记录 submit/apply/response/retry/失败类/U+FFFD/延迟；设置页 DEBUG 导出写入 Documents；单测全绿；真机回放（P1-4b）未执行 |
-| 同传 P1-1 range-aware 组装 | 已实现（2026-11-26，分支 `feat/p1-1-range-aware-assembly`）：Result(range) 建模、finalized-prefix、range 连续（含 volatile）+ 标点定句界、空 volatile 撤销、静音 finalize(through:nil) + 350ms 等待 + synthetic 兜底、迟到同 range final 复用 ID 且文本权威；D8/crosstalk/name-swap 保持；单测全绿；真机未验证。手动步骤：iPhone 13 同传英→中，连续说两个无标点短语应同行增长，句号/问号后换行；1.1 s 静音后不应出现重复行；诊断 JSON 的 `asr.result` 应显示相同 utterance 的 `revision` 与 range 重叠 |
+| 同传 P1-4a 每任务诊断 | 已实现（2026-11-26，PR #84 / merge `1cc8df6`）：内存 ring buffer + 聚合 + DEBUG JSON 导出；ASR 记录 language/range/resultsFinalizationTime/synthetic/脚本不匹配，翻译记录 submit/apply/response/retry/失败类/U+FFFD/延迟；设置页 DEBUG 导出写入 Documents；单测全绿；真机回放（P1-4b）未执行 |
+| 同传 P1-1 range-aware 组装 | 已实现（2026-11-26，PR #84 / merge `1cc8df6`）：Result(range) 建模、finalized-prefix、range 连续（含 volatile）+ 标点定句界、空 volatile 撤销、静音 finalize(through:nil) + 350ms 等待 + synthetic 兜底、迟到同 range final 复用 ID 且文本权威；D8/crosstalk/name-swap 保持；单测全绿；真机未验证。手动步骤：iPhone 13 同传英→中，连续说两个无标点短语应同行增长，句号/问号后换行；1.1 s 静音后不应出现重复行；诊断 JSON 的 `asr.result` 应显示相同 utterance 的 `revision` 与 range 重叠 |
+| 同传 P1-4b TED 真机回放 | 未验证（2026-11-26 暂停）：Debug 构建已安装、任务已创建，但设备持续收到房间人声，回放前即出现无关字幕，污染夹具指标；已暂停听写并保留任务。13 分钟 TTS 夹具（cue 132–331，195 句，110 个 ≥1.1 s 间隔）与 DEBUG 导出路径就绪；环境静音后新建任务重跑，手动步骤见 research §4 P1-4 |
 | Wave 3 C04 字幕/文字稿投影 | 已完成（#28–#31，PR #33–#36；#32 清理+文档+iPhone 13 真机矩阵，用户确认 2026-11-25）；候选台账见 [05-architecture-backlog.md](05-architecture-backlog.md) |
 | 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
 
