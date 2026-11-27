@@ -213,7 +213,7 @@ final class TranslationPipeline {
     /// source length for previews, so a late result can neither overwrite a
     /// newer job nor be replayed twice.
     func accept(job: TranslationJob, text: String) -> TranslationUpdate? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = TextNormalization.translation(text, language: job.target)
         guard !trimmed.isEmpty else {
             recordApply(job, text: trimmed, applied: false, reason: "empty")
             return nil

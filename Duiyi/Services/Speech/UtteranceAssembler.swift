@@ -76,7 +76,10 @@ struct UtteranceAssembler: Sendable {
         var id: UUID
         var language: AppLanguage
         var range: SpeechRange
-        var text: String
+        /// The row's finalized phrases and its still-open tail at close time.
+        /// A late final usually covers only the tail, so the phrases are kept
+        /// to merge it without dropping the finalized prefix.
+        var state: LanguageRangeState
         var at: Date
     }
 
@@ -122,12 +125,22 @@ struct UtteranceAssembler: Sendable {
         isFinal: Bool,
         range: SpeechRange?
     ) -> Utterance? {
+        let trimmedInput = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = TextNormalization.sourcePhrase(text)
+        // A punctuation-only result carries no words. Treat it as absent:
+        // replacing or finalizing an open phrase with "." would discard the
+        // phrase's text (and in trusted-locale mode it can otherwise become a
+        // row of its own). Truly empty text still reaches the revoke path.
+        if !trimmedInput.isEmpty,
+           !normalized.contains(where: { $0.isLetter || $0.isNumber }) {
+            return nil
+        }
         guard let range else {
-            return ingestByText(language: language, text: text, isFinal: isFinal)
+            return ingestByText(language: language, text: normalized, isFinal: isFinal)
         }
         return ingestRangeAware(
             language: language,
-            text: text,
+            text: normalized,
             isFinal: isFinal,
             range: range
         )
@@ -305,31 +318,60 @@ struct UtteranceAssembler: Sendable {
         }
 
         // A late volatile for an already-closed range must not revive or
-        // pollute the newer row.
-        if !isFinal, closedRangeMatch(language: language, range: range) != nil {
-            return nil
+        // pollute the newer row. If it extends beyond the closed range and no
+        // new row has started yet, it may carry the first phrase after a
+        // pause: start the next row with it instead of discarding possible
+        // new content.
+        if !isFinal, let closed = closedRangeMatch(language: language, range: range) {
+            let extendsClosedRange = range.end > closed.range.end + 0.05
+            let rowIsEmpty = texts.values.allSatisfy(\.isEmpty)
+            guard extendsClosedRange, rowIsEmpty else { return nil }
         }
 
         // A final for a range the silence timer already closed belongs to that
         // row even while a newer row is live. This replaces the old prefix
         // heuristic with the audio range Apple actually sent.
         if isFinal, let closed = closedRangeMatch(language: language, range: range) {
-            // A late final is authoritative even when it is shorter than the
-            // synthetic text it replaces (P0-2 final-wins).
-            updateClosedRange(id: closed.id, language: language, range: range, text: trimmed)
-            latestFinal = FinalizedUtterance(
-                id: closed.id,
-                language: language,
-                text: trimmed,
-                at: now()
-            )
-            return Utterance(
-                id: closed.id,
-                language: language,
-                text: trimmed,
-                isFinal: true,
-                isRevision: true
-            )
+            // A final that extends the closed row into new audio is the next
+            // phrase after a pause, not a revision, unless its text carries
+            // the closed tail. Start the next row instead of replacing a
+            // phrase and losing one side of the boundary.
+            let extendsClosedRange = range.end > closed.range.end + 0.05
+            let tail = closed.state.volatile ?? closed.state.finalized.last
+            let carriesClosedTail = tail.map {
+                SpokenText.compact(trimmed).contains(SpokenText.compact($0.text))
+            } ?? false
+            let rowIsEmpty = texts.values.allSatisfy(\.isEmpty)
+            let currentOverlaps = rangeStates[language].map { state in
+                state.volatile?.range.overlaps(range) == true
+                    || state.finalized.contains { $0.range.overlaps(range) }
+            } ?? false
+            let startsNextRow = extendsClosedRange
+                && !carriesClosedTail
+                && (rowIsEmpty || currentOverlaps)
+            if !startsNextRow {
+                // A late final usually covers only the tail that was still
+                // volatile at close time. Merge it into the row's phrase
+                // list: the final stays authoritative for its own range, but
+                // the finalized prefix must survive.
+                var state = closed.state
+                apply(range: range, text: trimmed, isFinal: true, to: &state)
+                let revisedText = Self.joinedText(of: state)
+                updateClosedRange(id: closed.id, range: range, state: state)
+                latestFinal = FinalizedUtterance(
+                    id: closed.id,
+                    language: language,
+                    text: revisedText,
+                    at: now()
+                )
+                return Utterance(
+                    id: closed.id,
+                    language: language,
+                    text: revisedText,
+                    isFinal: true,
+                    isRevision: true
+                )
+            }
         }
 
         // A published final closes the row for identity. A different language
@@ -339,10 +381,7 @@ struct UtteranceAssembler: Sendable {
            finalized.id == utteranceID,
            language != finalized.language {
             guard Self.isConfident(trimmed, language: language) else { return nil }
-            closeCurrentRangeRow(
-                language: finalized.language,
-                text: textFor(finalized.language)
-            )
+            closeCurrentRangeRow(language: finalized.language)
             beginNextUtterance(keeping: language)
         }
 
@@ -366,7 +405,7 @@ struct UtteranceAssembler: Sendable {
         // volatile phrase and a final that follows the gap.
         let lastEnd = state.volatile?.range.end ?? state.finalized.last?.range.end
         if let lastEnd, range.start > lastEnd + Self.rangeGapLimit {
-            closeCurrentRangeRow(language: language, text: textFor(language))
+            closeCurrentRangeRow(language: language)
             beginNextUtterance(keeping: language)
             state = LanguageRangeState()
         }
@@ -400,7 +439,7 @@ struct UtteranceAssembler: Sendable {
                 at: now()
             )
             if Self.endsSentence(winnerText) {
-                closeCurrentRangeRow(language: winner, text: winnerText)
+                closeCurrentRangeRow(language: winner)
                 beginNextUtterance(keeping: winner)
                 hold(winner, for: 0.8)
             }
@@ -445,20 +484,41 @@ struct UtteranceAssembler: Sendable {
         isFinal: Bool,
         to state: inout LanguageRangeState
     ) {
-        // A result for an already-finalized phrase revises that phrase.
+        let volatileOverlaps = state.volatile?.range.overlaps(range) ?? false
+
+        // A result for an already-finalized phrase revises that phrase. A
+        // later, still-open phrase must survive a late revision of an earlier
+        // one.
         if let index = state.finalized.firstIndex(where: { $0.range.overlaps(range) }) {
             if isFinal {
-                state.finalized[index].text = text
-                state.finalized[index].range = state.finalized[index].range.union(range)
-                state.volatile = nil
+                let existing = state.finalized[index]
+                state.finalized[index].text = Self.preferredPhraseText(
+                    existing: existing.text,
+                    incoming: text,
+                    incomingCovers: range.contains(existing.range)
+                )
+                state.finalized[index].range = existing.range.union(range)
+                if let volatile = state.volatile,
+                   volatileOverlaps,
+                   range.contains(volatile.range) {
+                    state.volatile = nil
+                }
             }
             return
         }
 
-        if let volatile = state.volatile, volatile.range.overlaps(range) {
+        if let volatile = state.volatile, volatileOverlaps {
             if isFinal {
+                // A final covering only part of the open phrase must not
+                // replace the phrase text: the words outside the final's
+                // range would be lost. Keep the fuller interpretation.
+                let merged = Self.preferredPhraseText(
+                    existing: volatile.text,
+                    incoming: text,
+                    incomingCovers: range.contains(volatile.range)
+                )
                 state.finalized.append(
-                    RangePhrase(text: text, range: volatile.range.union(range))
+                    RangePhrase(text: merged, range: volatile.range.union(range))
                 )
                 state.volatile = nil
             } else {
@@ -467,10 +527,25 @@ struct UtteranceAssembler: Sendable {
             return
         }
 
+        // The result belongs to a different phrase. An open volatile from an
+        // earlier range lies outside this result's range, and a volatile
+        // result makes no promise that it will be reissued as a final. Keep
+        // it as a consolidated phrase instead of discarding it; a later final
+        // for that range still revises it in place.
+        if let volatile = state.volatile {
+            guard range.start >= volatile.range.start else {
+                // An out-of-order result before the open phrase: keep the
+                // volatile tail untouched.
+                if isFinal {
+                    state.finalized.append(RangePhrase(text: text, range: range))
+                }
+                return
+            }
+            state.finalized.append(volatile)
+        }
+        state.volatile = nil
+
         if isFinal {
-            // The final covers the open range; any unresolved volatile guess
-            // is superseded.
-            state.volatile = nil
             if let last = state.finalized.last, last.range.overlaps(range) {
                 state.finalized[state.finalized.count - 1].text = text
                 state.finalized[state.finalized.count - 1].range = last.range.union(range)
@@ -483,16 +558,47 @@ struct UtteranceAssembler: Sendable {
         }
     }
 
+    /// A final that covers only part of an existing phrase cannot replace its
+    /// text without losing the words outside the final's range. Prefer the
+    /// interpretation that contains the other; otherwise keep the longer one.
+    private static func preferredPhraseText(
+        existing: String,
+        incoming: String,
+        incomingCovers: Bool
+    ) -> String {
+        let existingCompact = SpokenText.compact(existing)
+        let incomingCompact = SpokenText.compact(incoming)
+        if incomingCovers {
+            // A final that drops more than half of the phrase it covers is a
+            // truncation, not a cleanup ("...math test? She'll perform
+            // better." -> "She'll perform better."). Keep the fuller text so
+            // the preview's content survives into the settled row.
+            if existingCompact.contains(incomingCompact),
+               incomingCompact.count * 2 < existingCompact.count {
+                return existing
+            }
+            return incoming
+        }
+        if existingCompact.contains(incomingCompact) { return existing }
+        if incomingCompact.contains(existingCompact) { return incoming }
+        return incomingCompact.count >= existingCompact.count ? incoming : existing
+    }
+
     private mutating func refreshTexts(
         for language: AppLanguage,
         state: LanguageRangeState
     ) {
+        texts[language] = Self.joinedText(of: state)
+        finals[language] = !state.finalized.isEmpty && state.volatile == nil
+    }
+
+    /// The row's text: finalized phrases in audio order plus the open tail.
+    private static func joinedText(of state: LanguageRangeState) -> String {
         var parts = state.finalized.map(\.text)
         if let volatile = state.volatile {
             parts.append(volatile.text)
         }
-        texts[language] = Self.joinPhrases(parts)
-        finals[language] = !state.finalized.isEmpty && state.volatile == nil
+        return joinPhrases(parts)
     }
 
     private func closedRangeMatch(
@@ -508,34 +614,35 @@ struct UtteranceAssembler: Sendable {
 
     private mutating func updateClosedRange(
         id: UUID,
-        language: AppLanguage,
         range: SpeechRange,
-        text: String
+        state: LanguageRangeState
     ) {
         guard let index = closedRanges.lastIndex(where: { $0.id == id }) else { return }
         var closed = closedRanges[index]
         closed.range = closed.range.union(range)
-        closed.text = text
+        closed.state = state
         closed.at = now()
         closedRanges[index] = closed
     }
 
-    private mutating func closeCurrentRangeRow(language: AppLanguage, text: String) {
-        guard let range = currentRange(for: language) else { return }
+    private mutating func closeCurrentRangeRow(language: AppLanguage) {
+        guard let state = rangeStates[language],
+              let range = Self.unionRange(of: state) else {
+            return
+        }
         closedRanges.append(
             ClosedRangeUtterance(
                 id: utteranceID,
                 language: language,
                 range: range,
-                text: text,
+                state: state,
                 at: now()
             )
         )
         trimClosedRanges()
     }
 
-    private func currentRange(for language: AppLanguage) -> SpeechRange? {
-        guard let state = rangeStates[language] else { return nil }
+    private static func unionRange(of state: LanguageRangeState) -> SpeechRange? {
         var ranges = state.finalized.map(\.range)
         if let volatile = state.volatile {
             ranges.append(volatile.range)
@@ -572,7 +679,7 @@ struct UtteranceAssembler: Sendable {
             text: utterance.text,
             at: now()
         )
-        closeCurrentRangeRow(language: winner, text: winnerText)
+        closeCurrentRangeRow(language: winner)
         beginNextUtterance(keeping: winner)
         hold(winner, for: 0.8)
         return utterance
@@ -594,17 +701,24 @@ struct UtteranceAssembler: Sendable {
 
     private static func requiresSpace(between left: Character, and right: Character) -> Bool {
         guard !left.isWhitespace, !right.isWhitespace else { return false }
-        guard (left.isLetter || left.isNumber), (right.isLetter || right.isNumber) else {
-            return false
-        }
-        let leftIsCJK = isCJK(left)
-        let rightIsCJK = isCJK(right)
+        let leftIsCJK = isCJK(left) || isCJKPunctuation(left)
+        let rightIsCJK = isCJK(right) || isCJKPunctuation(right)
         if leftIsCJK || rightIsCJK {
             // Only a CJK/Latin boundary gets a space; CJK punctuation and CJK
             // characters stay unspaced.
             return leftIsCJK != rightIsCJK
         }
-        return true
+        // A closing mark attaches to the token before it; an opening mark
+        // attaches to the token after it.
+        if closingPunctuation.contains(right) || openingPunctuation.contains(left) {
+            return false
+        }
+        // After a sentence mark the next token starts a new word even when
+        // it is punctuation-led: "carry." + "It's" is not "carry.It's".
+        if closingPunctuation.contains(left) || openingPunctuation.contains(right) {
+            return true
+        }
+        return (left.isLetter || left.isNumber) && (right.isLetter || right.isNumber)
     }
 
     private static func isCJK(_ character: Character) -> Bool {
@@ -612,6 +726,18 @@ struct UtteranceAssembler: Sendable {
             isHanScalar($0) || isKanaScalar($0) || isHangulScalar($0) || isThaiScalar($0)
         }
     }
+
+    private static func isCJKPunctuation(_ character: Character) -> Bool {
+        "。，、；：？！…—～·「」『』【】（）《》〈〉".contains(character)
+    }
+
+    private static let closingPunctuation: Set<Character> = [
+        ".", ",", "!", "?", ";", ":", ")", "]", "}", "”", "’", "%"
+    ]
+
+    private static let openingPunctuation: Set<Character> = [
+        "(", "[", "{", "“", "‘"
+    ]
 
     private static func endsSentence(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

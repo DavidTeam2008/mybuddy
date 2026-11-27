@@ -194,8 +194,9 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 ### 4.2 切句
 
 - 每个 transcriber 的 partial/final 带 `range` 进入 `UtteranceAssembler.ingest`。当前行 = 已 final 的 phrase 前缀 + 开放 range 的 volatile 尾部；range 连续性决定续写，句末标点（`.?!。？！`，可带收尾引号/括号）决定换行，range 间隔 >0.75 s 也开新行。
+- volatile 结果不保证会重发 final（Apple 明确说明）。下一个 phrase（不同 range）到达时，旧的开放 volatile 先并入已定稿 phrase，不能直接丢弃；之后同 range 的 final 仍原位修订该 phrase。**final 只在 range 覆盖原 phrase 时才替换文本**：更窄的 final 保留原 phrase 全文；即使覆盖，若 final 是原文本的严格子串且不足一半，也视为截断并保留更全的 volatile（避免“预览对、结算丢前半句”）。纯标点结果（`.`、`...`）无词可承载，直接忽略；关闭行之后扩展出关闭 range 的 late volatile，或文本不含旧 tail 的 late final，若新行仍为空或当前行 range 与它重叠，则开/续新行，不丢弃暂停恢复后的第一句，也不把新句替换进旧行。源短语开头的续句标点（`,..`、`...`）剥除，4+ 连续点折叠为 `...`；译文按目标语言规范省略号（中文 `……`）。
 - 空 volatile 撤销该 range 的开放尾部并回退到 final 前缀；空 final 表示该 range 无语音。
-- 静音（Detector 或 1.1 s 无结果）：引擎先 `analyzer.finalize(through: nil)`，等待 350 ms 让转写器发布自己的 final；超时才用 `silenceTimedOut` 合成 final。合成与迟到 final 都按 range 重叠匹配最近关闭的行并复用 ID（`isRevision`），匹配窗口 12 s、最多保留 8 行。
+- 静音（Detector 或 1.1 s 无结果）：引擎先 `analyzer.finalize(through: nil)`，等待 350 ms 让转写器发布自己的 final；超时才用 `silenceTimedOut` 合成 final。合成与迟到 final 都按 range 重叠匹配最近关闭的行并复用 ID（`isRevision`），最多保留 8 行。关闭行保存 phrase 列表：迟到 final 只替换/合并其 range 内的 phrase，已 final 的前缀必须保留（不能把整行缩成最后一个 phrase）。
 - final 后 `acknowledgeFinal` 保持 1.0 秒，抑制同句尾巴被另一路重复接收。
 - `publish` 以 `(utterance.id, language, 归一化文本)` 签名去重 final：同一行的重复 final 只发一次，新行重复同一句仍会发布。
 
@@ -205,7 +206,7 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 
 - **语言纯度门禁**：`matchesClaimedLanguage` 按脚本统计拒绝明显不属于该路的文本（如中文路收到纯拉丁、英文路收到汉字）。真正的单语种请求用 `.trustedLocale` 信任唯一 transcriber：非空结果都接受，混合脚本/纯数字只记录不匹配、不丢句；请求了双 locale 但资源降到单路、以及会议，保持 `.strict`。
 - **抢占**：锁定语言后，异语候选只有 `nativeUnits` 明显超过当前句才抢占。
-- **同句更新**：range-aware 路径下，同一 `utteranceID` 原地更新；连续 phrase 按 range 连续性与标点合并，不依赖文本前缀相似度。无 range 的调用保留原文本启发式（测试与兼容路径）。
+- **同句更新**：range-aware 路径下，同一 `utteranceID` 原地更新；连续 phrase 按 range 连续性与标点合并，不依赖文本前缀相似度。开放 volatile 在下一个不同 range 的 phrase 到达时并入前缀（volatile 可能永远不会收到 final），同句字间按标点规则补空格（句末标点后加空格，CJK 标点不加）。无 range 的调用保留原文本启发式（测试与兼容路径）。
 - **短句抑制**：`isConfident` 对短确认语不自信，沿用上一句语种，减少「嗯 / um」误切。
 - **六语脚本阈值**：中/日/韩/泰/越/英各有独立计数与阈值；`resolvedLanguage` 可按文本重新判定会议行的实际语言。
 - **诊断**：range/`resultsFinalizationTime` 只在引擎消费结果处记录，assembler 的组装行为不读取诊断 sink。
@@ -221,7 +222,7 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 
 翻译 job 的生命周期与 Host 执行分离：
 
-- `TranslationPipeline`（`Duiyi/Features/Shared/TranslationPipeline.swift`，`@MainActor @Observable`）拥有 job 形成、每 utterance 独立防抖、重复抑制、单调 `sequence` 过期判定、已应用 job 去重、preview 有界且 final 不丢的有序 outbound 队列，以及 `sentSourceText` / `lastAppliedSourceCount` / `lastAppliedSequence`。
+- `TranslationPipeline`（`Duiyi/Features/Shared/TranslationPipeline.swift`，`@MainActor @Observable`）拥有 job 形成、每 utterance 独立防抖、重复抑制、单调 `sequence` 过期判定、已应用 job 去重、preview 有界且 final 不丢的有序 outbound 队列，以及 `sentSourceText` / `lastAppliedSourceCount` / `lastAppliedSequence`。`accept` 在应用前按目标语言规范化省略号（中文/日文 `……`，其它语言最多三个 ASCII 点），避免把 ASR 的点串原样显示。
 - `TranslationHostView` / `OneWayTranslationHostView` 只是 `.translationTask` 的泵适配器：live 模式按 ViewModel 的 `outboundRevision` 变化 drain `takeNextOutboundJob()` 到空，逐条 `submit` 给共享 bridge；`TranslationJobPump` 每次唤醒逐条 `session.translate`，成功/失败回调 ViewModel。历史详情仍用单个 `job:` 逐条推进。
 - 两个 ViewModel 只保留 feature 策略与副作用：Conversation 做语言路由与 crosstalk，并把结果写入两侧 pane/transcript；Interpretation 选目标语言、写单栏 pane/transcript 并调度 TTS。`fulfill` 是薄适配器：`pipeline.accept` 返回 `TranslationUpdate` 后写 UI。
 - `TranslationTrigger`（Domain 纯函数）回答非 final 文本是立即发送、进入防抖还是丢弃：句末/从句标点立即发送，≥4 estimated words 防抖，更短丢弃；final 旁路属于 pipeline。

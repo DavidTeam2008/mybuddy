@@ -138,6 +138,25 @@ say -v Tingting "<中文句子>"
 | TTS 播放了但无字幕 | 音量/输出设备不对，或句子太短 | 音量 ≥80、内置扬声器、换长句重试 |
 | 设备原有未结束任务被恢复 | 模块 bootstrap 自动恢复 | 只读查看可；追加/结束任务前先询问用户 |
 
+### 6.1 直接读取设备任务历史（runner 不可用时）
+
+只想核对最新任务的原文/译文，不需要驱动 UI 时，直接拷 App 数据容器（只读，不改设备）：
+
+```bash
+xcrun devicectl device copy from --device <DEVICE_UDID> \
+  --domain-type appDataContainer --domain-identifier com.david.Duiyi \
+  --source "Library/Application Support" --destination /tmp/duiyi-appdata
+sqlite3 "/tmp/duiyi-appdata/Application Support/default.store" \
+  "select t.Z_PK, datetime(t.ZSTARTEDAT+978307200,'unixepoch','localtime') from ZTASKENTITY t order by t.ZSTARTEDAT desc;"
+sqlite3 "/tmp/duiyi-appdata/Application Support/default.store" \
+  "select ZSORTINDEX, ZISFINAL, ZSOURCETEXT, ZTRANSLATEDTEXT from ZTRANSCRIPTENTITY where ZTASK=<pk> order by ZSORTINDEX;"
+```
+
+- 必须同时拷 `default.store`、`default.store-wal`、`default.store-shm`；Core Data 时间戳是 Unix 秒减 `978307200`。
+- 任务表 `ZTASKENTITY`，文字稿表 `ZTRANSCRIPTENTITY`（字段 `ZSORTINDEX` / `ZSOURCETEXT` / `ZTRANSLATEDTEXT` / `ZISFINAL`）。
+- `Library/Caches/TranscriptExports/` 里是用户导出过的文字稿；`Documents/` 里可能有诊断 JSON。
+- 诊断 recorder 是内存态；真机复测后要让用户先在设置页导出，再拷 `Documents`。
+
 ## 7. 记录与收口
 
 - 先在模拟器跑 `tools/test-unit.sh` 与 `tools/check-static.sh`；真机矩阵只补模拟器覆盖不到的部分。
