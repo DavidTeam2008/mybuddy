@@ -70,6 +70,62 @@ struct DiagnosticsRecorderTests {
         #expect(event.resultsFinalizationTime == 13.9)
     }
 
+    @Test("A speech failure records its language, error class, style, and recovery")
+    func speechFailureRecordsErrorClassAndRecovery() throws {
+        let recorder = DiagnosticsRecorder()
+        recorder.beginSession(feature: .faceToFace, taskID: UUID())
+
+        recorder.record(
+            SpeechFailureRecord(
+                language: .english,
+                errorDomain: "kAFAssistantErrorDomain",
+                errorCode: 1101,
+                recovery: .singleFallback,
+                style: "liveCaptions"
+            )
+        )
+
+        let event = try #require(recorder.snapshot().events.first)
+        #expect(event.kind == "speech.failure")
+        #expect(event.feature == FeatureID.faceToFace.rawValue)
+        #expect(event.language == AppLanguage.english.rawValue)
+        #expect(event.errorDomain == "kAFAssistantErrorDomain")
+        #expect(event.errorCode == 1101)
+        #expect(event.recovery == SpeechFailureRecovery.singleFallback.rawValue)
+        #expect(event.style == "liveCaptions")
+    }
+
+    @Test("Speech failure export JSON names restartFailed and carries no text")
+    func speechFailureExportJSON() throws {
+        let recorder = DiagnosticsRecorder()
+        recorder.beginSession(feature: .faceToFace, taskID: UUID())
+        recorder.record(
+            SpeechFailureRecord(
+                language: .zhHans,
+                errorDomain: "SFSpeechErrorDomain",
+                errorCode: 1110,
+                recovery: .restartFailed,
+                style: "liveCaptions"
+            )
+        )
+
+        let data = try #require(recorder.makeExportJSON())
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let events = try #require(object["events"] as? [[String: Any]])
+        #expect(events.count == 1)
+        let event = try #require(events.first)
+        #expect(event["kind"] as? String == "speech.failure")
+        #expect(event["feature"] as? String == FeatureID.faceToFace.rawValue)
+        #expect(event["language"] as? String == AppLanguage.zhHans.rawValue)
+        #expect(event["errorDomain"] as? String == "SFSpeechErrorDomain")
+        #expect(event["errorCode"] as? Int == 1110)
+        #expect(event["recovery"] as? String == SpeechFailureRecovery.restartFailed.rawValue)
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(!text.contains("\"text\""))
+    }
+
     @Test("Translation counters count final jobs, applications, and failures")
     func summaryCountsTranslation() {
         let recorder = DiagnosticsRecorder()

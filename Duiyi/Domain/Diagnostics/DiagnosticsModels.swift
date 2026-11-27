@@ -74,6 +74,33 @@ struct TranslationFailureRecord: Equatable, Sendable {
     var retryCount: Int
 }
 
+/// What the speech engine did after a transcriber consumer threw.
+enum SpeechFailureRecovery: String, Equatable, Sendable {
+    /// A dual-locale session restarted the failed transcriber's language as
+    /// the only transcriber.
+    case singleFallback
+    /// No new recovery was attempted: the session was already single-locale
+    /// or stopping, so the stream ended, or another failure already scheduled
+    /// the fallback that owns the outcome.
+    case none
+    /// The single-locale fallback was attempted but its pipeline failed to
+    /// start, so the stream ended.
+    case restartFailed
+}
+
+/// A speech-pipeline failure. It carries only the failed language, the
+/// error's domain/code, and the recovery decision — never the error message,
+/// caption text, audio, or a device identifier.
+struct SpeechFailureRecord: Equatable, Sendable {
+    var language: AppLanguage
+    /// The `NSError` domain, for example `kAFAssistantErrorDomain`.
+    var errorDomain: String
+    /// The `NSError` code.
+    var errorCode: Int
+    var recovery: SpeechFailureRecovery
+    var style: String
+}
+
 /// One JSON event. Fields are optional by kind; synthesized `Codable` omits
 /// them when nil.
 struct DiagnosticsEvent: Codable, Equatable, Sendable {
@@ -107,6 +134,9 @@ struct DiagnosticsEvent: Codable, Equatable, Sendable {
     var retryCount: Int?
     var failure: String?
     var reason: String?
+    var errorDomain: String?
+    var errorCode: Int?
+    var recovery: String?
 }
 
 /// Aggregate counters for one task. They are maintained incrementally so a

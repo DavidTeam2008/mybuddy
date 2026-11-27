@@ -21,6 +21,13 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     private var stopDepth = 0
     private var isStopping: Bool { stopDepth > 0 }
     private var usingDual = true
+    /// True from the moment a dual transcriber failure schedules a single-locale
+    /// fallback until that fallback finishes. Other failing consumers defer to
+    /// the in-flight restart instead of finishing the stream themselves.
+    private var isRecoveringFromTranscriberFailure = false
+    /// The scheduled single-locale fallback. `stop()` cancels it so a failure
+    /// reported just before a pause cannot restart the microphone afterwards.
+    private var fallbackTask: Task<Void, Never>?
     private static let stopDrain: Duration = .milliseconds(300)
     private static let finalizeTimeout: Duration = .seconds(1)
     /// How long a silence boundary waits for the transcriber's own final after
@@ -45,6 +52,7 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         style: SpeechRecognitionStyle
     ) async throws -> AsyncStream<Utterance> {
         await stop()
+        isRecoveringFromTranscriberFailure = false
         assembler.reset()
         lastFinalSignature = nil
         self.style = style
@@ -74,6 +82,8 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         stopDepth += 1
         defer { stopDepth -= 1 }
 
+        fallbackTask?.cancel()
+        fallbackTask = nil
         silenceTask?.cancel()
         silenceTask = nil
         audioTask?.cancel()
@@ -230,13 +240,15 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         consume(detector: detector)
     }
 
-    private func startSinglePipeline(language: AppLanguage) async throws {
-        // Trust the single transcriber only when the session was genuinely
-        // requested as one language. A dual request that degraded after a
-        // resource limit keeps the strict gate, and meeting notes stay strict.
-        assembler.languagePurity = requestedLanguageCount <= 1 && style != .meetingNotes
-            ? .trustedLocale
-            : .strict
+    private func startSinglePipeline(
+        language: AppLanguage,
+        forceTrustedLocale: Bool = false
+    ) async throws {
+        assembler.languagePurity = Self.singleLocalePurity(
+            forceTrustedLocale: forceTrustedLocale,
+            requestedLanguageCount: requestedLanguageCount,
+            style: style
+        )
         singleLanguage = language
         let locale = try await resolvedLocale(for: language)
         try await reserve([locale])
@@ -311,9 +323,93 @@ actor BilingualSpeechEngine: SpeechRecognizing {
                     return
                 } catch {
                     DuiyiLog.speech.error("Transcriber failed: \(error.localizedDescription, privacy: .public)")
-                    await self?.fail()
+                    let nsError = error as NSError
+                    await self?.handleTranscriberFailure(
+                        language: language,
+                        errorDomain: nsError.domain,
+                        errorCode: nsError.code
+                    )
                 }
             }
+        )
+    }
+
+    /// A dual-locale failure restarts the failed language as the only
+    /// transcriber. The restart runs on a separate task because it cancels the
+    /// consume tasks, including the one that reported this failure; calling it
+    /// inline would make the failing consumer cancel itself.
+    private func handleTranscriberFailure(
+        language: AppLanguage,
+        errorDomain: String,
+        errorCode: Int
+    ) {
+        let plan = Self.transcriberFailurePlan(
+            usingDual: usingDual,
+            isStopping: isStopping,
+            isRecovering: isRecoveringFromTranscriberFailure
+        )
+        recordSpeechFailure(
+            language: language,
+            errorDomain: errorDomain,
+            errorCode: errorCode,
+            recovery: plan.recovery
+        )
+        if plan.failStream {
+            fail()
+            return
+        }
+        guard plan.recovery == .singleFallback else { return }
+        isRecoveringFromTranscriberFailure = true
+        fallbackTask = Task { [weak self] in
+            await self?.fallbackToSingle(language: language)
+        }
+    }
+
+    private func fallbackToSingle(language: AppLanguage) async {
+        defer {
+            isRecoveringFromTranscriberFailure = false
+            fallbackTask = nil
+        }
+        guard !Task.isCancelled else { return }
+        guard !isStopping else {
+            fail()
+            return
+        }
+        DuiyiLog.speech.info(
+            "Falling back to single locale \(language.rawValue, privacy: .public) after transcriber failure"
+        )
+        do {
+            try await restartPipelineSingle(language: language, forceTrustedLocale: true)
+        } catch {
+            guard !Task.isCancelled else { return }
+            DuiyiLog.speech.error(
+                "Single locale fallback failed: \(error.localizedDescription, privacy: .public)"
+            )
+            let nsError = error as NSError
+            recordSpeechFailure(
+                language: language,
+                errorDomain: nsError.domain,
+                errorCode: nsError.code,
+                recovery: .restartFailed
+            )
+            fail()
+        }
+    }
+
+    private func recordSpeechFailure(
+        language: AppLanguage,
+        errorDomain: String,
+        errorCode: Int,
+        recovery: SpeechFailureRecovery
+    ) {
+        diagnostics.record(
+            SpeechFailureRecord(
+                language: language,
+                errorDomain: errorDomain,
+                errorCode: errorCode,
+                recovery: recovery,
+                style: styleName
+            )
         )
     }
 
@@ -448,6 +544,47 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         utterance.isFinal && !utterance.isRevision
     }
 
+    /// What a failed transcriber consumer should do. Pure so the fallback
+    /// branches stay unit-testable without constructing `SpeechTranscriber`s.
+    struct SpeechFailurePlan: Equatable, Sendable {
+        var recovery: SpeechFailureRecovery
+        var failStream: Bool
+    }
+
+    nonisolated static func transcriberFailurePlan(
+        usingDual: Bool,
+        isStopping: Bool,
+        isRecovering: Bool
+    ) -> SpeechFailurePlan {
+        if isStopping {
+            return SpeechFailurePlan(recovery: .none, failStream: true)
+        }
+        if isRecovering {
+            // Another failure already scheduled the fallback; let that task
+            // own the outcome instead of ending the stream from here.
+            return SpeechFailurePlan(recovery: .none, failStream: false)
+        }
+        if usingDual {
+            return SpeechFailurePlan(recovery: .singleFallback, failStream: false)
+        }
+        return SpeechFailurePlan(recovery: .none, failStream: true)
+    }
+
+    /// A genuinely single-locale request trusts its transcriber; a degraded
+    /// dual request and meeting notes stay strict. A failure fallback is an
+    /// explicit single-locale pipeline, so it forces trusted locale even when
+    /// the session originally requested two.
+    nonisolated static func singleLocalePurity(
+        forceTrustedLocale: Bool,
+        requestedLanguageCount: Int,
+        style: SpeechRecognitionStyle
+    ) -> SpeechLanguagePurity {
+        if forceTrustedLocale { return .trustedLocale }
+        return requestedLanguageCount <= 1 && style != .meetingNotes
+            ? .trustedLocale
+            : .strict
+    }
+
     private func handleVoiceActivity(_ speechDetected: Bool) {
         if speechDetected {
             silenceTask?.cancel()
@@ -507,26 +644,43 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private func scheduleSingleLocaleSwitchIfNeeded(to language: AppLanguage) {
-        guard !isStopping, !usingDual, language != singleLanguage else { return }
+        guard !isStopping,
+              !usingDual,
+              !isRecoveringFromTranscriberFailure,
+              language != singleLanguage else { return }
         Task { [weak self] in
             await self?.restartSingle(language: language)
         }
     }
 
+    /// The ordinary single-locale drift switch. It keeps the existing purity
+    /// rule: an explicit single-locale request is trusted, while a degraded
+    /// dual request and meeting notes stay strict.
     private func restartSingle(language: AppLanguage) async {
-        guard !isStopping else { return }
-        DuiyiLog.speech.info("Switching single transcriber to \(language.rawValue, privacy: .public)")
-        await resetPipelineKeepingStream()
-        guard !isStopping else { return }
-        assembler.reset()
+        guard !isStopping, !isRecoveringFromTranscriberFailure else { return }
         do {
-            try await startSinglePipeline(language: language)
-            guard !isStopping else { return }
-            usingDual = false
+            try await restartPipelineSingle(language: language)
         } catch {
             DuiyiLog.speech.error("Single locale restart failed: \(error.localizedDescription, privacy: .public)")
             fail()
         }
+    }
+
+    /// Shared single-locale restart for the drift switch and the failure
+    /// fallback. Throws when the new pipeline cannot start so the caller can
+    /// decide whether to record `restartFailed` and finish the stream.
+    private func restartPipelineSingle(
+        language: AppLanguage,
+        forceTrustedLocale: Bool = false
+    ) async throws {
+        guard !Task.isCancelled, !isStopping else { return }
+        DuiyiLog.speech.info("Switching single transcriber to \(language.rawValue, privacy: .public)")
+        await resetPipelineKeepingStream()
+        guard !Task.isCancelled, !isStopping else { return }
+        assembler.reset()
+        try await startSinglePipeline(language: language, forceTrustedLocale: forceTrustedLocale)
+        guard !Task.isCancelled, !isStopping else { return }
+        usingDual = false
     }
 
     private func resolvedLocale(for language: AppLanguage) async throws -> Locale {

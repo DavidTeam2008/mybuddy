@@ -405,7 +405,7 @@ MeetingRecognition.languages(multilingual:pinned:display:)
 - **翻译可用性**：`TranslationAvailabilityService` 双向查 `LanguageAvailability` 并合并状态。
 - **权限**：`PermissionService` 映射麦克风/语音识别四态；`requestAccess` 先麦后音后重查。
 - **语言目录**：生产注入 `SystemLanguageCatalog`，由 `SpeechTranscriber.supportedLocale`、`LanguageAvailability`、`AVSpeechSynthesizer` 探针填充缓存；当前只有首页设置消费，v1 扩展到所有语言入口。
-- **诊断（P1-4a）**：`DiagnosticsRecorder` 是唯一实现，`AppEnvironment` 注入；`TaskLifecycle` 在任务开始/恢复/结束处 begin/end 会话，结束后迟到的事件仍归最近结束任务。ring buffer 默认 4096 事件，聚合计数独立累加；DEBUG 设置页写 `Documents/duiyi-diagnostics-<时间>.json` 并 ShareLink，不上传。ASR 事件在引擎消费 `SpeechTranscriber.Result` 处记录 `range`/`resultsFinalizationTime`/synthetic/脚本不匹配，不改组装行为。
+- **诊断（P1-4a）**：`DiagnosticsRecorder` 是唯一实现，`AppEnvironment` 注入；`TaskLifecycle` 在任务开始/恢复/结束处 begin/end 会话，结束后迟到的事件仍归最近结束任务。ring buffer 默认 4096 事件，聚合计数独立累加；DEBUG 设置页写 `Documents/duiyi-diagnostics-<时间>.json` 并 ShareLink，不上传。ASR 事件在引擎消费 `SpeechTranscriber.Result` 处记录 `range`/`resultsFinalizationTime`/synthetic/脚本不匹配，不改组装行为。`speech.failure` 记录失败语言、错误 domain/code 与恢复决策（`singleFallback`/`none`/`restartFailed`），不写错误文案。
 
 ---
 
