@@ -298,6 +298,21 @@ TranslationSession.Configuration(
 
 ### 6.1 面对面
 
+默认是**手动换手**（`ConversationListeningMode.manual`）：
+
+```
+点一侧 → activeSpeaker（user/peer）；无 active 时中间控制默认 user
+  → 单路 [activeSpeaker 的语言]（切 turn：pause → drain → start）
+  → projection.ingest(utterance, pane: listener = activeSpeaker.opposite, speaker: speaker)
+  → enqueueTranslation（target = listener 的语言）→ TranslationPipeline.submit → TranslationHostView
+  → fulfill → TranslationPipeline.accept → projection.applyTranslation
+  → settled 时 TaskLifecycle.persist(projection.transcript)（250ms 防抖）
+```
+
+- 手动模式不跑 `shouldIgnoreCrosstalk`/`LanguageRouter`；pane 固定为听者侧；迟到 final 仍按 utterance ID pin。
+- 新任务不自动开始（即使 `autoStartListening` 为 true）；暂停恢复保留 active；换语言/对调/新任务/结束清空 active。
+- 自动模式是备选，保留原来的语种路由流水线：
+
 ```
 Utterance
   → shouldIgnoreCrosstalk（final 后 1s、异语、非自信 → 丢弃）
