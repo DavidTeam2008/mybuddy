@@ -127,6 +127,43 @@ say -v Tingting "<中文句子>"
 - 能证明 ASR 抓到内容、翻译语义正确、字幕路由到正确 pane。
 - 不能证明翻译地道程度、TTS 实际出声、延迟、长时稳定性；voiceOut 需要耳机 + 人耳，crosstalk 需要受控时序，2 万字需要长时连续语音。
 
+### 5.1 夹具注入（DEBUG，无需安静环境）
+
+Debug 构建支持把固定音频直接喂给听写链路，代替“Mac 播放 → 功放 → 麦克风采集”。注入点是 `AudioCapturing`：`FixtureAudioCapturer` 按生产 tap 的 1024 帧、原生格式读文件，`BilingualSpeechEngine.ingest`、`BufferConverter`、`SpeechAnalyzer`、`SpeechTranscriber`、`UtteranceAssembler`、翻译、字幕与 SwiftData 都不变。麦克风、ADC、房间声学、真实路由不在链路内。
+
+```bash
+# 默认：docs/media/TED.mp3 的 08:31–21:36，48 kHz 单声道，1× 实时，约 13.5 分钟
+tools/fixture-run.sh
+
+# 常用变体
+tools/fixture-run.sh --run-id ted-2 --noise     # Mac 外放人声，证环境无关
+tools/fixture-run.sh --codec m4a                 # 9 MB 级夹具，便于快速传输
+tools/fixture-run.sh --pacing max                # 只用于 ASR 筛选，墙钟窗口不保真
+tools/fixture-run.sh --start 511 --duration 30 --ground-truth /tmp/gt-30s.tsv --min-coverage 0.5
+```
+
+前置：`Config/Local.xcconfig`、已连接的物理 iPhone、`ffmpeg`、`python3`、`docs/media/TED.mp3`。脚本会构建/安装 Debug、把夹具推到 App `Documents`、用 `-duiyi.fixtureAudio` 启动、轮询 `fixture-run-done.json`、结束 App、拉取证据并用 `tools/fixture-score.py` 计分。证据在 `.device-state/fixture-runs/<run-id>/`，不提交。
+
+运行参数（也可手工传给 `devicectl device process launch`）：
+
+| 参数 | 作用 |
+| --- | --- |
+| `-duiyi.fixtureAudio <path>` | 夹具路径；相对 `Documents` 或绝对路径。出现即启用注入 |
+| `-duiyi.fixtureAutoRun YES` | 自动建任务、开始聆听、EOF 后结束并导出；`NO` 则只注入，手动操作 UI |
+| `-duiyi.fixturePacing realtime\|max` | 1× 墙钟节拍或全速喂入 |
+| `-duiyi.fixtureSettleSeconds <n>` | EOF 后等待翻译落定的秒数（默认 10） |
+| `-duiyi.fixtureDeleteAfterRun YES` | 结束后删除设备上的夹具；脚本复用 `fixture-current.<ext>`，避免 72 MB 文件堆积 |
+| `-duiyi.storeFile fixture-<id>` | 隔离 SwiftData，避免污染真实历史 |
+
+判定边界：
+
+- 能证明：文件音频走真实 ASR/组装/翻译/落库；同一夹具可重复；房间噪声不进入字幕；`EOF → endTask → 最后 final/译文` 的收口。
+- 不能证明：麦克风硬件、音频路由/回声、真实 TTS 出声、房间噪声下的 ASR 鲁棒性、长时热/内存稳定性。发布前的安静房间声学冒烟仍保留。
+- 1× 是常规回归口径：1.1 s 静音 finalize、40/90 ms 翻译防抖、380 ms TTS 结算都是墙钟；`max` 只用于 ASR 文本筛选，不用于句界/延迟结论。
+- 翻译语义质量不由脚本判定；`score.json` 只给源文覆盖/精确匹配/WER、前缀重复、空译、U+FFFD、中文译文行数。语义评审按 `docs/research/simultaneous-translation-quality.md` 的口径另做 LLM + 人工。
+
+实现约束：所有夹具代码在 `#if DEBUG` 下，Release 不编译；不改 `UtteranceAssembler`/翻译语义；不 mock `SpeechTranscriber.isAvailable`；真机结果才算数。
+
 ## 6. 常见故障
 
 | 现象 | 原因 | 处理 |

@@ -468,12 +468,12 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private func finalizeFromSilence() async {
-        guard !isStopping, assembler.hasOpenRange else { return }
-        // Ask the analyzer to finalize the open range. The transcriber's own
-        // final is preferred; the synthetic final below is only a timeout
-        // fallback. `finalize(through: nil)` finalizes everything received so
-        // far while analysis continues.
-        if let analyzer {
+        guard !isStopping, assembler.hasOpenRow else { return }
+        // Ask the analyzer to finalize only when a volatile tail still exists.
+        // A row made only of finalized phrases has nothing to synthesize; the
+        // silence timer just advances the row boundary so a long pause cannot
+        // be swallowed by the next contiguous range.
+        if assembler.hasOpenRange, let analyzer {
             do {
                 try await analyzer.finalize(through: nil)
             } catch {
