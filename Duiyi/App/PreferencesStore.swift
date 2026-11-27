@@ -17,6 +17,10 @@ final class PreferencesStore {
         static let showsSource = "duiyi.showsSourceLine"
         static let meetingLanguage = "duiyi.meetingLanguage"
         static let meetingMultilingual = "duiyi.meetingMultilingual.v2"
+        #if DEBUG
+        static let debugForceSingleLocale = "duiyi.debug.forceSingleLocale"
+        static let debugSingleLocaleUsesPeer = "duiyi.debug.singleLocaleUsesPeer"
+        #endif
     }
 
     private let defaults: UserDefaults
@@ -72,6 +76,20 @@ final class PreferencesStore {
     var meetingRecognizesMultipleLanguages: Bool {
         didSet { defaults.set(meetingRecognizesMultipleLanguages, forKey: Key.meetingMultilingual) }
     }
+
+    #if DEBUG
+    /// A/B experiment switch: force the next face-to-face listening request to
+    /// a single locale. Off is the production dual-locale request.
+    var debugForceSingleLocale: Bool {
+        didSet { defaults.set(debugForceSingleLocale, forKey: Key.debugForceSingleLocale) }
+    }
+
+    /// The single locale used when `debugForceSingleLocale` is on: `true`
+    /// selects the peer language, `false` the user's language.
+    var debugSingleLocaleUsesPeer: Bool {
+        didSet { defaults.set(debugSingleLocaleUsesPeer, forKey: Key.debugSingleLocaleUsesPeer) }
+    }
+    #endif
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -136,5 +154,13 @@ final class PreferencesStore {
         } else {
             meetingRecognizesMultipleLanguages = defaults.bool(forKey: Key.meetingMultilingual)
         }
+        #if DEBUG
+        debugForceSingleLocale = defaults.bool(forKey: Key.debugForceSingleLocale)
+        if defaults.object(forKey: Key.debugSingleLocaleUsesPeer) == nil {
+            debugSingleLocaleUsesPeer = true
+        } else {
+            debugSingleLocaleUsesPeer = defaults.bool(forKey: Key.debugSingleLocaleUsesPeer)
+        }
+        #endif
     }
 }

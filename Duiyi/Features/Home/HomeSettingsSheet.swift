@@ -62,6 +62,7 @@ struct HomeSettingsSheet: View {
                     .disabled(isRedownloading)
 
                     #if DEBUG
+                    debugRecognitionSection
                     diagnosticsSection
                     #endif
 
@@ -91,6 +92,69 @@ struct HomeSettingsSheet: View {
     }
 
     #if DEBUG
+    /// A/B fixture for the face-to-face recognition plan. Off is the
+    /// production dual-locale request; on forces one transcriber. The switch
+    /// is read when the next listening request is built.
+    private var debugRecognitionSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(
+                isOn: Binding(
+                    get: { environment.preferences.debugForceSingleLocale },
+                    set: { environment.preferences.debugForceSingleLocale = $0 }
+                )
+            ) {
+                Text(debugCopy.forceSingleLocale)
+                    .font(.footnote)
+                    .foregroundStyle(Tokens.textSecondary)
+            }
+            .accessibilityIdentifier("debug-force-single-locale")
+
+            if environment.preferences.debugForceSingleLocale {
+                Picker(
+                    debugCopy.singleLocaleSide,
+                    selection: Binding(
+                        get: { environment.preferences.debugSingleLocaleUsesPeer },
+                        set: { environment.preferences.debugSingleLocaleUsesPeer = $0 }
+                    )
+                ) {
+                    Text(debugCopy.userLanguage).tag(false)
+                    Text(debugCopy.peerLanguage).tag(true)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("debug-single-locale-side")
+
+                Text(debugCopy.hint)
+                    .font(.caption)
+                    .foregroundStyle(Tokens.textSecondary)
+            }
+        }
+    }
+
+    private var debugCopy: (
+        forceSingleLocale: String,
+        singleLocaleSide: String,
+        userLanguage: String,
+        peerLanguage: String,
+        hint: String
+    ) {
+        if language == .zhHans {
+            return (
+                "面对面单路听写（DEBUG）",
+                "单路语种",
+                "我的语言",
+                "对方语言",
+                "仅影响下一次面对面开始听写。A/B：关闭 = 双路；开启 = 单路。"
+            )
+        }
+        return (
+            "Face-to-face single locale (DEBUG)",
+            "Single locale",
+            "My language",
+            "Their language",
+            "Applies the next time face-to-face starts listening. A/B: off = dual; on = single."
+        )
+    }
+
     /// Per-task diagnostics written to Documents; the share sheet and
     /// `devicectl` can both retrieve the JSON. Nothing is uploaded.
     private var diagnosticsSection: some View {

@@ -157,6 +157,12 @@ sqlite3 "/tmp/duiyi-appdata/Application Support/default.store" \
 - `Library/Caches/TranscriptExports/` 里是用户导出过的文字稿；`Documents/` 里可能有诊断 JSON。
 - 诊断 recorder 是内存态；真机复测后要让用户先在设置页导出，再拷 `Documents`。
 
+### 6.2 面对面单路 A/B（DEBUG）
+
+1. 首页右上角齿轮 → 设置 → DEBUG 区「面对面单路听写（DEBUG）」，关闭 = 双路（A），开启 +「对方语言」= 单路（B）；改动在下一次开始听写时生效。
+2. 同一台 iPhone、同一摆放、同一段音频；每臂跑 3 次并交错，导出诊断 JSON 时在文件名标注 `A` / `B-peer` / `B-user`。
+3. 指标与判定见 [`docs/research/face-to-face-dual-locale-quality.md`](../research/face-to-face-dual-locale-quality.md) §3.3–3.4；Release 构建不包含该开关。
+
 ## 7. 记录与收口
 
 - 先在模拟器跑 `tools/test-unit.sh` 与 `tools/check-static.sh`；真机矩阵只补模拟器覆盖不到的部分。

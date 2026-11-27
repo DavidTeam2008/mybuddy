@@ -80,6 +80,14 @@ H2 目前证据偏弱：面对面英文拒绝率 29.4%，同传 28.3%，几乎�
 
 执行顺序：先 A/B（便宜、能直接回答 H1）；若 B 明显优于 A，再做 C（需要改引擎/原型）；若 A≈B，优先查 H3（摆放/声学），D 可选。
 
+### 3.2.1 DEBUG 单路开关（已实现）
+
+- 位置：首页右上角齿轮 → 设置 → DEBUG 区「面对面单路听写（DEBUG）」。
+- 关闭 = 臂 A（当前双路，生产默认）；开启 +「对方语言」= 臂 B（英文单路，用于英文 TED）；开启 +「我的语言」= 反向单路。
+- 设置持久化；改变在**下一次开始听写**时生效，不会热切当前流。
+- 导出诊断 JSON 时在文件名/记录表标注 `A` / `B-peer` / `B-user`；JSON 本身不含臂字段（若出现 `zhHans` ASR 事件，说明至少跑过双路，可辅助核对）。
+- Release 构建不编译该开关，不影响生产请求。单测：`ConversationViewModelTests.debugSingleLocaleStartsPeerOnly` / `debugSingleLocaleStartsUserOnly`。
+
 ### 3.3 指标
 
 主指标（词级质量）：
