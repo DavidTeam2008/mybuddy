@@ -130,3 +130,22 @@ H2 目前证据偏弱：面对面英文拒绝率 29.4%，同传 28.3%，几乎�
 - 路线图：`docs/04-roadmap.md` P1-3（ASR 精度 A/B）与 P1-1（range 组装）。
 - 同传质量基线：`docs/research/simultaneous-translation-quality.md`。
 - 诊断导出：`docs/agents/device-testing.md` §6.1。
+
+## 6. 2026-11-27 首轮 A/B 结果（单路 vs 双路）
+
+> iPhone 13，面对面，同一段 TED；单路 task 12（07:19:27–07:22:01），双路 task 13（07:24:24–07:27:27）。单路开关：DEBUG「对方语言」。
+
+| 指标 | 单路 | 双路 |
+| --- | --- | --- |
+| ASR 结果 | 470（全英文） | 1095（中文 687，全部被拒；英文 408） |
+| English final | 35 | 37 |
+| settled 行 | 29 | 34 |
+| 拒绝率 | 23.4% | 英文约 29.9%，中文 100% |
+| 结束 | 正常 | 英文 ASR 在 07:27:05 后停止，中文继续到 07:27:15，07:27:27 结束；收听按钮红（`.failed(.recognitionInterrupted)`） |
+
+观察：
+
+- 单路开关生效：单路 JSON 没有任何 `zhHans` ASR 事件。
+- 双路的 English stream 先停、中文流继续但全被拒；疑似一个 transcriber 失败后引擎结束了整条 utterance stream。诊断目前只记录 ASR 结果，没有 speech failure 事件（哪个 transcriber/什么错误），这是 P0-6b 的缺口。
+- 单路与同传的 ASR 请求相同（`[english]`、`.trustedLocale`、`.liveCaptions`），final 率也接近（约 0.227/s vs 0.230/s）。文字稿并非全面退化：单路在 `Highlight her female identity`、`your circumstances`、`Cameron Russell`、`doctor's lab coat`、`They'll perform better` 等行更好；坏行集中在 `agstic`、`. of the painters coat`、`noich`、孤立的 `we`、末行合并。双路/同传也有自己的坏行。
+- 结论：这次数据不支持“单路全面差于同传”；差异更像手机摆放/声学 + 单次波动。双路则明确更贵、更脆。下一步先做**同摆放**的 single vs simultaneous 对照，再决定是否把手动 turn + 单活跃 locale 作为面对面模式。
