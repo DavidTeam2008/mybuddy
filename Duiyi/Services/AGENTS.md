@@ -36,6 +36,7 @@
 ## 4. 测试替身与边界
 
 - 单测用假实现：假引擎（记录 start/stop、可手动 emit）、`InMemoryTaskStore`（已是 `TaskStoreV2`）、失败注入用 `DuiyiTests/StorageTestSupport.swift` 的 `ScriptedTaskStore`、假合成器、假 audio session；不得连真麦克风/真模型。
+- 真机夹具回放是 DEBUG-only 的 `AudioCapturing` 替身（`Services/Audio/FixtureAudioCapturer`）：只替换采集源，按 1024 帧、原生格式喂文件，后面的 `BilingualSpeechEngine`/`BufferConverter`/`SpeechAnalyzer`/assembler/翻译/落库必须是真的；不得换成 mock 引擎或 mock `TranslationSession`。1× 节拍是墙钟语义的常规口径，`max` 只用于 ASR 文本筛选。入口 `tools/fixture-run.sh`，详见 `docs/agents/device-testing.md` §5.1。
 - **不得 mock 能力检查**（如 `SpeechTranscriber.isAvailable`）来让模拟器用例变绿；语音/翻译/TTS/音频/持久化的最终验收在真机。
 - 新协议放 `ServiceProtocols.swift` 或所属目录，由 `AppEnvironment` 注入；预览替身放 `App/PreviewSupport.swift`。
 - 分层：Services 不引用 ViewModel；Domain 不 import SwiftUI/语音/翻译/SwiftData；由 code review 与测试保证（原 `make check-arch` 未随提取保留）。
