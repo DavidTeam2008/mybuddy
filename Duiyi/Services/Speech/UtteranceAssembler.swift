@@ -594,11 +594,11 @@ struct UtteranceAssembler: Sendable {
 
     /// The row's text: finalized phrases in audio order plus the open tail.
     private static func joinedText(of state: LanguageRangeState) -> String {
-        var parts = state.finalized.map(\.text)
+        var phrases = state.finalized
         if let volatile = state.volatile {
-            parts.append(volatile.text)
+            phrases.append(volatile)
         }
-        return joinPhrases(parts)
+        return joinPhrases(phrases)
     }
 
     private func closedRangeMatch(
@@ -685,11 +685,21 @@ struct UtteranceAssembler: Sendable {
         return utterance
     }
 
-    private static func joinPhrases(_ parts: [String]) -> String {
+    private static func joinPhrases(_ phrases: [RangePhrase]) -> String {
         var joined = ""
-        for part in parts {
-            let piece = part.trimmingCharacters(in: .whitespacesAndNewlines)
+        for phrase in phrases {
+            let piece = phrase.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !piece.isEmpty else { continue }
+            // A trailing ellipsis marks a phrase the transcriber has not
+            // finished. When another phrase continues the row, the ellipsis
+            // is a continuation mark, not punctuation: drop it but keep the
+            // normal word spacing. Do not concatenate the fragments: the
+            // missing phoneme cannot be recovered, and joining "di" + "nostic"
+            // into a fabricated word would hide that loss.
+            let dots = trailingDotCount(joined)
+            if dots >= 2 {
+                joined.removeLast(dots)
+            }
             if let last = joined.last, let first = piece.first,
                requiresSpace(between: last, and: first) {
                 joined.append(" ")
@@ -697,6 +707,15 @@ struct UtteranceAssembler: Sendable {
             joined += piece
         }
         return joined
+    }
+
+    private static func trailingDotCount(_ text: String) -> Int {
+        var count = 0
+        for character in text.reversed() {
+            guard character == "." else { break }
+            count += 1
+        }
+        return count
     }
 
     private static func requiresSpace(between left: Character, and right: Character) -> Bool {
@@ -748,6 +767,24 @@ struct UtteranceAssembler: Sendable {
             if "\"'”’)]）】」』".contains(character) {
                 index = previous
                 continue
+            }
+            if character == "." {
+                // One dot ends a sentence; a run of dots is the transcriber's
+                // continuation marker for a phrase that is still open.
+                var dotIndex = index
+                var dotCount = 0
+                while dotIndex > trimmed.startIndex {
+                    let previousDot = trimmed.index(before: dotIndex)
+                    guard trimmed[previousDot] == "." else { break }
+                    dotCount += 1
+                    dotIndex = previousDot
+                }
+                if dotCount > 1 { return false }
+                if dotIndex > trimmed.startIndex,
+                   trimmed[trimmed.index(before: dotIndex)] == "…" {
+                    return false
+                }
+                return true
             }
             return ".?!。？！".contains(character)
         }
