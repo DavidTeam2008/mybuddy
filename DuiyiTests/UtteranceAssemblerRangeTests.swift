@@ -45,8 +45,8 @@ struct UtteranceAssemblerRangeTests {
         #expect(second.isFinal == false)
     }
 
-    @Test("Contiguous final phrases join until a sentence terminator")
-    func contiguousFinalsJoinUntilPunctuation() throws {
+    @Test("Contiguous final phrases join until a real audio gap")
+    func contiguousFinalsJoinUntilRealGap() throws {
         var assembler = UtteranceAssembler()
         let first = try requireIngest(
             &assembler, "The best designs came", range(0, 2), isFinal: true
@@ -63,19 +63,36 @@ struct UtteranceAssemblerRangeTests {
         #expect(second.isFinal == true)
         #expect(second.isRevision == true)
 
-        let next = try requireIngest(&assembler, "Thank you.", range(5.5, 7), isFinal: true)
+        // 0.8 s is past the row gap limit; punctuation is not the boundary.
+        let next = try requireIngest(&assembler, "Thank you.", range(5.8, 7), isFinal: true)
         #expect(next.id != second.id)
         #expect(next.text == "Thank you.")
     }
 
-    @Test("A sentence-terminator final closes the row before the next final")
-    func punctuationFinalClosesRow() throws {
+    @Test("A period does not close a contiguous punctuated final")
+    func punctuationFinalKeepsContiguousRow() throws {
         var assembler = UtteranceAssembler()
         let first = try requireIngest(
             &assembler, "Hello there.", range(0, 2), isFinal: true
         )
         let second = try requireIngest(
             &assembler, "How are you?", range(2, 4), isFinal: true
+        )
+
+        #expect(first.id == second.id)
+        #expect(second.text == "Hello there. How are you?")
+        #expect(second.isFinal == true)
+        #expect(second.isRevision == true)
+    }
+
+    @Test("A period followed by a real gap starts a new row")
+    func punctuatedFinalThenGapStartsNextRow() throws {
+        var assembler = UtteranceAssembler()
+        let first = try requireIngest(
+            &assembler, "Hello there.", range(0, 2), isFinal: true
+        )
+        let second = try requireIngest(
+            &assembler, "How are you?", range(2.8, 4.8), isFinal: true
         )
 
         #expect(first.id != second.id)
@@ -344,7 +361,7 @@ struct UtteranceAssemblerRangeTests {
         let second = try requireIngest(
             &assembler,
             ",.. she didn't follow up on it.",
-            range(2, 4),
+            range(2.8, 4.8),
             isFinal: true
         )
 
@@ -426,6 +443,127 @@ struct UtteranceAssemblerRangeTests {
 
         #expect(first.id != second.id)
         #expect(second.text == "Maybe tomorrow.")
+    }
+
+    @Test("Contiguous punctuated finals stay one row")
+    func contiguousPunctuatedFinalsStayOneRow() throws {
+        var assembler = UtteranceAssembler()
+        let first = try requireIngest(
+            &assembler,
+            "The shame of not believing.",
+            range(139.64, 142.10),
+            isFinal: true
+        )
+        let second = try requireIngest(
+            &assembler,
+            "We deserve it.",
+            range(142.10, 143.12),
+            isFinal: true
+        )
+
+        #expect(first.id == second.id)
+        #expect(second.text == "The shame of not believing. We deserve it.")
+        #expect(second.isFinal == true)
+        #expect(second.isRevision == true)
+    }
+
+    @Test("A final-only row is closed by silence for the next phrase")
+    func silenceClosesFinalOnlyRow() throws {
+        var assembler = UtteranceAssembler()
+        let first = try requireIngest(
+            &assembler, "Hello there.", range(0, 2), isFinal: true
+        )
+
+        let silence = assembler.silenceTimedOut()
+        #expect(silence == nil)
+        #expect(assembler.hasOpenRow == false)
+
+        // No 0.75 s gap: only the silence close can give this a new id.
+        let next = try requireIngest(
+            &assembler, "How are you?", range(2.2, 4.2), isFinal: true
+        )
+        #expect(next.id != first.id)
+        #expect(next.text == "How are you?")
+    }
+
+    @Test("Three contiguous punctuated sentences stay one row")
+    func threeContiguousPunctuatedSentencesStayOneRow() throws {
+        var assembler = UtteranceAssembler()
+        let first = try requireIngest(
+            &assembler, "We don't always know how to hope.", range(10, 12), isFinal: true
+        )
+        _ = try requireIngest(
+            &assembler, "Or say yes, or choose.", range(12, 13.5), isFinal: true
+        )
+        let third = try requireIngest(
+            &assembler,
+            "big thing. Even when it's right in front of us.",
+            range(13.5, 16),
+            isFinal: true
+        )
+
+        #expect(first.id == third.id)
+        #expect(
+            third.text
+                == "We don't always know how to hope. Or say yes, or choose. big thing. Even when it's right in front of us."
+        )
+    }
+
+    @Test("A row longer than the duration cap closes at a phrase boundary")
+    func maxDurationCapClosesAtPhraseBoundary() throws {
+        var assembler = UtteranceAssembler()
+        var ids: [UUID] = []
+        for index in 0..<7 {
+            let start = Double(index) * 2.2
+            let value = try requireIngest(
+                &assembler,
+                "Sentence number \(index + 1).",
+                range(start, start + 2.2),
+                isFinal: true
+            )
+            ids.append(value.id)
+        }
+
+        #expect(ids[0] == ids[5])
+        #expect(ids[6] != ids[5])
+    }
+
+    @Test("A row longer than the character cap closes at a phrase boundary")
+    func maxCharacterCapClosesAtPhraseBoundary() throws {
+        var assembler = UtteranceAssembler()
+        var ids: [UUID] = []
+        for index in 0..<6 {
+            let start = Double(index)
+            let value = try requireIngest(
+                &assembler,
+                "This is a deliberately long sentence number \(index + 1).",
+                range(start, start + 1),
+                isFinal: true
+            )
+            ids.append(value.id)
+        }
+
+        #expect(Set(ids).count > 1)
+    }
+
+    @Test("The cap does not close a row with a volatile tail")
+    func capDoesNotCloseVolatileRow() throws {
+        var assembler = UtteranceAssembler()
+        var first: Utterance?
+        var last: Utterance?
+        for index in 0..<7 {
+            let start = Double(index) * 2.2
+            let value = try requireIngest(
+                &assembler,
+                "volatile phrase number \(index + 1)",
+                range(start, start + 2.2)
+            )
+            first = first ?? value
+            last = value
+        }
+
+        #expect(first?.id == last?.id)
+        #expect(last?.isFinal == false)
     }
 
     @Test("A late final for the silence-closed tail keeps the finalized prefix")

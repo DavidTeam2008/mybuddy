@@ -88,6 +88,10 @@ struct UtteranceAssembler: Sendable {
     private static let rangeGapLimit: TimeInterval = 0.75
     /// Recently closed rows remembered for a late same-range final.
     private static let closedRangeHistoryLimit = 8
+    /// Safety fuse for rows that keep growing through contiguous phrases.
+    /// Only applied at a phrase boundary when the row has no volatile tail.
+    private static let maxRowDuration: TimeInterval = 12
+    private static let maxRowCharacters = 120
 
     var lastLanguage: AppLanguage?
     var languagePurity: SpeechLanguagePurity
@@ -147,9 +151,19 @@ struct UtteranceAssembler: Sendable {
     }
 
     /// True while a row has volatile text the silence timer can finalize.
-    /// A row that already received only transcriber finals is closed.
+    /// A row that already received only transcriber finals is still open for
+    /// row identity purposes, but has nothing synthetic to publish.
     var hasOpenRange: Bool {
         rangeStates.values.contains { $0.volatile != nil }
+    }
+
+    /// True while the current row has any text that a gap, language change,
+    /// name swap, or silence can close. A final-only row is open until one of
+    /// those boundaries arrives; its final was already published in place.
+    var hasOpenRow: Bool {
+        rangeStates.values.contains { state in
+            state.volatile != nil || !state.finalized.isEmpty
+        }
     }
 
     private mutating func ingestByText(
@@ -410,6 +424,25 @@ struct UtteranceAssembler: Sendable {
             state = LanguageRangeState()
         }
 
+        // A long run of contiguous finalized phrases is one speech turn for
+        // identity purposes, but an unbounded row is bad for the pane and for
+        // translation latency. Close only at a phrase boundary and only when
+        // the row has no volatile tail; a volatile row waits for its final or
+        // the silence timer.
+        if state.volatile == nil,
+           !state.finalized.isEmpty,
+           let rowRange = Self.unionRange(of: state),
+           !rowRange.overlaps(range),
+           range.start >= rowRange.end - 0.05 {
+            let rowText = Self.joinedText(of: state)
+            if rowRange.duration > Self.maxRowDuration
+                || SpokenText.compact(rowText).count > Self.maxRowCharacters {
+                closeCurrentRangeRow(language: language)
+                beginNextUtterance(keeping: language)
+                state = LanguageRangeState()
+            }
+        }
+
         apply(range: range, text: trimmed, isFinal: isFinal, to: &state)
         rangeStates[language] = state
         refreshTexts(for: language, state: state)
@@ -438,11 +471,6 @@ struct UtteranceAssembler: Sendable {
                 text: utterance.text,
                 at: now()
             )
-            if Self.endsSentence(winnerText) {
-                closeCurrentRangeRow(language: winner)
-                beginNextUtterance(keeping: winner)
-                hold(winner, for: 0.8)
-            }
         }
         return utterance
     }
@@ -659,8 +687,8 @@ struct UtteranceAssembler: Sendable {
 
     private mutating func silenceTimedOutForRanges() -> Utterance? {
         guard let winner = lockedLanguage ?? winningLanguage() else { return nil }
-        guard let state = rangeStates[winner], state.volatile != nil else {
-            // The transcriber already finalized the open range.
+        guard let state = rangeStates[winner],
+              state.volatile != nil || !state.finalized.isEmpty else {
             return nil
         }
         let winnerText = textFor(winner)
@@ -672,17 +700,23 @@ struct UtteranceAssembler: Sendable {
             isFinal: true,
             isRevision: publishedFinalForCurrentID
         )
-        publishedFinalForCurrentID = true
-        latestFinal = FinalizedUtterance(
-            id: utterance.id,
-            language: utterance.language,
-            text: utterance.text,
-            at: now()
-        )
+        // A final-only row already published its text; the silence timer only
+        // advances the row boundary. Publishing it again would create a
+        // duplicate final (and re-lock the language).
+        let shouldPublish = state.volatile != nil || !publishedFinalForCurrentID
+        if shouldPublish {
+            publishedFinalForCurrentID = true
+            latestFinal = FinalizedUtterance(
+                id: utterance.id,
+                language: utterance.language,
+                text: utterance.text,
+                at: now()
+            )
+        }
         closeCurrentRangeRow(language: winner)
         beginNextUtterance(keeping: winner)
         hold(winner, for: 0.8)
-        return utterance
+        return shouldPublish ? utterance : nil
     }
 
     private static func joinPhrases(_ phrases: [RangePhrase]) -> String {
@@ -757,39 +791,6 @@ struct UtteranceAssembler: Sendable {
     private static let openingPunctuation: Set<Character> = [
         "(", "[", "{", "“", "‘"
     ]
-
-    private static func endsSentence(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        var index = trimmed.endIndex
-        while index > trimmed.startIndex {
-            let previous = trimmed.index(before: index)
-            let character = trimmed[previous]
-            if "\"'”’)]）】」』".contains(character) {
-                index = previous
-                continue
-            }
-            if character == "." {
-                // One dot ends a sentence; a run of dots is the transcriber's
-                // continuation marker for a phrase that is still open.
-                var dotIndex = index
-                var dotCount = 0
-                while dotIndex > trimmed.startIndex {
-                    let previousDot = trimmed.index(before: dotIndex)
-                    guard trimmed[previousDot] == "." else { break }
-                    dotCount += 1
-                    dotIndex = previousDot
-                }
-                if dotCount > 1 { return false }
-                if dotIndex > trimmed.startIndex,
-                   trimmed[trimmed.index(before: dotIndex)] == "…" {
-                    return false
-                }
-                return true
-            }
-            return ".?!。？！".contains(character)
-        }
-        return false
-    }
 
     mutating func silenceTimedOut() -> Utterance? {
         if !rangeStates.isEmpty {
