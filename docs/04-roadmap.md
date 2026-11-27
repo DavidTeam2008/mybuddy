@@ -30,7 +30,7 @@
 | 同传 P1-4b TED 真机回放 | 已具备夹具注入（2026-11-27）：`tools/fixture-run.sh` 可在无安静房间下跑 13 分钟 TED（DEBUG-only `AudioCapturing` 替身，ASR/翻译/落库为真）。首跑 158 行/158 有译文/覆盖 93.33%/前缀重复 0/final p95 61 ms；比调研基线 99.12% 低，重复从 5.7% 降到 0，质量差异待同音频 A/B（旧版或声学路径）。安静房间声学冒烟只保留给麦克风/路由/TTS/回声。详见 [`research/fixture-injection.md`](research/fixture-injection.md) |
 | 同传 P1-3 ASR 精度 A/B（research） | 未开始（2026-11-26）：等 P1-4b 同一夹具；`.fastResults` 去留、`AnalysisContext.contextualStrings`、`transcriptionConfidence` 只诊断，不因低置信度丢 final。2026-11-27 补面对面双 locale 实验方案：见 [`research/face-to-face-dual-locale-quality.md`](research/face-to-face-dual-locale-quality.md)，先 A/B 隔离双模型并发成本，再决定单活跃 locale 策略；DEBUG 单路开关已实现（首页设置 DEBUG 区，`ConversationViewModelTests` 覆盖）；首轮真机 A/B（2026-11-27）：双路末尾 English stream 停止、红按钮，单路未全面差于同传，见 research §6；下一步同摆放 single vs simultaneous 对照 + 手动 turn/单活跃 locale 评估 |
 | 面对面手动换手（默认） | 已实现（2026-11-27，PR #92）：`ConversationListeningMode.manual` 默认，点一侧启动该侧单路、切 turn 停/排空/重启，行固定到听者 pane；turn bar/说话色/设置；自动语种路由为备选；单测全绿；真机待验证（切 turn 延迟/首词/后台恢复） |
-| 同传 P0-6b 重试/可见状态 | 未开始（2026-11-26）：按用户确认拆票；取消/资源未就绪/不支持语言对/瞬时 2 次退避 + `permanentFailure` 可见状态，等 P1-4 诊断/设备数据后再定 UI 与预算 |
+| 同传 P0-6b 重试/可见状态 | 部分实现（2026-11-27，PR #91）：双路 transcriber 失败写 `speech.failure`（language/errorDomain/errorCode/recovery）并自动把失败语种重启为单路 `.trustedLocale`（meetingNotes 仍 `.strict`）；重启失败记 `restartFailed` 后结束，单路/停止保持原 fail；单测全绿，真机未验证。翻译取消/资源未就绪/不支持语言对/瞬时 2 次退避 + `permanentFailure` 可见状态仍待 P1-4 设备数据 |
 | Wave 3 C04 字幕/文字稿投影 | 已完成（#28–#31，PR #33–#36；#32 清理+文档+iPhone 13 真机矩阵，用户确认 2026-11-25）；候选台账见 [05-architecture-backlog.md](05-architecture-backlog.md) |
 | 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
 

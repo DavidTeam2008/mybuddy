@@ -147,5 +147,6 @@ H2 目前证据偏弱：面对面英文拒绝率 29.4%，同传 28.3%，几乎�
 
 - 单路开关生效：单路 JSON 没有任何 `zhHans` ASR 事件。
 - 双路的 English stream 先停、中文流继续但全被拒；疑似一个 transcriber 失败后引擎结束了整条 utterance stream。诊断目前只记录 ASR 结果，没有 speech failure 事件（哪个 transcriber/什么错误），这是 P0-6b 的缺口。
+- 2026-11-27 已补该缺口（PR #91）：失败 transcriber 写 `speech.failure`（language/errorDomain/errorCode/recovery），双路失败自动把失败语种重启为单路 `.trustedLocale`（meetingNotes 仍 `.strict`）；重启失败记 `restartFailed` 后结束。真机未验证。
 - 单路与同传的 ASR 请求相同（`[english]`、`.trustedLocale`、`.liveCaptions`），final 率也接近（约 0.227/s vs 0.230/s）。文字稿并非全面退化：单路在 `Highlight her female identity`、`your circumstances`、`Cameron Russell`、`doctor's lab coat`、`They'll perform better` 等行更好；坏行集中在 `agstic`、`. of the painters coat`、`noich`、孤立的 `we`、末行合并。双路/同传也有自己的坏行。
 - 结论：这次数据不支持“单路全面差于同传”；差异更像手机摆放/声学 + 单次波动。双路则明确更贵、更脆。下一步先做**同摆放**的 single vs simultaneous 对照，再决定是否把手动 turn + 单活跃 locale 作为面对面模式。
