@@ -58,7 +58,7 @@ struct ConversationViewModelTests {
         let viewModel = ConversationViewModel(
             speech: speech,
             permissions: MockPermissions(),
-            preferences: PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard),
+            preferences: makeAutomaticPreferences(),
             summarizer: MockSummarizer()
         )
         await viewModel.setUserLanguage(.zhHans)
@@ -76,7 +76,7 @@ struct ConversationViewModelTests {
         let viewModel = ConversationViewModel(
             speech: MockSpeechEngine(),
             permissions: MockPermissions(),
-            preferences: PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard),
+            preferences: makeAutomaticPreferences(),
             summarizer: MockSummarizer()
         )
         await viewModel.setUserLanguage(.zhHans)
@@ -92,7 +92,7 @@ struct ConversationViewModelTests {
         let viewModel = ConversationViewModel(
             speech: MockSpeechEngine(),
             permissions: MockPermissions(),
-            preferences: PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard),
+            preferences: makeAutomaticPreferences(),
             summarizer: MockSummarizer()
         )
         await viewModel.setUserLanguage(.zhHans)
@@ -117,7 +117,7 @@ struct ConversationViewModelTests {
         let viewModel = ConversationViewModel(
             speech: MockSpeechEngine(),
             permissions: MockPermissions(),
-            preferences: PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard),
+            preferences: makeAutomaticPreferences(),
             summarizer: MockSummarizer()
         )
         viewModel.accept(Utterance(language: .english, text: "Hello", isFinal: true))
@@ -207,6 +207,7 @@ struct ConversationViewModelTests {
     @Test("Bootstrap stays ready when auto-start is disabled")
     func bootstrapRespectsAutoStartOff() async {
         let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
+        preferences.conversationListeningMode = .automatic
         preferences.autoStartListening = false
         let viewModel = ConversationViewModel(
             speech: MockSpeechEngine(),
@@ -386,6 +387,7 @@ struct ConversationViewModelTests {
     func startUsesTwoLocales() async {
         let speech = RecordingSpeechEngine()
         let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
+        preferences.conversationListeningMode = .automatic
         preferences.userLanguage = .zhHans
         preferences.peerLanguage = .english
         preferences.autoStartListening = false
@@ -405,6 +407,7 @@ struct ConversationViewModelTests {
     func debugSingleLocaleStartsPeerOnly() async {
         let gate = ConversationFakeGate()
         let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
+        preferences.conversationListeningMode = .automatic
         preferences.userLanguage = .zhHans
         preferences.peerLanguage = .english
         preferences.autoStartListening = false
@@ -428,6 +431,7 @@ struct ConversationViewModelTests {
     func debugSingleLocaleStartsUserOnly() async {
         let gate = ConversationFakeGate()
         let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
+        preferences.conversationListeningMode = .automatic
         preferences.userLanguage = .zhHans
         preferences.peerLanguage = .english
         preferences.autoStartListening = false
@@ -461,6 +465,7 @@ struct ConversationViewModelTests {
     func autoStartOffStaysReady() async {
         let gate = ConversationFakeGate()
         let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
+        preferences.conversationListeningMode = .automatic
         preferences.autoStartListening = false
         let viewModel = ConversationViewModel(
             gate: gate,
@@ -627,6 +632,7 @@ struct ConversationViewModelTests {
         #expect(preferences.peerLanguage == .english)
         #expect(viewModel.hasActiveTask)
         #expect(viewModel.transcript.map(\.sourceText) == ["Restored line"])
+        #expect(viewModel.activeSpeaker == nil)
         #expect(viewModel.userPane.history.count + viewModel.peerPane.history.count == 1)
         #expect(viewModel.resumePromptText?.contains("继续任务") == true)
         #expect(viewModel.resumePromptText?.contains(title) == true)
@@ -1038,25 +1044,40 @@ struct ConversationViewModelTests {
 
     private func makeScheduledViewModel(
         scheduler: ManualTranslationScheduler,
-        store: any TaskStoreV2 = InMemoryTaskStore()
+        store: any TaskStoreV2 = InMemoryTaskStore(),
+        mode: ConversationListeningMode = .automatic
     ) -> ConversationViewModel {
         ConversationViewModel(
             gate: ConversationFakeGate(),
             permissions: MockPermissions(),
-            preferences: makePreferences(userLanguage: .zhHans, peerLanguage: .english),
+            preferences: makePreferences(
+                userLanguage: .zhHans,
+                peerLanguage: .english,
+                mode: mode
+            ),
             summarizer: MockSummarizer(),
             taskStore: store,
             scheduler: scheduler
         )
     }
 
+    private func makeAutomaticPreferences() -> PreferencesStore {
+        let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
+        preferences.conversationListeningMode = .automatic
+        return preferences
+    }
+
     private func makePreferences(
         userLanguage: AppLanguage,
-        peerLanguage: AppLanguage
+        peerLanguage: AppLanguage,
+        mode: ConversationListeningMode = .automatic
     ) -> PreferencesStore {
         let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
         preferences.userLanguage = userLanguage
         preferences.peerLanguage = peerLanguage
+        // Tests that predate manual turn describe automatic routing; keep
+        // them on that path explicitly now that manual is the default.
+        preferences.conversationListeningMode = mode
         return preferences
     }
 
@@ -1161,14 +1182,321 @@ struct ConversationViewModelTests {
         #expect(viewModel.transcript.contains { $0.sourceText == "暂停最后一句" })
     }
 
+    // MARK: - Manual turn
+
+    @Test("Manual turn is the default, persists, and a new task waits for a tap")
+    func manualModeIsDefaultAndWaitsForTap() async {
+        let defaults = UserDefaults(suiteName: UUID().uuidString) ?? .standard
+        let preferences = PreferencesStore(defaults: defaults)
+        #expect(preferences.conversationListeningMode == .manual)
+        preferences.conversationListeningMode = .automatic
+        #expect(PreferencesStore(defaults: defaults).conversationListeningMode == .automatic)
+
+        let gate = ConversationFakeGate()
+        let manual = makePreferences(userLanguage: .zhHans, peerLanguage: .english, mode: .manual)
+        let viewModel = makeGateViewModel(gate: gate, preferences: manual, mode: .manual)
+
+        await viewModel.beginTask()
+
+        #expect(viewModel.listeningMode == .manual)
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.activeSpeaker == nil)
+        #expect(viewModel.sessionState == .ready)
+        #expect(gate.startCount == 0)
+        #expect(viewModel.controlLabel == Copy.whichSideSpeaksFirst(for: .zhHans))
+    }
+
+    @Test("Tapping the user side starts only the user's language")
+    func manualUserTurnStartsSingleUserLanguage() async {
+        let gate = ConversationFakeGate()
+        let viewModel = makeGateViewModel(gate: gate, mode: .manual)
+        await viewModel.beginTask()
+        #expect(gate.startCount == 0)
+
+        await viewModel.setActiveSpeaker(.user)
+
+        #expect(viewModel.activeSpeaker == .user)
+        #expect(viewModel.sessionState == .listening)
+        #expect(gate.starts.count == 1)
+        #expect(gate.starts.first?.languages == [.zhHans])
+        #expect(gate.starts.first?.fallbackLanguage == .zhHans)
+        #expect(gate.starts.first?.style == .liveCaptions)
+    }
+
+    @Test("Tapping the peer side starts only the peer's language")
+    func manualPeerTurnStartsSinglePeerLanguage() async {
+        let gate = ConversationFakeGate()
+        let viewModel = makeGateViewModel(gate: gate, mode: .manual)
+        await viewModel.beginTask()
+
+        await viewModel.setActiveSpeaker(.peer)
+
+        #expect(viewModel.activeSpeaker == .peer)
+        #expect(viewModel.sessionState == .listening)
+        #expect(gate.starts.count == 1)
+        #expect(gate.starts.first?.languages == [.english])
+        #expect(gate.starts.first?.fallbackLanguage == .english)
+    }
+
+    @Test("Switching turn drains the old final and keeps the same task")
+    func manualTurnSwitchDrainsOldFinalAndKeepsTask() async {
+        let store = InMemoryTaskStore()
+        let gate = ConversationFakeGate()
+        let viewModel = makeGateViewModel(gate: gate, store: store, mode: .manual)
+        await viewModel.beginTask()
+        await viewModel.setActiveSpeaker(.user)
+        let taskID = viewModel.exportableSession.id
+        gate.emit(Utterance(language: .zhHans, text: "我先说", isFinal: true))
+        await waitUntil { viewModel.transcript.count == 1 }
+        gate.finalOnStop = Utterance(language: .zhHans, text: "切换前最后一句", isFinal: true)
+
+        await viewModel.setActiveSpeaker(.peer)
+
+        #expect(gate.stopCount == 1)
+        #expect(gate.starts.count == 2)
+        #expect(gate.starts.last?.languages == [.english])
+        #expect(gate.starts.last?.fallbackLanguage == .english)
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.exportableSession.id == taskID)
+        #expect(viewModel.activeSpeaker == .peer)
+        #expect(viewModel.sessionState == .listening)
+        #expect(viewModel.transcript.map(\.sourceText) == ["我先说", "切换前最后一句"])
+        // User speech is read on the peer pane.
+        #expect(viewModel.peerPane.history.map(\.sourceText) == ["我先说"])
+        #expect(viewModel.peerPane.live?.sourceText == "切换前最后一句")
+    }
+
+    @Test("Manual user speech lands on the peer pane and targets the peer's language")
+    func manualUserTurnRoutesToListenerPane() async {
+        let scheduler = ManualTranslationScheduler()
+        let viewModel = makeScheduledViewModel(scheduler: scheduler, mode: .manual)
+        await viewModel.beginTask()
+        await viewModel.setActiveSpeaker(.user)
+
+        viewModel.accept(Utterance(language: .zhHans, text: "三点见。", isFinal: true))
+
+        #expect(viewModel.peerPane.live?.sourceText == "三点见。")
+        #expect(viewModel.userPane.live == nil)
+        #expect(viewModel.outboundJob?.source == .zhHans)
+        #expect(viewModel.outboundJob?.target == .english)
+    }
+
+    @Test("Manual peer speech lands on the user pane and targets the user's language")
+    func manualPeerTurnRoutesToListenerPane() async {
+        let scheduler = ManualTranslationScheduler()
+        let viewModel = makeScheduledViewModel(scheduler: scheduler, mode: .manual)
+        await viewModel.beginTask()
+        await viewModel.setActiveSpeaker(.peer)
+
+        viewModel.accept(Utterance(language: .english, text: "See you at three.", isFinal: true))
+
+        #expect(viewModel.userPane.live?.sourceText == "See you at three.")
+        #expect(viewModel.peerPane.live == nil)
+        #expect(viewModel.outboundJob?.source == .english)
+        #expect(viewModel.outboundJob?.target == .zhHans)
+    }
+
+    @Test("Manual turn ignores the language router when detection disagrees")
+    func manualTurnSkipsLanguageRouter() async {
+        let scheduler = ManualTranslationScheduler()
+        let viewModel = makeScheduledViewModel(scheduler: scheduler, mode: .manual)
+        await viewModel.beginTask()
+        await viewModel.setActiveSpeaker(.peer)
+
+        // Detected as the user's language, but the peer owns the turn: the row
+        // must still land on the listener (user) pane, not be routed to peer.
+        viewModel.accept(Utterance(language: .zhHans, text: "语种检测错了", isFinal: true))
+
+        #expect(viewModel.userPane.live?.sourceText == "语种检测错了")
+        #expect(viewModel.peerPane.live == nil)
+        #expect(viewModel.outboundJob?.target == .zhHans)
+    }
+
+    @Test("Manual turn does not apply the automatic crosstalk filter")
+    func manualTurnBypassesCrosstalk() async {
+        let viewModel = makeGateViewModel(gate: ConversationFakeGate(), mode: .manual)
+        await viewModel.beginTask()
+        await viewModel.setActiveSpeaker(.user)
+
+        viewModel.accept(
+            Utterance(language: .zhHans, text: "然后我给你介绍一下北京有哪些好玩的", isFinal: true)
+        )
+        viewModel.accept(Utterance(language: .english, text: "No okay", isFinal: true))
+
+        // Automatic mode drops this weak opposite-language leftover; manual
+        // keeps it because the tapped side owns the turn.
+        #expect(viewModel.transcript.map(\.sourceText) == [
+            "然后我给你介绍一下北京有哪些好玩的",
+            "No okay",
+        ])
+        #expect(viewModel.peerPane.live?.sourceText == "No okay")
+    }
+
+    @Test("Pausing and resuming keeps the active manual speaker")
+    func pauseResumeKeepsActiveSpeaker() async {
+        let gate = ConversationFakeGate()
+        let viewModel = makeGateViewModel(gate: gate, mode: .manual)
+        await viewModel.beginTask()
+        await viewModel.setActiveSpeaker(.peer)
+
+        await viewModel.stop(restoreIdleTimerAfterDelay: false)
+
+        #expect(viewModel.activeSpeaker == .peer)
+        #expect(viewModel.sessionState == .paused)
+
+        await viewModel.start()
+
+        #expect(viewModel.activeSpeaker == .peer)
+        #expect(gate.starts.count == 2)
+        #expect(gate.starts.last?.languages == [.english])
+    }
+
+    @Test("A new manual task clears the active speaker and waits for a tap")
+    func newManualTaskClearsActiveSpeaker() async {
+        let gate = ConversationFakeGate()
+        let viewModel = makeGateViewModel(gate: gate, mode: .manual)
+        await viewModel.beginTask()
+        await viewModel.setActiveSpeaker(.user)
+        gate.emit(Utterance(language: .zhHans, text: "旧任务", isFinal: true))
+        await waitUntil { viewModel.transcript.count == 1 }
+
+        await viewModel.beginTask()
+
+        #expect(viewModel.activeSpeaker == nil)
+        #expect(viewModel.sessionState == .ready)
+        #expect(viewModel.transcript.isEmpty)
+        #expect(gate.starts.count == 1)
+        #expect(gate.stopCount == 1)
+    }
+
+    @Test("The middle control defaults to the user when no side is chosen")
+    func middleControlDefaultsToUserInManualMode() async {
+        let gate = ConversationFakeGate()
+        let viewModel = makeGateViewModel(gate: gate, mode: .manual)
+        await viewModel.beginTask()
+
+        await viewModel.toggleListening()
+
+        #expect(viewModel.activeSpeaker == .user)
+        #expect(viewModel.sessionState == .listening)
+        #expect(gate.starts.first?.languages == [.zhHans])
+    }
+
+    @Test("Switching mode stops the stream, keeps the task, and applies on the next start")
+    func modeSwitchStopsWithoutEndingTask() async {
+        let store = InMemoryTaskStore()
+        let gate = ConversationFakeGate()
+        let viewModel = makeGateViewModel(gate: gate, store: store, mode: .manual)
+        await viewModel.beginTask()
+        await viewModel.setActiveSpeaker(.user)
+        gate.emit(Utterance(language: .zhHans, text: "模式切换前", isFinal: true))
+        await waitUntil { viewModel.transcript.count == 1 }
+        let taskID = viewModel.exportableSession.id
+
+        await viewModel.setListeningMode(.automatic)
+
+        #expect(viewModel.listeningMode == .automatic)
+        #expect(viewModel.activeSpeaker == nil)
+        #expect(viewModel.hasActiveTask)
+        #expect(viewModel.exportableSession.id == taskID)
+        #expect(viewModel.transcript.map(\.sourceText) == ["模式切换前"])
+        #expect(viewModel.sessionState == .paused)
+        #expect(gate.stopCount == 1)
+        #expect(gate.starts.count == 1)
+
+        await viewModel.start()
+
+        #expect(gate.starts.count == 2)
+        #expect(gate.starts.last?.languages == [.zhHans, .english])
+    }
+
+    @Test("Switching from automatic to manual waits for a side tap")
+    func switchingToManualWaitsForTap() async {
+        let gate = ConversationFakeGate()
+        let viewModel = makeGateViewModel(gate: gate, mode: .automatic)
+        await viewModel.beginTask()
+        #expect(viewModel.sessionState == .listening)
+
+        await viewModel.setListeningMode(.manual)
+
+        #expect(viewModel.listeningMode == .manual)
+        #expect(viewModel.activeSpeaker == nil)
+        #expect(viewModel.hasActiveTask)
+        #expect(gate.stopCount == 1)
+        #expect(viewModel.controlLabel == Copy.whichSideSpeaksFirst(for: .zhHans))
+
+        await viewModel.start()
+        #expect(gate.starts.count == 1)
+
+        await viewModel.setActiveSpeaker(.peer)
+        #expect(gate.starts.count == 2)
+        #expect(gate.starts.last?.languages == [.english])
+    }
+
+    @Test("Tapping the side that already owns the turn while listening is a no-op")
+    func tappingActiveSideIsNoOp() async {
+        let gate = ConversationFakeGate()
+        let viewModel = makeGateViewModel(gate: gate, mode: .manual)
+        await viewModel.beginTask()
+        await viewModel.setActiveSpeaker(.user)
+
+        await viewModel.setActiveSpeaker(.user)
+
+        #expect(gate.starts.count == 1)
+        #expect(gate.stopCount == 0)
+        #expect(viewModel.sessionState == .listening)
+        #expect(viewModel.activeSpeaker == .user)
+    }
+
+    @Test("A late revision stays on its pinned listener pane after a turn switch")
+    func manualLateRevisionKeepsPinnedPane() async {
+        let viewModel = makeScheduledViewModel(
+            scheduler: ManualTranslationScheduler(),
+            mode: .manual
+        )
+        await viewModel.beginTask()
+        await viewModel.setActiveSpeaker(.user)
+        let id = UUID()
+        viewModel.accept(Utterance(id: id, language: .zhHans, text: "第一版", isFinal: false))
+
+        await viewModel.setActiveSpeaker(.peer)
+        // The old utterance id remains pinned to the peer pane even though the
+        // active speaker is now the peer, whose listener pane is the user's.
+        viewModel.accept(Utterance(id: id, language: .zhHans, text: "第一版修正", isFinal: true))
+
+        #expect(viewModel.peerPane.live?.sourceText == "第一版修正")
+        #expect(viewModel.userPane.live == nil)
+    }
+
+    @Test("Manual turn ignores the DEBUG single-locale experiment")
+    func manualTurnIgnoresDebugSingleLocale() async {
+        let gate = ConversationFakeGate()
+        let preferences = makePreferences(
+            userLanguage: .zhHans,
+            peerLanguage: .english,
+            mode: .manual
+        )
+        preferences.debugForceSingleLocale = true
+        preferences.debugSingleLocaleUsesPeer = true
+        let viewModel = makeGateViewModel(gate: gate, preferences: preferences, mode: .manual)
+
+        await viewModel.beginTask()
+        await viewModel.setActiveSpeaker(.user)
+
+        #expect(gate.starts.first?.languages == [.zhHans])
+        #expect(gate.starts.first?.fallbackLanguage == .zhHans)
+    }
+
     private func makeGateViewModel(
         gate: ConversationFakeGate,
         store: any TaskStoreV2 = InMemoryTaskStore(),
         autoStart: Bool = true,
-        preferences: PreferencesStore? = nil
+        preferences: PreferencesStore? = nil,
+        mode: ConversationListeningMode = .automatic
     ) -> ConversationViewModel {
         let resolved = preferences ?? makePreferences(userLanguage: .zhHans, peerLanguage: .english)
         resolved.autoStartListening = autoStart
+        resolved.conversationListeningMode = mode
         return ConversationViewModel(
             gate: gate,
             permissions: MockPermissions(),
@@ -1203,10 +1531,12 @@ struct ConversationViewModelTests {
     private func makeViewModel(
         idleRestoreDelay: Duration = .seconds(30)
     ) -> ConversationViewModel {
-        ConversationViewModel(
+        let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
+        preferences.conversationListeningMode = .automatic
+        return ConversationViewModel(
             speech: MockSpeechEngine(),
             permissions: MockPermissions(),
-            preferences: PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard),
+            preferences: preferences,
             summarizer: MockSummarizer(),
             idleRestoreDelay: idleRestoreDelay
         )

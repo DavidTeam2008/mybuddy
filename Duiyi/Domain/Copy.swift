@@ -5,6 +5,110 @@ enum Copy {
         language.pick(zh: "正在说…", en: "Speaking…", ja: "話しています…", ko: "말하는 중…", th: "กำลังพูด…", vi: "Đang nói…")
     }
 
+    // MARK: - Manual turn (face-to-face)
+
+    /// Middle-control prompt when manual mode has no active speaker yet.
+    static func whichSideSpeaksFirst(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "谁先说话，点一下自己这边",
+            en: "Who speaks first? Tap your side",
+            ja: "先に話す人が自分の側をタップ",
+            ko: "먼저 말하는 사람이 자기 쪽을 탭하세요",
+            th: "ใครพูดก่อน แตะฝั่งของตัวเอง",
+            vi: "Ai nói trước? Chạm vào phía mình"
+        )
+    }
+
+    /// Turn bar label for the side that is not speaking yet; the bar is in
+    /// the language of the person who reads that pane.
+    static func turnTapToSpeak(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "我来说",
+            en: "I speak",
+            ja: "自分が話す",
+            ko: "내가 말할게",
+            th: "ฉันพูด",
+            vi: "Tôi nói"
+        )
+    }
+
+    static func turnIAmSpeaking(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "我在说",
+            en: "I'm speaking",
+            ja: "自分が話しています",
+            ko: "내가 말하는 중",
+            th: "ฉันกำลังพูด",
+            vi: "Tôi đang nói"
+        )
+    }
+
+    static func turnOtherIsSpeaking(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "对方在说",
+            en: "They're speaking",
+            ja: "相手が話しています",
+            ko: "상대가 말하는 중",
+            th: "อีกฝ่ายกำลังพูด",
+            vi: "Đối phương đang nói"
+        )
+    }
+
+    static func turnModeSection(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "说话方式",
+            en: "Speaking mode",
+            ja: "話し方",
+            ko: "말하는 방식",
+            th: "วิธีพูด",
+            vi: "Cách nói"
+        )
+    }
+
+    static func turnModeManual(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "手动",
+            en: "Manual",
+            ja: "手動",
+            ko: "수동",
+            th: "กำหนดเอง",
+            vi: "Thủ công"
+        )
+    }
+
+    static func turnModeAutomatic(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "自动",
+            en: "Automatic",
+            ja: "自動",
+            ko: "자동",
+            th: "อัตโนมัติ",
+            vi: "Tự động"
+        )
+    }
+
+    static func turnModeManualHint(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "谁说话，点谁那一侧；识别更接近同传，适合轮流对话。",
+            en: "Tap the side of whoever is speaking. Closer to simultaneous interpretation; best for taking turns.",
+            ja: "話す人の側をタップします。同時通訳に近い認識で、交互に話す場面に向きます。",
+            ko: "말하는 사람의 쪽을 탭하세요. 동시통역에 가까운 인식으로 번갈아 말할 때 좋습니다.",
+            th: "แตะฝั่งของคนที่กำลังพูด ใกล้เคียงกับการแปลพร้อมกัน เหมาะกับการพูดสลับกัน",
+            vi: "Chạm vào phía người đang nói. Gần với phiên dịch song song, hợp khi nói luân phiên."
+        )
+    }
+
+    static func turnModeAutomaticHint(for language: AppLanguage) -> String {
+        language.pick(
+            zh: "自动按语言分侧；适合不方便点屏幕的场景。",
+            en: "Chooses the side by language. Best when tapping the screen is inconvenient.",
+            ja: "言語で側を自動判定します。画面をタップしにくい場面に向きます。",
+            ko: "언어로 쪽을 자동 판단합니다. 화면을 누르기 어려울 때 좋습니다.",
+            th: "แยกฝั่งตามภาษาอัตโนมัติ เหมาะเมื่อแตะหน้าจอไม่สะดวก",
+            vi: "Tự chọn phía theo ngôn ngữ. Hợp khi không tiện chạm màn hình."
+        )
+    }
+
     static func listening(for language: AppLanguage) -> String {
         language.pick(zh: "聆听中", en: "Listening", ja: "聞き取り中", ko: "듣는 중", th: "กำลังฟัง", vi: "Đang nghe")
     }

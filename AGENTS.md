@@ -25,7 +25,7 @@ Single-context: `GLOSSARY.md` at the repo root and the D-series decision record 
 
 ### Device testing
 
-Physical iPhone builds, signing, UI automation, and acoustic smoke: see `docs/agents/device-testing.md`.
+Physical iPhone builds, signing, UI automation, acoustic smoke, and the DEBUG fixture-audio replay: see `docs/agents/device-testing.md`.
 
 ### Formal verification
 
