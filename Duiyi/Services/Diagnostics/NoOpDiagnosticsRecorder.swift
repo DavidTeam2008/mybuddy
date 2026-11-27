@@ -8,6 +8,7 @@ final class NoOpDiagnosticsRecorder: DiagnosticsRecording, @unchecked Sendable {
     func beginSession(feature: FeatureID, taskID: UUID?) {}
     func endSession(taskID: UUID?) {}
     func record(_ record: ASRDiagnosticsRecord) {}
+    func record(_ record: SpeechFailureRecord) {}
     func recordSubmit(_ record: TranslationSubmitRecord) {}
     func recordApply(_ record: TranslationApplyRecord) {}
     func recordResponse(_ record: TranslationResponseRecord) {}

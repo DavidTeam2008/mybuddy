@@ -131,6 +131,28 @@ final class DiagnosticsRecorder: DiagnosticsRecording, @unchecked Sendable {
         #endif
     }
 
+    // MARK: - Speech failures
+
+    func record(_ record: SpeechFailureRecord) {
+        #if DEBUG
+        lock.lock()
+        defer { lock.unlock() }
+        ensureSessionLocked()
+        appendLocked(
+            DiagnosticsEvent(
+                kind: "speech.failure",
+                at: now(),
+                feature: session?.feature,
+                language: record.language.rawValue,
+                style: record.style,
+                errorDomain: record.errorDomain,
+                errorCode: record.errorCode,
+                recovery: record.recovery.rawValue
+            )
+        )
+        #endif
+    }
+
     // MARK: - Translation
 
     func recordSubmit(_ record: TranslationSubmitRecord) {
