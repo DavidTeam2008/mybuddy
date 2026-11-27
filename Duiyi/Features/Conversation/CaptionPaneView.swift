@@ -13,9 +13,16 @@ struct CaptionPaneView: View {
     var onSelectLanguage: ((AppLanguage) -> Void)?
     var onCancelPicking: (() -> Void)?
     var idleOverride: String? = nil
+    var listeningMode: ConversationListeningMode = .automatic
+    var activeSpeaker: SpeakerSide?
+    var turnEnabled = false
+    var onSelectTurn: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if showsTurnBar {
+                turnBar
+            }
             languageBadge
 
             if isPickingLanguage {
@@ -33,8 +40,92 @@ struct CaptionPaneView: View {
         .padding(.top, isPeer ? 24 : 28)
         .padding(.bottom, isPeer ? ScreenSafeArea.top : max(36, ScreenSafeArea.bottom + 8))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(isPeer ? Tokens.peerPane : Tokens.userPane)
+        .background {
+            ZStack {
+                isPeer ? Tokens.peerPane : Tokens.userPane
+                if isTurnActive {
+                    Tokens.speaking.opacity(0.07)
+                }
+            }
+        }
         .contentShape(Rectangle())
+    }
+
+    // MARK: - Manual turn bar
+
+    private var side: SpeakerSide { isPeer ? .peer : .user }
+
+    private var showsTurnBar: Bool {
+        listeningMode == .manual && onSelectTurn != nil
+    }
+
+    private var isTurnActive: Bool {
+        listeningMode == .manual && activeSpeaker == side
+    }
+
+    private var isOtherTurnActive: Bool {
+        guard listeningMode == .manual, let activeSpeaker else { return false }
+        return activeSpeaker == side.opposite
+    }
+
+    private var turnStatusText: String {
+        if isTurnActive {
+            return Copy.turnIAmSpeaking(for: viewerLanguage)
+        }
+        if isOtherTurnActive {
+            return Copy.turnOtherIsSpeaking(for: viewerLanguage)
+        }
+        return Copy.turnTapToSpeak(for: viewerLanguage)
+    }
+
+    /// Full-width tap target above the language chip and captions. The pane is
+    /// rotated for the peer, so this bar is physically reachable by them; the
+    /// pane's `.accessibilityHidden(true)` leaves VoiceOver on the lower bar
+    /// and the middle control.
+    private var turnBar: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            onSelectTurn?()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isTurnActive ? "waveform" : "hand.tap")
+                    .font(.system(size: 15, weight: .semibold))
+                Text(turnStatusText)
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+                if isTurnActive {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+            }
+            .foregroundStyle(turnForeground)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: Tokens.minHitTarget)
+            .background(
+                turnBackground,
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!turnEnabled)
+        .opacity(turnEnabled ? 1 : 0.5)
+        .accessibilityIdentifier(isPeer ? "conversation-turn-peer" : "conversation-turn-user")
+        .accessibilityLabel(turnStatusText)
+        .accessibilityAddTraits(.isButton)
+        .animation(.easeInOut(duration: 0.18), value: isTurnActive)
+        .animation(.easeInOut(duration: 0.18), value: isOtherTurnActive)
+    }
+
+    private var turnForeground: Color {
+        if isTurnActive { return Tokens.speaking }
+        return isOtherTurnActive ? Tokens.textPrimary : Tokens.textSecondary
+    }
+
+    private var turnBackground: Color {
+        if isTurnActive { return Tokens.speaking.opacity(0.16) }
+        return Tokens.controlIdle.opacity(isOtherTurnActive ? 0.35 : 0.55)
     }
 
     private var languageBadge: some View {
@@ -156,6 +247,9 @@ struct CaptionPaneView: View {
 
     private var idlePrompt: String {
         if let idleOverride { return idleOverride }
+        if listeningMode == .manual, activeSpeaker == nil {
+            return Copy.whichSideSpeaksFirst(for: viewerLanguage)
+        }
         switch sessionState {
         case .ready, .idle, .paused:
             return isPeer

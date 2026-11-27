@@ -151,6 +151,8 @@ struct PlatformTaskTests {
 
     private func makeConversation(store: InMemoryTaskStore = InMemoryTaskStore()) -> ConversationViewModel {
         let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
+        // These tests describe the existing automatic face-to-face routing.
+        preferences.conversationListeningMode = .automatic
         preferences.userLanguage = .zhHans
         preferences.peerLanguage = .english
         preferences.autoStartListening = false
