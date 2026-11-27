@@ -62,6 +62,13 @@ struct RootView: View {
                 into: environment.taskStore,
                 language: environment.preferences.userLanguage
             )
+            if let interpretationViewModel {
+                DebugFixtureRun.startIfRequested(
+                    viewModel: interpretationViewModel,
+                    coordinator: coordinator,
+                    environment: environment
+                )
+            }
             #endif
         }
         .onChange(of: environment.preferences.hasCompletedOnboarding) { _, completed in

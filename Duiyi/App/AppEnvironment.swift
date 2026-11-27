@@ -21,6 +21,12 @@ final class AppEnvironment {
     /// the export entry point.
     let diagnostics: any DiagnosticsRecording
 
+    #if DEBUG
+    /// Non-nil only when `-duiyi.fixtureAudio` is present. Lets the debug
+    /// runner observe EOF and report fixture stats; no Release path reads it.
+    let fixtureCapturer: FixtureAudioCapturer?
+    #endif
+
     init(
         preferences: PreferencesStore = PreferencesStore(),
         permissions: any PermissionGranting = PermissionService(),
@@ -40,7 +46,16 @@ final class AppEnvironment {
         self.permissions = permissions
         self.speechModels = speechModels
         self.translationAvailability = translationAvailability
+        #if DEBUG
+        let fixture = DebugAudioFixture.makeCapturerIfRequested()
+        self.fixtureCapturer = fixture
+        let engine = speechEngine ?? BilingualSpeechEngine(
+            capturer: fixture ?? AudioEngineCapturer(),
+            diagnostics: diagnostics
+        )
+        #else
         let engine = speechEngine ?? BilingualSpeechEngine(diagnostics: diagnostics)
+        #endif
         self.speechEngine = engine
         self.speechGate = speechGate ?? SpeechSessionGate(engine: engine)
         self.summarizer = summarizer

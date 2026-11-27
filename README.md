@@ -41,7 +41,7 @@ For agent or CI runs, use the wrappers. They select and boot a simulator, parse 
     tools/test-unit.sh
     tools/test-ui.sh
 
-Physical iPhone verification: run `tools/device.sh check` and follow `docs/agents/device-testing.md` (signing, UI automation, acoustic smoke).
+Physical iPhone verification: run `tools/device.sh check` and follow `docs/agents/device-testing.md` (signing, UI automation, acoustic smoke). Debug builds also accept a fixture audio path through the real speech engine, so the ASR → translation → persistence path can run without a quiet room: `tools/fixture-run.sh` (see §5.1 in that page).
 
 Fast static checks, plus the optional committed pre-commit hook:
 
