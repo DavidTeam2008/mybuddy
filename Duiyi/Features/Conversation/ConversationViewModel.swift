@@ -27,6 +27,11 @@ final class ConversationViewModel {
     var isSummaryPresented = false
     var autoStartListening: Bool
     var holdScreenAfterPause = false
+    /// Manual turn selection persists across pause/resume; new tasks,
+    /// language changes, and swaps clear it.
+    var activeSpeaker: SpeakerSide?
+    /// Manual by default; automatic keeps the language router as a fallback.
+    var listeningMode: ConversationListeningMode
     var transcript: [TranscriptEntry] { projection.transcript }
     var summary: ConversationSummary?
     var summaryError: String?
@@ -80,6 +85,8 @@ final class ConversationViewModel {
         peerLanguage = preferences.peerLanguage
         fontSize = preferences.fontSize
         autoStartListening = preferences.autoStartListening
+        listeningMode = preferences.conversationListeningMode
+        activeSpeaker = nil
     }
 
     /// Test seam: injects only the debounce scheduler. The ViewModel still
@@ -116,6 +123,8 @@ final class ConversationViewModel {
         peerLanguage = preferences.peerLanguage
         fontSize = preferences.fontSize
         autoStartListening = preferences.autoStartListening
+        listeningMode = preferences.conversationListeningMode
+        activeSpeaker = nil
     }
 
     /// Compatibility initializer for call sites and tests that inject a raw
@@ -191,6 +200,9 @@ final class ConversationViewModel {
     var controlLabel: String {
         if !hasActiveTask {
             return Copy.needNewTask(for: userLanguage)
+        }
+        if listeningMode == .manual, activeSpeaker == nil {
+            return Copy.whichSideSpeaksFirst(for: userLanguage)
         }
         switch sessionState {
         case .listening:
@@ -310,6 +322,7 @@ final class ConversationViewModel {
         // the transcript snapshot is written.
         await lifecycle.pauseListening()
         await drainSpeechTask()
+        activeSpeaker = nil
         isUnsavedTaskPromptPresented = false
         isExportThenContinuePending = false
         lateTranslation.beginEnding()
@@ -343,12 +356,59 @@ final class ConversationViewModel {
         if sessionState == .listening {
             await stop()
         } else {
+            // The middle control is the keyboard/VoiceOver fallback: with no
+            // side chosen it starts as the user rather than doing nothing.
+            if listeningMode == .manual, activeSpeaker == nil {
+                activeSpeaker = .user
+            }
             await start()
         }
     }
 
+    /// Manual turn selection: tapping the inactive side claims the turn and
+    /// restarts recognition in that side's only language. The old stream is
+    /// stopped and drained first so its final still lands in the old pane;
+    /// the task and transcript stay intact.
+    func setActiveSpeaker(_ side: SpeakerSide) async {
+        guard listeningMode == .manual, hasActiveTask, sessionState != .preparing else { return }
+
+        if activeSpeaker == side {
+            // Tapping the side that already owns the turn is a no-op while
+            // listening; after a pause it resumes the same single language.
+            guard sessionState != .listening else { return }
+            await start()
+            return
+        }
+
+        let wasListening = sessionState == .listening
+        if wasListening {
+            await lifecycle.pauseListening()
+            await drainSpeechTask()
+        }
+        activeSpeaker = side
+        clearSpeakingHints()
+        holdScreenAfterPause = false
+        idleRestoreTask?.cancel()
+        await start()
+    }
+
+    /// Applies on the next start; switching never ends the task. The current
+    /// stream is drained under the old mode/speaker first.
+    func setListeningMode(_ mode: ConversationListeningMode) async {
+        guard mode != listeningMode else { return }
+        if sessionState == .listening {
+            await stop()
+        }
+        listeningMode = mode
+        preferences.conversationListeningMode = mode
+        activeSpeaker = nil
+    }
+
     func start() async {
         guard hasActiveTask, sessionState != .listening else { return }
+        // Manual mode starts only for an explicitly chosen side. The middle
+        // control supplies the user fallback in `toggleListening`.
+        if listeningMode == .manual, activeSpeaker == nil { return }
         idleRestoreTask?.cancel()
         holdScreenAfterPause = false
         stateOverride = nil
@@ -473,24 +533,35 @@ final class ConversationViewModel {
     }
 
     func accept(_ utterance: Utterance) {
-        if shouldIgnoreCrosstalk(utterance) {
-            return
-        }
-
         let listener: SpeakerSide
-        if let pinned = routedSideByUtterance[utterance.id] {
-            let detectedSide = LanguageRouter.targetSide(detected: utterance.language, userLanguage: userLanguage)
-            if detectedSide != pinned {
+        if listeningMode == .manual {
+            // Manual: the tapped side owns the turn; the opposite pane reads
+            // it. No language detection, routing decision, or crosstalk.
+            guard let activeSpeaker else { return }
+            if let pinned = routedSideByUtterance[utterance.id] {
+                listener = pinned
+            } else {
+                listener = activeSpeaker.opposite
+                routedSideByUtterance[utterance.id] = listener
+            }
+        } else {
+            if shouldIgnoreCrosstalk(utterance) {
                 return
             }
-            listener = pinned
-        } else {
-            listener = LanguageRouter.targetSide(detected: utterance.language, userLanguage: userLanguage)
-            routedSideByUtterance[utterance.id] = listener
+            if let pinned = routedSideByUtterance[utterance.id] {
+                let detectedSide = LanguageRouter.targetSide(detected: utterance.language, userLanguage: userLanguage)
+                if detectedSide != pinned {
+                    return
+                }
+                listener = pinned
+            } else {
+                listener = LanguageRouter.targetSide(detected: utterance.language, userLanguage: userLanguage)
+                routedSideByUtterance[utterance.id] = listener
+            }
         }
 
         let speaker = listener.opposite
-        let speaking = Copy.speaking(for: speaker == .user ? userLanguage : peerLanguage)
+        let speaking = Copy.speaking(for: language(for: speaker))
 
         if utterance.isFinal {
             projection.setSpeakingHint(nil, pane: speaker)
@@ -570,15 +641,23 @@ final class ConversationViewModel {
     }
 
     private func enqueueTranslation(_ line: CaptionLine, isFinal: Bool) {
+        let target: AppLanguage
+        if listeningMode == .manual {
+            // The line's pane is always the listener's pane; translate into
+            // the language that pane reads.
+            target = language(for: line.side)
+        } else {
+            target = LanguageRouter.targetLanguage(
+                detected: line.source,
+                userLanguage: userLanguage,
+                peerLanguage: peerLanguage
+            )
+        }
         pipeline.submit(
             TranslationSubmission(
                 line: line,
                 isFinal: isFinal,
-                target: LanguageRouter.targetLanguage(
-                    detected: line.source,
-                    userLanguage: userLanguage,
-                    peerLanguage: peerLanguage
-                ),
+                target: target,
                 firstDelay: .milliseconds(ConversationLayout.firstTranslationDebounceMilliseconds),
                 subsequentDelay: .milliseconds(ConversationLayout.translationDebounceMilliseconds)
             )
@@ -599,10 +678,22 @@ final class ConversationViewModel {
         return !UtteranceAssembler.isConfident(utterance.text, language: utterance.language)
     }
 
+    private func language(for side: SpeakerSide) -> AppLanguage {
+        side == .user ? userLanguage : peerLanguage
+    }
+
+    private func clearSpeakingHints() {
+        projection.setSpeakingHint(nil, pane: .user)
+        projection.setSpeakingHint(nil, pane: .peer)
+    }
+
     private func createNewTask() async {
         // The lifecycle already stopped the old stream; drain its consumer so
         // the stop-time final cannot land in the new task's captions.
         await drainSpeechTask()
+        // Every new task starts with no turn chosen; manual mode waits for a
+        // tap even when the auto-start preference is on.
+        activeSpeaker = nil
         resetCaptions()
         resumePromptText = nil
         switch await lifecycle.startNewTask(makeNewTaskRequest()) {
@@ -625,23 +716,36 @@ final class ConversationViewModel {
     }
 
     private func makeNewTaskRequest() -> TaskLifecycle.NewTaskRequest {
-        TaskLifecycle.NewTaskRequest(
+        // Manual mode overrides the auto-start preference: there is no active
+        // speaker at task start, so the user must tap a side.
+        let autoStart = autoStartListening && listeningMode == .automatic
+        return TaskLifecycle.NewTaskRequest(
             sourceLanguage: userLanguage,
             targetLanguage: peerLanguage,
             multilingual: false,
             titleLanguage: preferences.userLanguage,
             startedAt: .now,
-            autoStart: autoStartListening,
+            autoStart: autoStart,
             listening: makeListeningRequest()
         )
     }
 
     private func makeListeningRequest() -> TaskLifecycle.ListeningRequest {
+        if listeningMode == .manual {
+            let language = language(for: activeSpeaker ?? .user)
+            return TaskLifecycle.ListeningRequest(
+                languages: [language],
+                fallbackLanguage: language,
+                style: .liveCaptions,
+                audioUseCase: .faceToFace
+            )
+        }
         var languages = [userLanguage, peerLanguage]
         var fallback = peerLanguage
         #if DEBUG
         // A/B fixture: force one transcriber while keeping the production
         // dual-locale request as the default. Takes effect on the next start.
+        // Manual turn chooses its own single locale and does not use this.
         if preferences.debugForceSingleLocale {
             let language = preferences.debugSingleLocaleUsesPeer ? peerLanguage : userLanguage
             languages = [language]
@@ -692,6 +796,8 @@ final class ConversationViewModel {
         let wasActive = sessionState == .listening || sessionState == .paused
         await lifecycle.pauseListening()
         await drainSpeechTask()
+        // The old pair's turn no longer names a language; wait for a new tap.
+        activeSpeaker = nil
         // The view may already have entered asset preparation for the new
         // pair; never overwrite that transient state with a stale "ready".
         if wasActive, stateOverride != .preparing, stateOverride?.isFailed != true {

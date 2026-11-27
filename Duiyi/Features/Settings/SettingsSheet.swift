@@ -6,6 +6,7 @@ struct SettingsSheet: View {
     let appMode: AppMode
     let fontSize: CaptionFontSize
     let autoStartListening: Bool
+    let listeningMode: ConversationListeningMode
     let isRedownloading: Bool
     let speechProgress: Double
     let translationProgress: Double
@@ -15,6 +16,7 @@ struct SettingsSheet: View {
     let onSelectPeerLanguage: (AppLanguage) -> Void
     let onSelectFont: (CaptionFontSize) -> Void
     let onToggleAutoStart: (Bool) -> Void
+    let onSelectListeningMode: (ConversationListeningMode) -> Void
     let onClear: () -> Void
     let onSummarize: () -> Void
     let canSummarize: Bool
@@ -51,6 +53,33 @@ struct SettingsSheet: View {
             ) {
                 onSelectMode(.meeting)
             }
+
+            Text(Copy.turnModeSection(for: userLanguage))
+                .font(.footnote)
+                .foregroundStyle(Tokens.textSecondary)
+            HStack(spacing: 8) {
+                SelectChip(
+                    title: Copy.turnModeManual(for: userLanguage),
+                    isSelected: listeningMode == .manual
+                ) {
+                    onSelectListeningMode(.manual)
+                }
+                .accessibilityIdentifier("conversation-mode-manual")
+                SelectChip(
+                    title: Copy.turnModeAutomatic(for: userLanguage),
+                    isSelected: listeningMode == .automatic
+                ) {
+                    onSelectListeningMode(.automatic)
+                }
+                .accessibilityIdentifier("conversation-mode-automatic")
+            }
+            Text(
+                listeningMode == .manual
+                    ? Copy.turnModeManualHint(for: userLanguage)
+                    : Copy.turnModeAutomaticHint(for: userLanguage)
+            )
+            .font(.caption)
+            .foregroundStyle(Tokens.textSecondary)
 
             Text(Copy.iReadSection(for: userLanguage))
                 .font(.footnote)

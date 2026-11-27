@@ -153,6 +153,8 @@ enum ConversationPreview {
         preferences.userLanguage = .zhHans
         preferences.peerLanguage = .english
         preferences.autoStartListening = false
+        // Previews predate manual turn and stage automatic-routing states.
+        preferences.conversationListeningMode = .automatic
         let speech = PreviewSpeechEngine()
         let permissions = PreviewPermissions()
         let summarizer = PreviewSummarizer()

@@ -30,7 +30,13 @@ struct ConversationView: View {
                     onSelectLanguage: { language in
                         applyPeerLanguage(language)
                     },
-                    onCancelPicking: { pickingSide = nil }
+                    onCancelPicking: { pickingSide = nil },
+                    listeningMode: viewModel.listeningMode,
+                    activeSpeaker: viewModel.activeSpeaker,
+                    turnEnabled: viewModel.hasActiveTask && viewModel.sessionState != .preparing,
+                    onSelectTurn: {
+                        Task { await viewModel.setActiveSpeaker(.peer) }
+                    }
                 )
                 .rotationEffect(.degrees(180))
                 .accessibilityHidden(true)
@@ -99,7 +105,13 @@ struct ConversationView: View {
                             applyUserLanguage(language)
                         },
                         onCancelPicking: { pickingSide = nil },
-                        idleOverride: viewModel.hasActiveTask ? nil : Copy.needNewTask(for: viewModel.userLanguage)
+                        idleOverride: viewModel.hasActiveTask ? nil : Copy.needNewTask(for: viewModel.userLanguage),
+                        listeningMode: viewModel.listeningMode,
+                        activeSpeaker: viewModel.activeSpeaker,
+                        turnEnabled: viewModel.hasActiveTask && viewModel.sessionState != .preparing,
+                        onSelectTurn: {
+                            Task { await viewModel.setActiveSpeaker(.user) }
+                        }
                     )
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -113,6 +125,7 @@ struct ConversationView: View {
                     appMode: environment.preferences.appMode,
                     fontSize: viewModel.fontSize,
                     autoStartListening: viewModel.autoStartListening,
+                    listeningMode: viewModel.listeningMode,
                     isRedownloading: isRedownloading,
                     speechProgress: speechProgress,
                     translationProgress: translationProgress,
@@ -128,6 +141,9 @@ struct ConversationView: View {
                     },
                     onSelectFont: viewModel.setFontSize,
                     onToggleAutoStart: viewModel.setAutoStartListening,
+                    onSelectListeningMode: { mode in
+                        Task { await viewModel.setListeningMode(mode) }
+                    },
                     onClear: {
                         Task { await viewModel.clearDisplay() }
                     },
