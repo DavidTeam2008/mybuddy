@@ -81,14 +81,21 @@ struct SpeechEngineLanguageTests {
         #expect(!plan.failStream)
     }
 
-    @Test("The explicit failure fallback forces trusted locale")
+    @Test("The explicit failure fallback forces trusted locale for live captions only")
     func fallbackForcesTrustedLocale() {
         #expect(
             BilingualSpeechEngine.singleLocalePurity(
                 forceTrustedLocale: true,
                 requestedLanguageCount: 2,
-                style: .meetingNotes
+                style: .liveCaptions
             ) == .trustedLocale
+        )
+        #expect(
+            BilingualSpeechEngine.singleLocalePurity(
+                forceTrustedLocale: true,
+                requestedLanguageCount: 2,
+                style: .meetingNotes
+            ) == .strict
         )
     }
 

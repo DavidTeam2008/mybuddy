@@ -572,17 +572,17 @@ actor BilingualSpeechEngine: SpeechRecognizing {
 
     /// A genuinely single-locale request trusts its transcriber; a degraded
     /// dual request and meeting notes stay strict. A failure fallback is an
-    /// explicit single-locale pipeline, so it forces trusted locale even when
-    /// the session originally requested two.
+    /// explicit single-locale pipeline, so it forces trusted locale for live
+    /// captions even when the session originally requested two; meeting notes
+    /// always stay strict.
     nonisolated static func singleLocalePurity(
         forceTrustedLocale: Bool,
         requestedLanguageCount: Int,
         style: SpeechRecognitionStyle
     ) -> SpeechLanguagePurity {
+        if style == .meetingNotes { return .strict }
         if forceTrustedLocale { return .trustedLocale }
-        return requestedLanguageCount <= 1 && style != .meetingNotes
-            ? .trustedLocale
-            : .strict
+        return requestedLanguageCount <= 1 ? .trustedLocale : .strict
     }
 
     private func handleVoiceActivity(_ speechDetected: Bool) {
