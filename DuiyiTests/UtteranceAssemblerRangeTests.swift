@@ -378,6 +378,56 @@ struct UtteranceAssemblerRangeTests {
         #expect(second.text == "我们先去，吃饭吧")
     }
 
+    @Test("A trailing ellipsis keeps a contiguous phrase in the same row")
+    func trailingEllipsisKeepsContiguousPhrase() throws {
+        var assembler = UtteranceAssembler()
+        let first = try requireIngest(
+            &assembler,
+            "Lead a group of men to believe an athletic task is di...",
+            range(20.44, 22.90),
+            isFinal: true
+        )
+        let second = try requireIngest(
+            &assembler,
+            "nostic of sports intelligence.",
+            range(22.90, 25.06)
+        )
+
+        #expect(first.id == second.id)
+        #expect(
+            second.text
+                == "Lead a group of men to believe an athletic task is di nostic of sports intelligence."
+        )
+        #expect(second.isFinal == false)
+    }
+
+    @Test("A trailing ellipsis is removed when a contiguous final continues the row")
+    func trailingEllipsisIsStrippedOnContinuation() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler, "I was going to say...", range(0, 2), isFinal: true
+        )
+        let second = try requireIngest(
+            &assembler, "hello.", range(2, 4), isFinal: true
+        )
+
+        #expect(second.text == "I was going to say hello.")
+    }
+
+    @Test("A trailing ellipsis does not merge a phrase across a real pause")
+    func trailingEllipsisDoesNotMergeAcrossGap() throws {
+        var assembler = UtteranceAssembler()
+        let first = try requireIngest(
+            &assembler, "I don't know...", range(0, 2), isFinal: true
+        )
+        let second = try requireIngest(
+            &assembler, "Maybe tomorrow.", range(3, 5)
+        )
+
+        #expect(first.id != second.id)
+        #expect(second.text == "Maybe tomorrow.")
+    }
+
     @Test("A late final for the silence-closed tail keeps the finalized prefix")
     func lateFinalForClosedTailKeepsPrefix() throws {
         var assembler = UtteranceAssembler()

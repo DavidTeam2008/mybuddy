@@ -401,6 +401,52 @@ struct ConversationViewModelTests {
         #expect(started == [.zhHans, .english])
     }
 
+    @Test("DEBUG single-locale override starts only the peer language")
+    func debugSingleLocaleStartsPeerOnly() async {
+        let gate = ConversationFakeGate()
+        let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
+        preferences.userLanguage = .zhHans
+        preferences.peerLanguage = .english
+        preferences.autoStartListening = false
+        preferences.debugForceSingleLocale = true
+        preferences.debugSingleLocaleUsesPeer = true
+        let viewModel = ConversationViewModel(
+            gate: gate,
+            permissions: MockPermissions(),
+            preferences: preferences,
+            summarizer: MockSummarizer()
+        )
+
+        await viewModel.beginTask()
+        await viewModel.start()
+
+        #expect(gate.starts.first?.languages == [.english])
+        #expect(gate.starts.first?.fallbackLanguage == .english)
+    }
+
+    @Test("DEBUG single-locale override can use the user's language")
+    func debugSingleLocaleStartsUserOnly() async {
+        let gate = ConversationFakeGate()
+        let preferences = PreferencesStore(defaults: UserDefaults(suiteName: UUID().uuidString) ?? .standard)
+        preferences.userLanguage = .zhHans
+        preferences.peerLanguage = .english
+        preferences.autoStartListening = false
+        preferences.debugForceSingleLocale = true
+        preferences.debugSingleLocaleUsesPeer = false
+        let viewModel = ConversationViewModel(
+            gate: gate,
+            permissions: MockPermissions(),
+            preferences: preferences,
+            summarizer: MockSummarizer()
+        )
+
+        await viewModel.beginTask()
+        await viewModel.start()
+
+        #expect(gate.starts.first?.languages == [.zhHans])
+        #expect(gate.starts.first?.fallbackLanguage == .zhHans)
+    }
+
     @Test("Summary uses the on-device summarizer after a conversation")
     func summaryUsesInjectedSummarizer() async {
         let viewModel = makeViewModel()

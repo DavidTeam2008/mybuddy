@@ -637,9 +637,20 @@ final class ConversationViewModel {
     }
 
     private func makeListeningRequest() -> TaskLifecycle.ListeningRequest {
-        TaskLifecycle.ListeningRequest(
-            languages: [userLanguage, peerLanguage],
-            fallbackLanguage: peerLanguage,
+        var languages = [userLanguage, peerLanguage]
+        var fallback = peerLanguage
+        #if DEBUG
+        // A/B fixture: force one transcriber while keeping the production
+        // dual-locale request as the default. Takes effect on the next start.
+        if preferences.debugForceSingleLocale {
+            let language = preferences.debugSingleLocaleUsesPeer ? peerLanguage : userLanguage
+            languages = [language]
+            fallback = language
+        }
+        #endif
+        return TaskLifecycle.ListeningRequest(
+            languages: languages,
+            fallbackLanguage: fallback,
             style: .liveCaptions,
             audioUseCase: .faceToFace
         )

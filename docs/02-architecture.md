@@ -194,7 +194,7 @@ func isCurrent(_ handle: SpeechSessionHandle) async -> Bool
 ### 4.2 切句
 
 - 每个 transcriber 的 partial/final 带 `range` 进入 `UtteranceAssembler.ingest`。当前行 = 已 final 的 phrase 前缀 + 开放 range 的 volatile 尾部；range 连续性决定续写，句末标点（`.?!。？！`，可带收尾引号/括号）决定换行，range 间隔 >0.75 s 也开新行。
-- volatile 结果不保证会重发 final（Apple 明确说明）。下一个 phrase（不同 range）到达时，旧的开放 volatile 先并入已定稿 phrase，不能直接丢弃；之后同 range 的 final 仍原位修订该 phrase。**final 只在 range 覆盖原 phrase 时才替换文本**：更窄的 final 保留原 phrase 全文；即使覆盖，若 final 是原文本的严格子串且不足一半，也视为截断并保留更全的 volatile（避免“预览对、结算丢前半句”）。纯标点结果（`.`、`...`）无词可承载，直接忽略；关闭行之后扩展出关闭 range 的 late volatile，或文本不含旧 tail 的 late final，若新行仍为空或当前行 range 与它重叠，则开/续新行，不丢弃暂停恢复后的第一句，也不把新句替换进旧行。源短语开头的续句标点（`,..`、`...`）剥除，4+ 连续点折叠为 `...`；译文按目标语言规范省略号（中文 `……`）。
+- volatile 结果不保证会重发 final（Apple 明确说明）。下一个 phrase（不同 range）到达时，旧的开放 volatile 先并入已定稿 phrase，不能直接丢弃；之后同 range 的 final 仍原位修订该 phrase。**final 只在 range 覆盖原 phrase 时才替换文本**：更窄的 final 保留原 phrase 全文；即使覆盖，若 final 是原文本的严格子串且不足一半，也视为截断并保留更全的 volatile（避免“预览对、结算丢前半句”）。纯标点结果（`.`、`...`）无词可承载，直接忽略；尾随 ASCII 省略号（2+ 个 `.`）是 transcriber 的续句标记，不触发换行；同一行后续 phrase 接入时去掉该省略号，按正常词间距拼接（不硬拼缺失音节的片段，避免伪造词）。关闭行之后扩展出关闭 range 的 late volatile，或文本不含旧 tail 的 late final，若新行仍为空或当前行 range 与它重叠，则开/续新行，不丢弃暂停恢复后的第一句，也不把新句替换进旧行。源短语开头的续句标点（`,..`、`...`）剥除，4+ 连续点折叠为 `...`；译文按目标语言规范省略号（中文 `……`）。
 - 空 volatile 撤销该 range 的开放尾部并回退到 final 前缀；空 final 表示该 range 无语音。
 - 静音（Detector 或 1.1 s 无结果）：引擎先 `analyzer.finalize(through: nil)`，等待 350 ms 让转写器发布自己的 final；超时才用 `silenceTimedOut` 合成 final。合成与迟到 final 都按 range 重叠匹配最近关闭的行并复用 ID（`isRevision`），最多保留 8 行。关闭行保存 phrase 列表：迟到 final 只替换/合并其 range 内的 phrase，已 final 的前缀必须保留（不能把整行缩成最后一个 phrase）。
 - final 后 `acknowledgeFinal` 保持 1.0 秒，抑制同句尾巴被另一路重复接收。
