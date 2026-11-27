@@ -288,6 +288,16 @@ struct TranslationPipelineTests {
         #expect(pipeline.outboundJob == nil)
     }
 
+    @Test("A Chinese translation normalizes an ASCII ellipsis")
+    func chineseTranslationNormalizesEllipsis() throws {
+        let (pipeline, _) = makePipeline()
+        pipeline.submit(makeSubmission(text: "what you...", language: .english))
+        let job = try #require(pipeline.outboundJob)
+
+        let update = try #require(pipeline.accept(job: job, text: "你看到什么......"))
+        #expect(update.translatedText == "你看到什么……")
+    }
+
     @Test("Empty translation text is not accepted and leaves the outbound job alone")
     func emptyTranslationIsDropped() throws {
         let (pipeline, _) = makePipeline()

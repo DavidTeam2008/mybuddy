@@ -61,6 +61,7 @@ SOURCES=(
     "$ROOT/Duiyi/Domain/Models/AppLanguage.swift"
     "$ROOT/Duiyi/Domain/Models/ScriptCounts.swift"
     "$ROOT/Duiyi/Domain/Models/SpokenText.swift"
+    "$ROOT/Duiyi/Domain/Models/TextNormalization.swift"
     "$ROOT/Duiyi/Services/DuiyiLog.swift"
     "$ROOT/Duiyi/Services/Speech/UtteranceAssembler.swift"
     "$ROOT/tools/verification/utterance-identity/main.swift"

@@ -133,6 +133,49 @@ struct UtteranceAssemblerRangeTests {
         #expect(late.isRevision)
     }
 
+    @Test("A late final that extends a closed range starts the next row")
+    func lateFinalExtendingClosedRangeStartsNextRow() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(&assembler, "They also cause us", range(0, 2))
+        let synthetic = try requireSilenceFinal(&assembler)
+
+        let next = try requireIngest(
+            &assembler, "into each other.", range(1.5, 4), isFinal: true
+        )
+        #expect(next.id != synthetic.id)
+        #expect(next.text == "into each other.")
+    }
+
+    @Test("A late final revises the next row started by its volatile")
+    func lateFinalRevisesLateVolatileRow() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(&assembler, "They also cause us", range(0, 2))
+        let synthetic = try requireSilenceFinal(&assembler)
+        let revived = try requireIngest(
+            &assembler, "into each other.", range(1.5, 4)
+        )
+        let final = try requireIngest(
+            &assembler, "into each other.", range(1.5, 4), isFinal: true
+        )
+        #expect(revived.id != synthetic.id)
+        #expect(final.id == revived.id)
+        #expect(final.text == "into each other.")
+    }
+
+    @Test("A late volatile that extends a closed range starts the next row")
+    func lateVolatileExtendingClosedRangeStartsNextRow() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(&assembler, "They also cause us", range(0, 2))
+        let synthetic = try requireSilenceFinal(&assembler)
+
+        let revived = try requireIngest(
+            &assembler, "bump into each other", range(1.5, 4)
+        )
+        #expect(revived.id != synthetic.id)
+        #expect(revived.text == "bump into each other")
+        #expect(revived.isFinal == false)
+    }
+
     @Test("A late volatile for a closed range does not reopen the row")
     func lateVolatileForClosedRangeIsIgnored() throws {
         var assembler = UtteranceAssembler()
@@ -149,6 +192,285 @@ struct UtteranceAssemblerRangeTests {
 
         let next = try requireIngest(&assembler, "And then", range(2, 3))
         #expect(next.text == "And then")
+    }
+
+    @Test("A drastically truncated final keeps the fuller volatile text")
+    func truncatedFinalKeepsFullerVolatile() throws {
+        var assembler = UtteranceAssembler()
+        let full = "Highlight an Asian woman's Asian identity before a math test? "
+            + "She'll perform better."
+        _ = try requireIngest(&assembler, full, range(0, 3))
+
+        let final = try requireIngest(
+            &assembler, "She'll perform better.", range(0, 3), isFinal: true
+        )
+        #expect(final.text == full)
+    }
+
+    @Test("A narrower final keeps the open phrase's full text")
+    func narrowFinalKeepsOpenPhrase() throws {
+        var assembler = UtteranceAssembler()
+        let full = "Highlight an Asian woman's Asian identity before a math test? "
+            + "She'll perform better."
+        _ = try requireIngest(&assembler, full, range(0, 3))
+
+        let final = try requireIngest(
+            &assembler, "She'll perform better.", range(1.5, 3), isFinal: true
+        )
+        #expect(final.text == full)
+        #expect(final.isFinal)
+    }
+
+    @Test("A narrow final does not truncate an already-finalized phrase")
+    func narrowFinalKeepsFinalizedPhrase() throws {
+        var assembler = UtteranceAssembler()
+        let full = "They also cause us to bump into each other"
+        _ = try requireIngest(&assembler, full, range(0, 3), isFinal: true)
+
+        let final = try requireIngest(
+            &assembler, "into each other", range(2, 3), isFinal: true
+        )
+        #expect(final.text == full)
+    }
+
+    @Test("A punctuation-only result is ignored")
+    func punctuationOnlyResultIsIgnored() {
+        var assembler = UtteranceAssembler(languagePurity: .trustedLocale)
+        #expect(
+            assembler.ingest(
+                language: .english, text: ".", isFinal: true, range: range(0, 1)
+            ) == nil
+        )
+        #expect(
+            assembler.ingest(
+                language: .english, text: "...", isFinal: false, range: range(0, 1)
+            ) == nil
+        )
+    }
+
+    @Test("A punctuation-only result does not replace the open phrase")
+    func punctuationOnlyResultKeepsOpenPhrase() throws {
+        var assembler = UtteranceAssembler(languagePurity: .trustedLocale)
+        _ = try requireIngest(
+            &assembler, "They also cause us to bump", range(0, 2)
+        )
+        #expect(
+            assembler.ingest(
+                language: .english, text: ".", isFinal: true, range: range(0, 2)
+            ) == nil
+        )
+
+        let final = try requireIngest(
+            &assembler, "into each other.", range(2, 4), isFinal: true
+        )
+        #expect(final.text == "They also cause us to bump into each other.")
+    }
+
+    @Test("An open volatile survives the next phrase's final")
+    func openVolatileSurvivesNextFinal() throws {
+        var assembler = UtteranceAssembler()
+        let first = try requireIngest(
+            &assembler, "It's the shame we carry.", range(0, 2)
+        )
+        let second = try requireIngest(
+            &assembler,
+            "It's the shame of wanting something good.",
+            range(2, 4),
+            isFinal: true
+        )
+
+        #expect(second.id == first.id)
+        #expect(
+            second.text
+                == "It's the shame we carry. It's the shame of wanting something good."
+        )
+    }
+
+    @Test("Consecutive volatile sentences all survive the last final")
+    func consecutiveVolatilesSurviveLastFinal() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler, "It's the shame we carry.", range(0, 1)
+        )
+        _ = try requireIngest(
+            &assembler, "It's the shame of wanting something good.", range(1, 2)
+        )
+        _ = try requireIngest(
+            &assembler, "It's the shame of feeling something good.", range(2, 3)
+        )
+        let last = try requireIngest(
+            &assembler,
+            "The shame of not believing we deserve it.",
+            range(3, 4),
+            isFinal: true
+        )
+
+        #expect(
+            last.text
+                == "It's the shame we carry. It's the shame of wanting something good. "
+                + "It's the shame of feeling something good. "
+                + "The shame of not believing we deserve it."
+        )
+    }
+
+    @Test("An open volatile survives the next phrase's volatile")
+    func openVolatileSurvivesNextVolatile() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler, "It's the shame we carry.", range(0, 2)
+        )
+        let second = try requireIngest(
+            &assembler,
+            "It's the shame of wanting something good.",
+            range(2, 4)
+        )
+
+        #expect(second.isFinal == false)
+        #expect(
+            second.text
+                == "It's the shame we carry. It's the shame of wanting something good."
+        )
+    }
+
+    @Test("A continuation phrase loses its leading punctuation")
+    func continuationPhraseLeadingPunctuationIsStripped() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "An award winning author, Lydia Yuknovich.",
+            range(0, 2),
+            isFinal: true
+        )
+        let second = try requireIngest(
+            &assembler,
+            ",.. she didn't follow up on it.",
+            range(2, 4),
+            isFinal: true
+        )
+
+        #expect(second.text == "she didn't follow up on it.")
+    }
+
+    @Test("A phrase ending in punctuation joins the next phrase with a space")
+    func punctuationPhraseJoinsWithSpace() throws {
+        var assembler = UtteranceAssembler()
+        let first = try requireIngest(
+            &assembler, "Hello,", range(0, 1), isFinal: true
+        )
+        let second = try requireIngest(
+            &assembler, "world", range(1, 2), isFinal: true
+        )
+
+        #expect(first.id == second.id)
+        #expect(second.text == "Hello, world")
+    }
+
+    @Test("A Chinese phrase ending in punctuation joins without a space")
+    func chinesePunctuationPhraseJoinsWithoutSpace() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler, "我们先去，", range(0, 1), isFinal: true, language: .zhHans
+        )
+        let second = try requireIngest(
+            &assembler, "吃饭吧", range(1, 2), isFinal: true, language: .zhHans
+        )
+
+        #expect(second.text == "我们先去，吃饭吧")
+    }
+
+    @Test("A late final for the silence-closed tail keeps the finalized prefix")
+    func lateFinalForClosedTailKeepsPrefix() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler, "They also cause us", range(0, 2), isFinal: true
+        )
+        _ = try requireIngest(
+            &assembler, "to bump into each other", range(2, 4)
+        )
+        let synthetic = try requireSilenceFinal(&assembler)
+        #expect(synthetic.text == "They also cause us to bump into each other")
+
+        // The transcriber's own final covers only the tail range. It must
+        // replace the tail, not the whole row text.
+        let late = try requireIngest(
+            &assembler,
+            "to bump into each other.",
+            range(2, 4),
+            isFinal: true
+        )
+        #expect(late.id == synthetic.id)
+        #expect(late.text == "They also cause us to bump into each other.")
+    }
+
+    @Test("A late final after a language-change close keeps the old prefix")
+    func lateFinalAfterLanguageCloseKeepsPrefix() throws {
+        let clock = RangeTestClock()
+        var assembler = UtteranceAssembler(now: { clock.now })
+        _ = try requireIngest(
+            &assembler, "They also cause us", range(0, 2), isFinal: true
+        )
+        let live = try requireIngest(
+            &assembler, "to bump into each other", range(2, 4)
+        )
+        // A confident other-language result closes the English row (the
+        // utterance-identity fix) while its tail is still volatile.
+        clock.now.addTimeInterval(1.5)
+        _ = assembler.ingest(
+            language: .zhHans,
+            text: "他们互相碰撞",
+            isFinal: true,
+            range: range(2.1, 4)
+        )
+
+        let late = try requireIngest(
+            &assembler,
+            "to bump into each other.",
+            range(2, 4),
+            isFinal: true
+        )
+        #expect(late.id == live.id)
+        #expect(late.text == "They also cause us to bump into each other.")
+    }
+
+    @Test("A late tail final keeps every finalized phrase of the row")
+    func lateTailFinalKeepsAllFinalizedPhrases() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler, "They also cause us", range(0, 2), isFinal: true
+        )
+        _ = try requireIngest(
+            &assembler, "to bump into each other", range(2, 4), isFinal: true
+        )
+        _ = try requireIngest(&assembler, "and then", range(4, 5))
+        _ = try requireSilenceFinal(&assembler)
+
+        let late = try requireIngest(
+            &assembler, "and then.", range(4, 5), isFinal: true
+        )
+        #expect(
+            late.text == "They also cause us to bump into each other and then."
+        )
+    }
+
+    @Test("A late final after a gap close keeps the finalized prefix")
+    func lateFinalAfterGapCloseKeepsPrefix() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler, "They also cause us", range(0, 2), isFinal: true
+        )
+        _ = try requireIngest(
+            &assembler, "to bump into each other", range(2, 4)
+        )
+        // A phrase after a >0.75 s gap closes the row with its volatile tail.
+        _ = try requireIngest(&assembler, "and then", range(5, 6))
+
+        let late = try requireIngest(
+            &assembler,
+            "to bump into each other.",
+            range(2, 4),
+            isFinal: true
+        )
+        #expect(late.text == "They also cause us to bump into each other.")
     }
 
     @Test("A late final long after silence still reuses the closed row")
