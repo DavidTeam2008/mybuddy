@@ -123,6 +123,14 @@ enum TokenPalette {
     )
     /// Brand fill; pair it with `onAccent` text.
     static let listen = TokenVariants(hex: 0xE8B86D)
+    /// Manual speaking-turn accent. Distinct from the amber `listen` brand
+    /// and from `danger`; used for the active turn bar's text/icon and tint.
+    static let speaking = TokenVariants(
+        light: 0x1F6F6B,
+        dark: 0x7EC8C3,
+        lightHighContrast: 0x0F5652,
+        darkHighContrast: 0xA8E4DF
+    )
     /// Readable accent used for text, icons, and links.
     static let accentText = TokenVariants(
         light: 0x8A5A12,
@@ -253,6 +261,8 @@ enum Tokens {
     static let textSecondary = TokenPalette.textSecondary.color
     /// Brand fill; pair with `onAccent` text.
     static let listen = TokenPalette.listen.color
+    /// Manual speaking-turn text/icon accent.
+    static let speaking = TokenPalette.speaking.color
     /// Readable accent for text, icons, and links.
     static let accentText = TokenPalette.accentText.color
     static let onAccent = TokenPalette.onAccent.color

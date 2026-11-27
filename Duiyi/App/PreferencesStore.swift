@@ -17,6 +17,7 @@ final class PreferencesStore {
         static let showsSource = "duiyi.showsSourceLine"
         static let meetingLanguage = "duiyi.meetingLanguage"
         static let meetingMultilingual = "duiyi.meetingMultilingual.v2"
+        static let conversationListeningMode = "duiyi.conversationListeningMode"
         #if DEBUG
         static let debugForceSingleLocale = "duiyi.debug.forceSingleLocale"
         static let debugSingleLocaleUsesPeer = "duiyi.debug.singleLocaleUsesPeer"
@@ -75,6 +76,12 @@ final class PreferencesStore {
 
     var meetingRecognizesMultipleLanguages: Bool {
         didSet { defaults.set(meetingRecognizesMultipleLanguages, forKey: Key.meetingMultilingual) }
+    }
+
+    /// Face-to-face turn selection. Manual is the default; automatic is the
+    /// language-routing fallback.
+    var conversationListeningMode: ConversationListeningMode {
+        didSet { defaults.set(conversationListeningMode.rawValue, forKey: Key.conversationListeningMode) }
     }
 
     #if DEBUG
@@ -153,6 +160,12 @@ final class PreferencesStore {
             meetingRecognizesMultipleLanguages = false
         } else {
             meetingRecognizesMultipleLanguages = defaults.bool(forKey: Key.meetingMultilingual)
+        }
+        if let raw = defaults.string(forKey: Key.conversationListeningMode),
+           let mode = ConversationListeningMode(rawValue: raw) {
+            conversationListeningMode = mode
+        } else {
+            conversationListeningMode = .manual
         }
         #if DEBUG
         debugForceSingleLocale = defaults.bool(forKey: Key.debugForceSingleLocale)

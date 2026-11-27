@@ -70,6 +70,13 @@ struct TokensTests {
         assertContrast(TokenPalette.warningText, TokenPalette.warningBackground, "warning")
     }
 
+    @Test("Speaking turn text clears 4.5:1 on panes, canvas, and sheets")
+    func speakingContrast() {
+        for (surfaceName, surface) in surfaces {
+            assertContrast(TokenPalette.speaking, surface, "speaking/\(surfaceName)")
+        }
+    }
+
     @Test("Every language badge clears 4.5:1 on panes, sheets, and canvas")
     func languageContrast() {
         let badges: [(String, TokenVariants)] = [
