@@ -2,9 +2,9 @@
 
 > **唯一决策表**：其他文档只引用 D 编号，不复制内容。确认后更新本表并标注日期；未确认前不按假设实现。
 > 排期与验收见 [`04-roadmap.md`](04-roadmap.md)；工程论证见相关案例文档，不在此复述。
-> 状态：**D1–D7 已于 2026-11-23 确认；D8 已于 2026-11-24 确认**；D1–D8 之外的产品口径见文末「v1 冻结口径」。
+> 状态：**D1–D7 已于 2026-11-23 确认；D8 已于 2026-11-24 确认；D9–D10 于 2026-11-28 确认**；D1–D10 之外的产品口径见文末「v1 冻结口径」。
 
-## D1–D8（产品 / 工程，状态：已确认 2026-11-23；D8 于 2026-11-24 确认）
+## D1–D10（产品 / 工程，状态：已确认 2026-11-23；D8 于 2026-11-24、D9–D10 于 2026-11-28 确认）
 
 | ID | 决策点 | 当前事实 / 已实现 | 已确认决策 | 验收影响 |
 | --- | --- | --- | --- | --- |
@@ -16,6 +16,9 @@
 | D6 | Apple 智能范围 | 代码只在 `availability == .available` 时调用 summarizer；不可用时无总结、无 digest；可用但失败时 digest 可能被误标为 Apple 智能生成 | **总结仅在 Apple Intelligence 可用时提供**；不可用三态（`deviceNotEligible` / `appleIntelligenceOff` / `modelNotReady`）只说明原因，仍可导出；生成失败/空结果说明本次暂不可用，不展示 digest、不冒充 AI；iPhone 13 无总结但可导出；Apple 智能只用于总结；删除 01/03 的 digest 回退表述 | iPhone 13 明确「本机不支持总结」；任何非 AI 结果不得显示「由 Apple 智能生成」 |
 | D7 | 长会策略 | 会议 2 万字符按内存 transcript 累计；达到上限停听并标记 `isLengthLimited`；清屏会复位计数；无续集关联 | **2 万字是分段边界，不是产品上限**；v1 实现「结束并继续」，用组 ID 关联续集任务；计数按任务累计（含清屏前内容），清屏不复位；单段导出 + 组内跳转，整组合并导出留 v1.x。该续集关联是 Q1 功能冻结中唯一**新增产品行为**的例外 | 长会不丢内容；续集任务可在历史中组内跳转；达到 2 万后不静默截断 |
 | D8 | 字幕/文字稿的 utterance identity | C04 前：`Utterance.id` 由 `UtteranceAssembler` 维护；投影层仍有跨 ID 文本相似度合并（`PaneState` + 三份 `upsertTranscript` + `TranslationPipeline` alias） | **`Utterance.id` 即 caption 行与 transcript 条目的唯一身份；assembler 独占新 ID 判定；同一 ID 同一行，新 ID 新行；不引入 `continuesFrom` / `groupID`；跨 ID 文本相似度只保留在 assembler 内部；投影 module 用单一有序 record store 派生显示窗口与全量 transcript**（C04 spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27)） | C04 Wave 3；assembler 认不出的修订成为独立行，各自翻译；删除 alias 与跨 ID 合并；行为变更测试按 spec 记录 |
+
+| D9 | ASR `.fastResults` 默认 | P1-3 360 s 同音频 A/B：fast 40 行/覆盖 98.35%/WER 3.82–3.69%；no-fast 73 行/95.67%/WER 7.38%，行碎片化；no-fast+context 71 行/95.80%/WER 6.62% | **Release 保持 `.fastResults` 开启**；`-duiyi.asrFastResults` 只作 DEBUG 实验开关。关闭 fast 必须重新做 p95/预览延迟与行稳定性 A/B，不能只为个别词恢复 | P1-3 A/B 默认 fast；no-fast 不进入产品 |
+| D10 | ASR `contextualStrings` 默认 | `AnalysisContext.contextualStrings[.general]` 在 360 s A/B 有小幅 WER 收益（3.31% vs 3.69–3.82%），但 Cameron/Lidia/Design/`white men` 仍随机失败；full context 两次 WER 2.01/2.83% vs baseline 2.08%，无稳定收益；词表是夹具专用，产品无来源 | **不默认启用 contextualStrings**；只保留 DEBUG 实验开关。若后续做“用户可提供名称/术语”的显式设置，需新增产品决策、隐私与存储设计，并证明不引入专名过拟合/延迟/串词 | P1-3 不因夹具词表改变 Release；用户词表功能另立决策 |
 
 ## v1 冻结口径（非 D 编号）
 
