@@ -1,8 +1,9 @@
 # MyBuddy fixture semantic review — `fix-full-edge` (84 rows)
 
 > **Status:** LLM screening from 2026-11-28, not human signoff. The run is
-> `fix-full-edge`, recorded before the row-82 assembler fix. Row 82 is fixed in
-> code and awaits a fresh device run; the remaining findings are pre-fix.
+> `fix-full-edge`, recorded before the row-82 assembler fix. The follow-up
+> full run `row82-fix-full-1` recovered the clause (requiredCues 10/10,
+> 85 rows, 99.43% coverage); the remaining rows below are pre-fix results.
 > Use this as a triage list, not as a release gate.
 
 ## Inputs and method
@@ -99,7 +100,7 @@
 | 79 | "A seed. that gets you to question what you've previously accepted as true." | "一颗种子。让你质疑你以前接受为事实的东西。" | minor | "接受为事实" is slightly literal; "信以为真" is natural. Meaning preserved. |
 | 80 | "That makes you more aware of your ropes." | "这让你更清楚自己的绳索。" | OK | Faithful. |
 | 81 | "that helps you see, they were always yours to bring." | "这有助于你看到，它们一直都是你带来的。" | **SD-A major** + minor | Ground truth "yours to break"; ASR misheard "break" as "bring", and translation renders "你带来的" ("brought by you"), inverting the closing metaphor. Translation is faithful to the defective source; the semantic result is wrong. |
-| 82 | "No matter who you are ... in this moment. If you break your ropes." | "无论你是谁，或者你此刻在哪里。 如果你断了绳子。" | **SD-X critical** + minor | Assembler dropped "there is the life that you can be living"; the row has no main assertion, only two fragments. Diagnostics: 41-char volatile at range 766.91–770.86 (16:32:35.5) exactly matches the missing clause; no final for that range; row text is 54-char first phrase + 25-char final. Prior `fix-full-final` row 82 retained "There is the life that you can be living." Minor: "断了绳子" (ropes broke) vs "你挣脱绳索". |
+| 82 | "No matter who you are ... in this moment. If you break your ropes." | "无论你是谁，或者你此刻在哪里。 如果你断了绳子。" | **SD-X critical** + minor | Assembler dropped "there is the life that you can be living"; the row has no main assertion, only two fragments. Diagnostics: 41-char volatile at range 766.91–770.86 (16:32:35.5) exactly matches the missing clause; no final for that range; row text is 54-char first phrase + 25-char final. Prior `fix-full-final` row 82 retained "There is the life that you can be living." Minor: "断了绳子" (ropes broke) vs "你挣脱绳索". **Fixed and device-verified in `row82-fix-full-1`.** |
 | 83 | "You get there one new thought at a time. One new action at a time. one day ..." | "你一次一个新想法到达那里。 一次一个新的行动。有一天 ..." | minor + SD-A minor | Word order awkward; "一次一个新的行动。" is a fragment; ASR dropped "until", so the "until one day" relation is lost. |
 
 ## Source defects vs ground truth (ASR vs assembler)
