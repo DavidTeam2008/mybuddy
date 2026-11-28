@@ -38,6 +38,16 @@ NOISE=0
 SKIP_BUILD=0
 GROUND_TRUTH="$ROOT/tools/fixtures/ted-cue132-331.tsv"
 MIN_COVERAGE="0.90"
+BASELINE="$ROOT/tools/fixtures/ted-baseline.json"
+BASELINE_EXPLICIT=0
+GROUND_TRUTH_EXPLICIT=0
+ASR_FAST_RESULTS="yes"
+ASR_CONTEXT_TERMS=""
+DUMP_ASR_TEXT=0
+FIXTURE_MODULE="interpretation"
+PREEMPTION_PUBLISH="no"
+FIXTURE_USER_LANGUAGE="zhHans"
+FIXTURE_PEER_LANGUAGE="english"
 
 usage() {
     cat <<'EOF'
@@ -53,6 +63,21 @@ Options:
   --settle <seconds>     Wait after EOF before ending the task (default: 12)
   --noise                Play speech on the Mac speakers during the run
   --ground-truth <path>  Cue TSV for scoring
+  --module interpretation|conversation
+                         Fixture driver (default: interpretation; conversation
+                         runs the real dual-locale face-to-face path)
+  --baseline <path|none> Regression baseline (default: tools/fixtures/ted-baseline.json
+                         for the default full WAV/realtime run; pass none to disable)
+  --asr-fast-results yes|no
+                         Toggle SpeechTranscriber.fastResults for A/B (default: yes)
+  --asr-context-terms <csv>
+                         AnalysisContext contextual strings for A/B (default: empty)
+  --preemption-publish yes|no
+                         DEBUG A/B: publish a confident visible incumbent row
+                         before a dual-locale preemption (default: no = Release)
+  --user-language <lang> Conversation fixture user language (default: zhHans)
+  --peer-language <lang> Conversation fixture peer language (default: english)
+  --dump-asr-text       Pull fixture-only raw ASR JSONL into evidence (default: off)
   --min-coverage <0-1>   Fail below this source coverage (default: 0.90)
   --skip-build           Reuse the installed app and last build
   -h, --help             Show this help
@@ -69,11 +94,57 @@ while [[ $# -gt 0 ]]; do
         --pacing) PACING="$2"; shift 2 ;;
         --settle) SETTLE="$2"; shift 2 ;;
         --noise) NOISE=1; shift ;;
-        --ground-truth) GROUND_TRUTH="$2"; shift 2 ;;
+        --ground-truth) GROUND_TRUTH="$2"; GROUND_TRUTH_EXPLICIT=1; shift 2 ;;
+        --module) FIXTURE_MODULE="$2"; shift 2 ;;
+        --user-language) FIXTURE_USER_LANGUAGE="$2"; shift 2 ;;
+        --peer-language) FIXTURE_PEER_LANGUAGE="$2"; shift 2 ;;
+        --baseline) BASELINE="$2"; BASELINE_EXPLICIT=1; shift 2 ;;
+        --asr-fast-results) ASR_FAST_RESULTS="$2"; shift 2 ;;
+        --asr-context-terms) ASR_CONTEXT_TERMS="$2"; shift 2 ;;
+        --preemption-publish) PREEMPTION_PUBLISH="$2"; shift 2 ;;
+        --dump-asr-text) DUMP_ASR_TEXT=1; shift ;;
         --min-coverage) MIN_COVERAGE="$2"; shift 2 ;;
         --skip-build) SKIP_BUILD=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+    esac
+done
+
+if [[ "$BASELINE_EXPLICIT" -eq 0 ]] && {
+    [[ "$GROUND_TRUTH_EXPLICIT" -eq 1 ]] ||
+    [[ "$START" != "511" ]] ||
+    [[ "$DURATION" != "785" ]] ||
+    [[ "$CODEC" != "wav" ]] ||
+    [[ "$PACING" != "realtime" ]]
+}; then
+    BASELINE=""
+fi
+if [[ "$BASELINE" == "none" ]]; then
+    BASELINE=""
+fi
+if [[ -n "$BASELINE" && ! -f "$BASELINE" ]]; then
+    printf 'Missing baseline: %s\n' "$BASELINE" >&2
+    exit 1
+fi
+if [[ "$ASR_FAST_RESULTS" != "yes" && "$ASR_FAST_RESULTS" != "no" ]]; then
+    printf 'Unsupported --asr-fast-results: %s\n' "$ASR_FAST_RESULTS" >&2
+    exit 2
+fi
+if [[ "$FIXTURE_MODULE" != "interpretation" && "$FIXTURE_MODULE" != "conversation" ]]; then
+    printf 'Unsupported --module: %s\n' "$FIXTURE_MODULE" >&2
+    exit 2
+fi
+if [[ "$PREEMPTION_PUBLISH" != "yes" && "$PREEMPTION_PUBLISH" != "no" ]]; then
+    printf 'Unsupported --preemption-publish: %s\n' "$PREEMPTION_PUBLISH" >&2
+    exit 2
+fi
+for language in "$FIXTURE_USER_LANGUAGE" "$FIXTURE_PEER_LANGUAGE"; do
+    case "$language" in
+        zhHans|english|japanese|korean|thai|vietnamese) ;;
+        *)
+            printf 'Unsupported fixture language: %s\n' "$language" >&2
+            exit 2
+            ;;
     esac
 done
 
@@ -129,6 +200,62 @@ shasum -a 256 "$FIXTURE_PATH" > "$EVIDENCE/fixture.sha256"
 echo "fixture: $FIXTURE_PATH"
 echo "sha256:  $(cut -d' ' -f1 "$EVIDENCE/fixture.sha256")"
 echo "info:    $(grep -E 'Data format|estimated duration' "$EVIDENCE/fixture-info.txt" | tr '\n' ' ')"
+echo "baseline: ${BASELINE:-none}"
+echo "asr:      fast=$ASR_FAST_RESULTS context=${ASR_CONTEXT_TERMS:-none}"
+echo "module:   $FIXTURE_MODULE languages=$FIXTURE_USER_LANGUAGE/$FIXTURE_PEER_LANGUAGE preemption-publish=$PREEMPTION_PUBLISH"
+
+COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
+DIRTY=false
+if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+    DIRTY=true
+fi
+FIXTURE_SHA="$(cut -d' ' -f1 "$EVIDENCE/fixture.sha256")"
+XCODE_VERSION="$(xcodebuild -version 2>/dev/null | tr '\n' ' ' || true)"
+MACOS_VERSION="$(sw_vers -productVersion 2>/dev/null || true)"
+APP_PATH="$DERIVED_DATA/Build/Products/Debug-iphoneos/Duiyi.app"
+APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist" 2>/dev/null || true)"
+APP_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist" 2>/dev/null || true)"
+jq -n \
+    --arg runId "$RUN_ID" \
+    --arg commit "$COMMIT" \
+    --argjson dirty "$DIRTY" \
+    --arg fixtureSha256 "$FIXTURE_SHA" \
+    --arg groundTruth "$GROUND_TRUTH" \
+    --arg baseline "${BASELINE:-none}" \
+    --argjson start "$START" \
+    --argjson duration "$DURATION" \
+    --arg codec "$CODEC" \
+    --arg pacing "$PACING" \
+    --arg module "$FIXTURE_MODULE" \
+    --arg asrFastResults "$ASR_FAST_RESULTS" \
+    --arg asrContextTerms "$ASR_CONTEXT_TERMS" \
+    --arg preemptionPublish "$PREEMPTION_PUBLISH" \
+    --arg fixtureUserLanguage "$FIXTURE_USER_LANGUAGE" \
+    --arg fixturePeerLanguage "$FIXTURE_PEER_LANGUAGE" \
+    --argjson skipBuild "$([[ "$SKIP_BUILD" -eq 1 ]] && echo true || echo false)" \
+    --argjson dumpASRText "$([[ "$DUMP_ASR_TEXT" -eq 1 ]] && echo true || echo false)" \
+    --arg appVersion "$APP_VERSION" \
+    --arg appBuild "$APP_BUILD" \
+    --arg xcodeVersion "$XCODE_VERSION" \
+    --arg macOSVersion "$MACOS_VERSION" \
+    '{
+        schemaVersion: 1,
+        runId: $runId,
+        commit: $commit,
+        dirty: $dirty,
+        fixtureSha256: $fixtureSha256,
+        groundTruth: $groundTruth,
+        baseline: $baseline,
+        module: $module,
+        fixtureLanguages: {user: $fixtureUserLanguage, peer: $fixturePeerLanguage},
+        window: {startSeconds: $start, durationSeconds: $duration, codec: $codec, pacing: $pacing},
+        asr: {fastResults: $asrFastResults, contextTerms: $asrContextTerms, dumpText: $dumpASRText},
+        preemption: {publishIncumbent: $preemptionPublish},
+        skipBuild: $skipBuild,
+        app: {version: $appVersion, build: $appBuild},
+        toolchain: {xcode: $xcodeVersion, macOS: $macOSVersion}
+    }' > "$EVIDENCE/run-meta.json"
+echo "meta:     $EVIDENCE/run-meta.json"
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
     echo "== build for device =="
@@ -192,8 +319,16 @@ xcrun devicectl device process launch \
     -- \
     -duiyi.onboardingComplete YES \
     -duiyi.storeFile "fixture-$RUN_ID" \
+    -duiyi.prefsSuite "fixture-$RUN_ID" \
     -duiyi.fixtureAudio "Documents/$FIXTURE_NAME" \
+    -duiyi.fixtureModule "$FIXTURE_MODULE" \
+    -duiyi.fixtureUserLanguage "$FIXTURE_USER_LANGUAGE" \
+    -duiyi.fixturePeerLanguage "$FIXTURE_PEER_LANGUAGE" \
     -duiyi.fixturePacing "$PACING" \
+    -duiyi.assemblerPreemptionPublish "$PREEMPTION_PUBLISH" \
+    -duiyi.asrFastResults "$ASR_FAST_RESULTS" \
+    -duiyi.asrContextTerms "$ASR_CONTEXT_TERMS" \
+    -duiyi.dumpASRText "$([[ "$DUMP_ASR_TEXT" -eq 1 ]] && echo YES || echo NO)" \
     -duiyi.fixtureAutoRun YES \
     -duiyi.fixtureSettleSeconds "$SETTLE" \
     -duiyi.fixtureDeleteAfterRun YES \
@@ -231,8 +366,11 @@ if [[ "$MARKER_READY" -ne 1 ]]; then
 fi
 
 echo "== stop app =="
+# `awk exit` closes the pipe early; devicectl may then receive SIGPIPE and
+# pipefail would abort the run after a successful marker. Keep the PID and
+# ignore that expected pipeline status.
 PID=$(xcrun devicectl device info processes --device "$DEVICE_UDID" 2>/dev/null \
-    | awk '/Duiyi.app\/Duiyi/ {print $1; exit}')
+    | awk '/Duiyi.app\/Duiyi/ {print $1; exit}' || true)
 if [[ -n "$PID" ]]; then
     xcrun devicectl device process terminate --device "$DEVICE_UDID" --pid "$PID" --kill \
         > "$EVIDENCE/terminate.log" 2>&1 || true
@@ -255,6 +393,30 @@ xcrun devicectl device copy from \
     --source 'Library/Application Support/UITestStores' \
     --destination "$EVIDENCE/UITestStores" >/dev/null 2>&1 || true
 
+if [[ "$DUMP_ASR_TEXT" -eq 1 ]]; then
+    if xcrun devicectl device copy from \
+        --device "$DEVICE_UDID" \
+        --domain-type appDataContainer \
+        --domain-identifier "$BUNDLE_ID" \
+        --source 'Documents/fixture-asr-raw.jsonl' \
+        --destination "$EVIDENCE/asr-raw.jsonl" >/dev/null 2>&1; then
+        echo "== raw ASR: $EVIDENCE/asr-raw.jsonl =="
+    else
+        echo "WARN: raw ASR pull failed" >&2
+    fi
+    # The raw dump contains fixture caption text. Overwrite it on the device
+    # after pulling; keep the empty file so the next fixture run resets it.
+    EMPTY_RAW="$(mktemp)"
+    xcrun devicectl device copy to \
+        --device "$DEVICE_UDID" \
+        --domain-type appDataContainer \
+        --domain-identifier "$BUNDLE_ID" \
+        --source "$EMPTY_RAW" \
+        --destination 'Documents/fixture-asr-raw.jsonl' >/dev/null 2>&1 \
+        || echo "WARN: raw ASR cleanup failed" >&2
+    rm -f "$EMPTY_RAW"
+fi
+
 STORE="$EVIDENCE/UITestStores/fixture-$RUN_ID.store"
 if [[ ! -f "$STORE" ]]; then
     echo "ERROR: store not found: $STORE" >&2
@@ -262,16 +424,24 @@ if [[ ! -f "$STORE" ]]; then
 fi
 
 sqlite3 -header -separator $'\t' "$STORE" \
-    "select ZSORTINDEX, ZISFINAL, ZSOURCETEXT, ZTRANSLATEDTEXT from ZTRANSCRIPTENTITY order by ZSORTINDEX;" \
+    "select ZSORTINDEX, ZISFINAL, ZSOURCETEXT, ZTRANSLATEDTEXT from ZTRANSCRIPTENTITY where ZTASK=(select Z_PK from ZTASKENTITY order by ZSTARTEDAT desc limit 1) order by ZSORTINDEX;" \
     > "$EVIDENCE/transcript.tsv"
 
 echo "== score =="
-python3 -I "$ROOT/tools/fixture-score.py" \
-    --store "$STORE" \
-    --ground-truth "$GROUND_TRUTH" \
-    --marker "$EVIDENCE/fixture-run-done.json" \
-    --diagnostics "$EVIDENCE/duiyi-diagnostics.json" \
-    --out "$EVIDENCE/score.json" >/dev/null
+SCORE_ARGS=(
+    --store "$STORE"
+    --ground-truth "$GROUND_TRUTH"
+    --marker "$EVIDENCE/fixture-run-done.json"
+    --diagnostics "$EVIDENCE/duiyi-diagnostics.json"
+    --out "$EVIDENCE/score.json"
+)
+if [[ -n "$BASELINE" ]]; then
+    SCORE_ARGS+=(--baseline "$BASELINE")
+fi
+if [[ -f "$EVIDENCE/asr-raw.jsonl" ]]; then
+    SCORE_ARGS+=(--asr-raw "$EVIDENCE/asr-raw.jsonl")
+fi
+python3 -I "$ROOT/tools/fixture-score.py" "${SCORE_ARGS[@]}" >/dev/null
 
 echo "== result =="
 jq -r '
@@ -285,6 +455,13 @@ jq -r '
     "coverage:           \(.sourceCoverage)",
     "exact match:        \(.exactMatchRate)",
     "WER:                \(.wordErrorRate)",
+    "required cues:      \(.requiredCueFound)/\(.requiredCueTotal) (\(.requiredCueMissing // [] | length) missing)",
+    "short-cue retention: \(.shortCueFound)/\(.shortCueTotal) (\(((.shortCueRetention // 0) * 10000 | round) / 100)%)",
+    "short-cue missing:  \(.missingShortCues | join(" | "))",
+    "baseline:           \(.baselineName // "none")",
+    "baseline fails:     \(.baselineRegressions // [] | length)",
+    "name cues:          \(.nameCueFound // 0)/\(.nameCueTotal // 0) (non-blocking)",
+    "missing attribution: \(.missingCueAttribution.counts // {})",
     "prefix duplicates:  \(.prefixDuplicatePairs)",
     "empty translations: \(.emptyTranslationRows)",
     "U+FFFD:             \(.replacementCharacters)",
@@ -294,6 +471,9 @@ jq -r '
     "permanent failures: \(.diagnostics.summary.permanentFailureCount // "?")",
     "synthetic finals:   \(.diagnostics.syntheticFinals // "?")",
     "revision finals:    \(.diagnostics.revisionFinals // "?")",
+    "asr drops:          \(.diagnostics.asrDropEvents // "?") \(.diagnostics.asrDropReasons // {})",
+    "preemptions:        \(.diagnostics.preemptionEvents // "?") (applied \(.diagnostics.preemptionApplied // "?") / queued final \(.diagnostics.preemptionQueuedFinal // "?"))",
+    "speech starts:      \(.diagnostics.speechStarts // [])",
     "apply rejects:      \(.diagnostics.applyRejects // {})",
     "final latency p95:  \(.diagnostics.finalLatencyP95Ms // "?") ms"
 ' "$EVIDENCE/score.json"
@@ -309,6 +489,29 @@ COVERAGE=$(jq -r '.sourceCoverage' "$EVIDENCE/score.json")
 if [[ "$ERRORS" -ne 0 || "$LISTENING" != "true" || "$END" != "ended" || "$ROWS" -eq 0 || "$EMPTY" -ne 0 || "$BAD" -ne 0 ]]; then
     echo "FAIL: structural checks (errors=$ERRORS listening=$LISTENING end=$END rows=$ROWS empty=$EMPTY u+fffd=$BAD)" >&2
     exit 1
+fi
+
+if [[ -n "$BASELINE" ]]; then
+    BASELINE_SHA=$(jq -r '.recordedFrom.fixtureSha256 // empty' "$BASELINE")
+    CURRENT_SHA=$(cut -d' ' -f1 "$EVIDENCE/fixture.sha256")
+    if [[ -n "$BASELINE_SHA" && "$BASELINE_SHA" != "$CURRENT_SHA" ]]; then
+        echo "WARN: fixture sha $CURRENT_SHA differs from baseline $BASELINE_SHA" >&2
+    fi
+
+    REGRESSIONS=$(jq -r '.baselineRegressions // [] | length' "$EVIDENCE/score.json")
+    if [[ "$REGRESSIONS" -ne 0 ]]; then
+        echo "FAIL: baseline regressions ($REGRESSIONS):" >&2
+        jq -r '.baselineRegressions[] | "  \(.metric): current=\(.current) baseline=\(.baseline) allowed=\(.allowed)"' \
+            "$EVIDENCE/score.json" >&2
+        exit 1
+    fi
+
+    REQUIRED_MISSING=$(jq -r '.requiredCueMissing // [] | length' "$EVIDENCE/score.json")
+    if [[ "$REQUIRED_MISSING" -ne 0 ]]; then
+        echo "FAIL: required cues missing ($REQUIRED_MISSING):" >&2
+        jq -r '.requiredCueMissing[] | "  \(.)"' "$EVIDENCE/score.json" >&2
+        exit 1
+    fi
 fi
 
 if python3 -I -c "import sys; sys.exit(0 if float('$COVERAGE') >= float('$MIN_COVERAGE') else 1)"; then

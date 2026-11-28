@@ -2,9 +2,9 @@
 
 > **唯一决策表**：其他文档只引用 D 编号，不复制内容。确认后更新本表并标注日期；未确认前不按假设实现。
 > 排期与验收见 [`04-roadmap.md`](04-roadmap.md)；工程论证见相关案例文档，不在此复述。
-> 状态：**D1–D7 已于 2026-11-23 确认；D8 已于 2026-11-24 确认**；D1–D8 之外的产品口径见文末「v1 冻结口径」。
+> 状态：**D1–D7 已于 2026-11-23 确认；D8 已于 2026-11-24 确认；D9–D10 于 2026-11-28 确认；D11–D13 于 2026-11-29 确认（D12 取代 D11 的默认部分）**；D1–D13 之外的产品口径见文末「v1 冻结口径」。
 
-## D1–D8（产品 / 工程，状态：已确认 2026-11-23；D8 于 2026-11-24 确认）
+## D1–D13（产品 / 工程，状态：已确认 2026-11-23；D8 于 2026-11-24、D9–D10 于 2026-11-28、D11–D13 于 2026-11-29 确认）
 
 | ID | 决策点 | 当前事实 / 已实现 | 已确认决策 | 验收影响 |
 | --- | --- | --- | --- | --- |
@@ -17,9 +17,15 @@
 | D7 | 长会策略 | 会议 2 万字符按内存 transcript 累计；达到上限停听并标记 `isLengthLimited`；清屏会复位计数；无续集关联 | **2 万字是分段边界，不是产品上限**；v1 实现「结束并继续」，用组 ID 关联续集任务；计数按任务累计（含清屏前内容），清屏不复位；单段导出 + 组内跳转，整组合并导出留 v1.x。该续集关联是 Q1 功能冻结中唯一**新增产品行为**的例外 | 长会不丢内容；续集任务可在历史中组内跳转；达到 2 万后不静默截断 |
 | D8 | 字幕/文字稿的 utterance identity | C04 前：`Utterance.id` 由 `UtteranceAssembler` 维护；投影层仍有跨 ID 文本相似度合并（`PaneState` + 三份 `upsertTranscript` + `TranslationPipeline` alias） | **`Utterance.id` 即 caption 行与 transcript 条目的唯一身份；assembler 独占新 ID 判定；同一 ID 同一行，新 ID 新行；不引入 `continuesFrom` / `groupID`；跨 ID 文本相似度只保留在 assembler 内部；投影 module 用单一有序 record store 派生显示窗口与全量 transcript**（C04 spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27)） | C04 Wave 3；assembler 认不出的修订成为独立行，各自翻译；删除 alias 与跨 ID 合并；行为变更测试按 spec 记录 |
 
+| D9 | ASR `.fastResults` 默认 | P1-3 360 s 同音频 A/B：fast 40 行/覆盖 98.35%/WER 3.82–3.69%；no-fast 73 行/95.67%/WER 7.38%，行碎片化；no-fast+context 71 行/95.80%/WER 6.62% | **Release 保持 `.fastResults` 开启**；`-duiyi.asrFastResults` 只作 DEBUG 实验开关。关闭 fast 必须重新做 p95/预览延迟与行稳定性 A/B，不能只为个别词恢复 | P1-3 A/B 默认 fast；no-fast 不进入产品 |
+| D10 | ASR `contextualStrings` 默认 | Apple DocC 只把词表偏置写给 `DictationTranscriber`；Apple 工程师论坛 811083（2026-01，iOS 26 时期）明确 `SpeechTranscriber` 当前不消费 `contextualStrings`；本机 SDK 也没有 contentHints/custom LM 参数。根因/复测计划见 [`research/asr-accuracy-root-cause-2026-11-28.md`](research/asr-accuracy-root-cause-2026-11-28.md)。我们的 360 s/full context A/B 因此不是有效偏置实验，观察到的 WER 差异是 ASR 随机波动（同配置 C/C2 专名仍切换，full context WER 2.01/2.83% vs baseline 2.08%）。 | **不默认启用 contextualStrings**；现有 DEBUG flag 只用于未来 OS 复测，不能当作已生效的专名修复。真正 Apple 支持的词表路径是 `DictationTranscriber` + 自定义 LM，属 later spike；用户可提供名称/术语的替换需另立产品决策和隐私/存储设计 | P1-3 不因夹具词表改变 Release；不得把 `contextualStrings` 宣传成 SpeechTranscriber 的修复 |
+
+| D11 | P1-1 抢占内容保留的 Release 默认 | 2026-11-29 真实麦克风 A/B（同构建/设备、交错、无 `fixtureAudio`）：Conversation en/ja A 干净保留 0/12、B 17/18；Meeting en/zh A 1/8、B 7/7；B `queuedFinal` 18/19；无 duplicate ID/U+FFFD/permanent failure，Conversation translation p95 不回退。详见 [`research/face-to-face-dual-locale-quality.md`](research/face-to-face-dual-locale-quality.md) §7.6 | **已由 D12 取代（2026-11-29）：Release 默认改为 publish。** 原决定：Release 默认保持 `publishesPreemptedIncumbent=false`，`-duiyi.assemblerPreemptionPublish YES` 只作 DEBUG 实验开关；真人验证暂缓、P1-1 不签收。D12 保留 `no` 作为回滚/对比开关。 | 原验收：Release 走旧丢弃路径；D12 改为 publish。P1-1/P1-3 仍不完成；不得把 A/B 机械指标当作发布签收 |
+| D12 | P1-1 抢占默认改为 publish | D11 原定 Release 默认 no；2026-11-29 用户明确要求“都改成 B”并把代码合并到 main。真实麦克风 A/B（同构建/设备、交错、无 fixtureAudio）Conversation A 干净保留 0/12 vs B 17/18，Meeting A 1/8 vs B 7/7；B `queuedFinal` 18/19；0 duplicate ID/U+FFFD/permanent failure，Conversation translation p95 不回退。见 [`research/face-to-face-dual-locale-quality.md`](research/face-to-face-dual-locale-quality.md) §7.6 | **Release 默认 `publishesPreemptedIncumbent=true`（B）**；`-duiyi.assemblerPreemptionPublish no` 保留为回滚/对比开关。非 confident incumbent 仍走旧丢弃路径；10 分钟真人验证仍暂缓；P1-1 仍不签收（ASR 漏词/专名未解） | Release 行为变更：抢占时先发布可见 incumbent final，再起新 row；必须全量单测/identity/静态回归；不得把 A/B 机械指标当作 P1-1 完成 |
+| D13 | 面对面默认换手方式 | `PreferencesStore.conversationListeningMode` 无持久值时默认 `.manual`；`autoStartListening` 默认 true 只在 `.automatic` 生效；`.automatic` 是语种路由备选（见 `docs/02-architecture.md`、GLOSSARY「手动换手」、PR #92）。2026-11-29 真机排查发现设备持久值被 DEBUG A/B harness 改成 automatic，不是产品默认值变更。 | **面对面默认手动换手**：新任务先显示「哪一侧先说」，点谁就只识别谁的语言，字幕送听者侧；自动模式只作为设置里的备选，不改为默认；manual 下新任务不自动开始听。 | 首次任务不得在未点选说话侧时自动录音/自动路由；`autoStartListening` 不能绕过 manual；自动模式可切换但不得成为默认。 |
 ## v1 冻结口径（非 D 编号）
 
-> 本节只记录 D1–D8 之外、本次冻结的产品口径；涉及 D 的内容只引用编号，不复制。冻结日期：2026-11-23。
+> 本节只记录 D1–D13 之外、本次冻结的产品口径；涉及 D 的内容只引用编号，不复制。冻结日期：2026-11-23。
 
 ### 目标与范围
 

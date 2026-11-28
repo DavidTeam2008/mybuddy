@@ -1,4 +1,5 @@
 import Foundation
+import Speech
 import Testing
 @testable import Duiyi
 
@@ -122,5 +123,66 @@ struct SpeechEngineLanguageTests {
                 style: .meetingNotes
             ) == .strict
         )
+    }
+
+    @Test("ASR experiment flags parse fast results and contextual terms")
+    func asrExperimentFlagsParse() {
+        let options = ASRExperimentOptions.parse(arguments: [
+            "-duiyi.asrFastResults", "NO",
+            "-duiyi.asrContextTerms", "Cameron Russell, Lidia Yuknavitch, Fernando",
+        ])
+
+        #expect(options.fastResults == false)
+        #expect(
+            options.contextualStrings
+                == ["Cameron Russell", "Lidia Yuknavitch", "Fernando"]
+        )
+    }
+
+    @Test("ASR experiments default to fast results and no contextual bias")
+    func asrExperimentDefaults() {
+        let options = ASRExperimentOptions.parse(arguments: [])
+
+        #expect(options.fastResults)
+        #expect(options.contextualStrings.isEmpty)
+    }
+
+    @Test("Preemption publish defaults on and parses the rollback flag")
+    func preemptionExperimentFlagParses() {
+        #expect(UtteranceAssemblerExperimentOptions.parse(arguments: []).publishesPreemptedIncumbent)
+        #expect(
+            UtteranceAssemblerExperimentOptions.parse(arguments: [
+                "-duiyi.assemblerPreemptionPublish", "YES",
+            ]).publishesPreemptedIncumbent
+        )
+        #expect(
+            UtteranceAssemblerExperimentOptions.parse(arguments: [
+                "-duiyi.assemblerPreemptionPublish", "NO",
+            ]).publishesPreemptedIncumbent == false
+        )
+    }
+
+    @Test("ASR confidence aggregates runs by character weight")
+    func asrConfidenceAggregates() {
+        var text = AttributedString("hello world")
+        if let hello = text.range(of: "hello") {
+            text[hello].transcriptionConfidence = 0.8
+        }
+        if let world = text.range(of: "world") {
+            text[world].transcriptionConfidence = 0.4
+        }
+
+        let stats = ASRConfidenceStats.from(text)
+
+        #expect(stats?.runCount == 2)
+        #expect(abs((stats?.minimum ?? 0) - 0.4) < 0.0001)
+        #expect(abs((stats?.mean ?? 0) - 0.6) < 0.0001)
+        #expect(stats?.buckets[4] == 5)
+        #expect(stats?.buckets[8] == 5)
+    }
+
+    @Test("ASR confidence is nil when the framework omits the attribute")
+    func asrConfidenceMissing() {
+        #expect(ASRConfidenceStats.from(AttributedString("plain")) == nil)
     }
 }

@@ -10,10 +10,33 @@ import Foundation
 ///   -duiyi.fixtureAutoRun YES
 ///   -duiyi.fixtureSettleSeconds 10
 enum DebugAudioFixture {
+    enum FixtureModule: String {
+        case interpretation
+        case conversation
+    }
+
     private static var arguments: [String] { ProcessInfo.processInfo.arguments }
 
     static var isRequested: Bool {
         value(for: "-duiyi.fixtureAudio") != nil
+    }
+
+    static var module: FixtureModule {
+        guard let raw = value(for: "-duiyi.fixtureModule"),
+              let module = FixtureModule(rawValue: raw.lowercased()) else {
+            return .interpretation
+        }
+        return module
+    }
+
+    static var userLanguage: AppLanguage {
+        value(for: "-duiyi.fixtureUserLanguage")
+            .flatMap(AppLanguage.init(rawValue:)) ?? .zhHans
+    }
+
+    static var peerLanguage: AppLanguage {
+        value(for: "-duiyi.fixturePeerLanguage")
+            .flatMap(AppLanguage.init(rawValue:)) ?? .english
     }
 
     static var autoRun: Bool {
@@ -67,6 +90,7 @@ enum DebugAudioFixture {
 
 struct DebugFixtureMarker: Codable {
     var schemaVersion = 1
+    var module: String? = nil
     var fixture: String
     var pacing: String
     var startedAt: String

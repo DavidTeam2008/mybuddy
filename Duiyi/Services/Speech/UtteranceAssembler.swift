@@ -52,6 +52,75 @@ struct SpeechRange: Equatable, Sendable {
     }
 }
 
+/// Diagnostic-only reason an ASR result did not become row content. These
+/// events never change acceptance, publication, or utterance identity.
+enum SpeechDropReason: String, Equatable, Sendable {
+    case empty
+    case punctuationOnly
+    case purity
+    case suppression
+    case lateVolatileClosedRange
+    case preemption
+}
+
+/// One diagnostic drop. It carries no caption text: only the language, result
+/// shape, length, and audio range.
+struct SpeechDropEvent: Equatable, Sendable {
+    var language: AppLanguage
+    var reason: SpeechDropReason
+    var textLength: Int
+    var isFinal: Bool
+    var range: SpeechRange?
+}
+
+/// One diagnostic language-preemption decision. `language` in the exported
+/// event is the incumbent; `challengerLanguage` is the result that arrived.
+struct SpeechPreemptionEvent: Equatable, Sendable {
+    /// The incumbent row that was dropped or published. Lets a real-device
+    /// A/B join the event to the final ASR event/transcript row.
+    var incumbentUtteranceID: UUID
+    var incumbentLanguage: AppLanguage
+    var challengerLanguage: AppLanguage
+    var incumbentTextLength: Int
+    var challengerTextLength: Int
+    var incumbentConfident: Bool
+    var challengerConfident: Bool
+    var incumbentVisible: Bool
+    var queuedFinal: Bool
+    var applied: Bool
+    var range: SpeechRange?
+}
+
+/// Preemption publish behavior. On by default in Release: a visible,
+/// confident incumbent is finalized before the challenger starts. The DEBUG
+/// `-duiyi.assemblerPreemptionPublish no` flag keeps the legacy discard path
+/// for comparison and rollback.
+struct UtteranceAssemblerExperimentOptions: Equatable, Sendable {
+    /// When true, a confident visible incumbent row is published and closed
+    /// before the challenger starts; the loser is never merged into the winner.
+    var publishesPreemptedIncumbent = true
+
+    static func parse(arguments: [String]) -> UtteranceAssemblerExperimentOptions {
+        var options = UtteranceAssemblerExperimentOptions()
+        guard let index = arguments.firstIndex(of: "-duiyi.assemblerPreemptionPublish") else {
+            return options
+        }
+        let valueIndex = arguments.index(after: index)
+        guard valueIndex < arguments.endIndex else { return options }
+        options.publishesPreemptedIncumbent = !["no", "false", "0"]
+            .contains(arguments[valueIndex].lowercased())
+        return options
+    }
+
+    static var current: UtteranceAssemblerExperimentOptions {
+        #if DEBUG
+        parse(arguments: ProcessInfo.processInfo.arguments)
+        #else
+        UtteranceAssemblerExperimentOptions()
+        #endif
+    }
+}
+
 struct UtteranceAssembler: Sendable {
     private struct FinalizedUtterance: Equatable, Sendable {
         let id: UUID
@@ -103,17 +172,24 @@ struct UtteranceAssembler: Sendable {
     private var latestFinal: FinalizedUtterance?
     private var rangeStates: [AppLanguage: LanguageRangeState] = [:]
     private var closedRanges: [ClosedRangeUtterance] = []
+    private var pendingFinals: [Utterance] = []
     private var publishedFinalForCurrentID = false
+    /// Diagnostic-only queues. The engine drains them after every ingest.
+    private var dropEvents: [SpeechDropEvent] = []
+    private var preemptionEvents: [SpeechPreemptionEvent] = []
     private let reconciliationWindow: TimeInterval
+    private let experiment: UtteranceAssemblerExperimentOptions
     private let now: @Sendable () -> Date
 
     init(
         reconciliationWindow: TimeInterval = 3,
         languagePurity: SpeechLanguagePurity = .strict,
+        experiment: UtteranceAssemblerExperimentOptions = .current,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.reconciliationWindow = reconciliationWindow
         self.languagePurity = languagePurity
+        self.experiment = experiment
         self.now = now
     }
 
@@ -137,6 +213,13 @@ struct UtteranceAssembler: Sendable {
         // row of its own). Truly empty text still reaches the revoke path.
         if !trimmedInput.isEmpty,
            !normalized.contains(where: { $0.isLetter || $0.isNumber }) {
+            recordDrop(
+                language: language,
+                reason: .punctuationOnly,
+                textLength: trimmedInput.count,
+                isFinal: isFinal,
+                range: range
+            )
             return nil
         }
         guard let range else {
@@ -166,15 +249,62 @@ struct UtteranceAssembler: Sendable {
         }
     }
 
+    /// Finals for rows closed by a gap, language/name change, or cap. The
+    /// current `ingest` returns the new row's utterance, so the caller must
+    /// publish these first; otherwise an open volatile at the boundary would
+    /// be closed without ever reaching the transcript.
+    mutating func takePendingFinals() -> [Utterance] {
+        defer { pendingFinals.removeAll() }
+        return pendingFinals
+    }
+
+    /// Diagnostic drops since the last drain. Never used for row decisions.
+    mutating func takeDropEvents() -> [SpeechDropEvent] {
+        defer { dropEvents.removeAll() }
+        return dropEvents
+    }
+
+    /// Diagnostic language-preemption decisions since the last drain. Never
+    /// used for row decisions.
+    mutating func takePreemptionEvents() -> [SpeechPreemptionEvent] {
+        defer { preemptionEvents.removeAll() }
+        return preemptionEvents
+    }
+
     private mutating func ingestByText(
         language: AppLanguage,
         text: String,
         isFinal: Bool
     ) -> Utterance? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        guard passesPurityGate(trimmed, language: language),
-              passesSuppressionGate(language: language) else {
+        guard !trimmed.isEmpty else {
+            recordDrop(
+                language: language,
+                reason: .empty,
+                textLength: 0,
+                isFinal: isFinal,
+                range: nil
+            )
+            return nil
+        }
+        guard passesPurityGate(trimmed, language: language) else {
+            recordDrop(
+                language: language,
+                reason: .purity,
+                textLength: trimmed.count,
+                isFinal: isFinal,
+                range: nil
+            )
+            return nil
+        }
+        guard passesSuppressionGate(language: language) else {
+            recordDrop(
+                language: language,
+                reason: .suppression,
+                textLength: trimmed.count,
+                isFinal: isFinal,
+                range: nil
+            )
             return nil
         }
 
@@ -261,7 +391,14 @@ struct UtteranceAssembler: Sendable {
             && !previousInLanguage.isEmpty
             && SpokenText.isNameSwap(trimmed, of: previousInLanguage)
 
-        guard preemptsIfNeeded(language: language, text: trimmed) else { return nil }
+        if preemptsIfNeeded(
+            language: language,
+            text: trimmed,
+            isFinal: isFinal,
+            range: nil
+        ) == .rejected {
+            return nil
+        }
 
         if isGreetingNameSwap {
             beginNextUtterance(keeping: language)
@@ -310,8 +447,9 @@ struct UtteranceAssembler: Sendable {
     /// `SpeechTranscriber` sends a result per audio phrase. The text belongs to
     /// `range`, not to the whole utterance: finalized phrases accumulate as a
     /// prefix and the open range's volatile text is the tail. Ranges decide
-    /// where a phrase continues, punctuation decides where the sentence ends,
-    /// and a late final for a closed range revises that row in place.
+    /// where a phrase continues; punctuation stays in the text. Row boundaries
+    /// are audio gaps, language/name changes, silence, and the max cap. A late
+    /// final for a closed range revises that row in place.
     private mutating func ingestRangeAware(
         language: AppLanguage,
         text: String,
@@ -323,11 +461,34 @@ struct UtteranceAssembler: Sendable {
         // An empty volatile revokes the open interpretation for its range; an
         // empty final says the range contained no speech.
         if trimmed.isEmpty {
+            recordDrop(
+                language: language,
+                reason: .empty,
+                textLength: 0,
+                isFinal: isFinal,
+                range: range
+            )
             return revokeRange(language: language, range: range)
         }
 
-        guard passesPurityGate(trimmed, language: language),
-              passesSuppressionGate(language: language) else {
+        guard passesPurityGate(trimmed, language: language) else {
+            recordDrop(
+                language: language,
+                reason: .purity,
+                textLength: trimmed.count,
+                isFinal: isFinal,
+                range: range
+            )
+            return nil
+        }
+        guard passesSuppressionGate(language: language) else {
+            recordDrop(
+                language: language,
+                reason: .suppression,
+                textLength: trimmed.count,
+                isFinal: isFinal,
+                range: range
+            )
             return nil
         }
 
@@ -339,7 +500,16 @@ struct UtteranceAssembler: Sendable {
         if !isFinal, let closed = closedRangeMatch(language: language, range: range) {
             let extendsClosedRange = range.end > closed.range.end + 0.05
             let rowIsEmpty = texts.values.allSatisfy(\.isEmpty)
-            guard extendsClosedRange, rowIsEmpty else { return nil }
+            guard extendsClosedRange, rowIsEmpty else {
+                recordDrop(
+                    language: language,
+                    reason: .lateVolatileClosedRange,
+                    textLength: trimmed.count,
+                    isFinal: false,
+                    range: range
+                )
+                return nil
+            }
         }
 
         // A final for a range the silence timer already closed belongs to that
@@ -351,7 +521,8 @@ struct UtteranceAssembler: Sendable {
             // the closed tail. Start the next row instead of replacing a
             // phrase and losing one side of the boundary.
             let extendsClosedRange = range.end > closed.range.end + 0.05
-            let tail = closed.state.volatile ?? closed.state.finalized.last
+            let tail = closed.state.volatile
+                ?? closed.state.finalized.max { $0.range.end < $1.range.end }
             let carriesClosedTail = tail.map {
                 SpokenText.compact(trimmed).contains(SpokenText.compact($0.text))
             } ?? false
@@ -395,11 +566,11 @@ struct UtteranceAssembler: Sendable {
            finalized.id == utteranceID,
            language != finalized.language {
             guard Self.isConfident(trimmed, language: language) else { return nil }
+            queueFinalForBoundary(language: finalized.language)
             closeCurrentRangeRow(language: finalized.language)
             beginNextUtterance(keeping: language)
         }
 
-        var state = rangeStates[language] ?? LanguageRangeState()
         let previousText = texts[language] ?? ""
         let isGreetingNameSwap = (lockedLanguage == nil || lockedLanguage == language)
             && !previousText.isEmpty
@@ -408,17 +579,30 @@ struct UtteranceAssembler: Sendable {
         if isGreetingNameSwap {
             // Do not remember the old greeting's range: a final for that same
             // audio belongs to the new person's row, not the name it replaced.
+            queueFinalForBoundary(language: language)
             beginNextUtterance(keeping: language)
-            state = LanguageRangeState()
         }
 
-        guard preemptsIfNeeded(language: language, text: trimmed) else { return nil }
+        if preemptsIfNeeded(
+            language: language,
+            text: trimmed,
+            isFinal: isFinal,
+            range: range
+        ) == .rejected {
+            return nil
+        }
+
+        // A preemption experiment may have closed the incumbent row and
+        // started a new utterance. Read the challenger's state only after the
+        // decision so the new id never inherits the loser's phrases.
+        var state = rangeStates[language] ?? LanguageRangeState()
 
         // A phrase after a real audio gap starts a new utterance even when the
         // transcriber did not add sentence punctuation. This covers both a new
         // volatile phrase and a final that follows the gap.
-        let lastEnd = state.volatile?.range.end ?? state.finalized.last?.range.end
+        let lastEnd = Self.maxEnd(of: state)
         if let lastEnd, range.start > lastEnd + Self.rangeGapLimit {
+            queueFinalForBoundary(language: language)
             closeCurrentRangeRow(language: language)
             beginNextUtterance(keeping: language)
             state = LanguageRangeState()
@@ -437,6 +621,7 @@ struct UtteranceAssembler: Sendable {
             let rowText = Self.joinedText(of: state)
             if rowRange.duration > Self.maxRowDuration
                 || SpokenText.compact(rowText).count > Self.maxRowCharacters {
+                queueFinalForBoundary(language: language)
                 closeCurrentRangeRow(language: language)
                 beginNextUtterance(keeping: language)
                 state = LanguageRangeState()
@@ -512,78 +697,302 @@ struct UtteranceAssembler: Sendable {
         isFinal: Bool,
         to state: inout LanguageRangeState
     ) {
-        let volatileOverlaps = state.volatile?.range.overlaps(range) ?? false
-
-        // A result for an already-finalized phrase revises that phrase. A
-        // later, still-open phrase must survive a late revision of an earlier
-        // one.
-        if let index = state.finalized.firstIndex(where: { $0.range.overlaps(range) }) {
-            if isFinal {
-                let existing = state.finalized[index]
-                state.finalized[index].text = Self.preferredPhraseText(
-                    existing: existing.text,
-                    incoming: text,
-                    incomingCovers: range.contains(existing.range)
-                )
-                state.finalized[index].range = existing.range.union(range)
-                if let volatile = state.volatile,
-                   volatileOverlaps,
-                   range.contains(volatile.range) {
-                    state.volatile = nil
-                }
-            }
-            return
+        if isFinal {
+            applyFinal(range: range, text: text, to: &state)
+        } else {
+            applyVolatile(range: range, text: text, to: &state)
         }
+    }
 
-        if let volatile = state.volatile, volatileOverlaps {
-            if isFinal {
-                // A final covering only part of the open phrase must not
-                // replace the phrase text: the words outside the final's
-                // range would be lost. Keep the fuller interpretation.
-                let merged = Self.preferredPhraseText(
-                    existing: volatile.text,
-                    incoming: text,
-                    incomingCovers: range.contains(volatile.range)
-                )
-                state.finalized.append(
-                    RangePhrase(text: merged, range: volatile.range.union(range))
+    private func applyFinal(
+        range: SpeechRange,
+        text: String,
+        to state: inout LanguageRangeState
+    ) {
+        var candidate = RangePhrase(text: text, range: range)
+
+        // A final usually covers the phrase the volatile was previewing. When
+        // the two texts describe the same phrase, merge them; when they do
+        // not, the volatile is a different phrase that happens to share a
+        // padded range. Keep it as its own phrase instead of replacing one
+        // side with the other.
+        if let volatile = state.volatile {
+            if volatile.range.overlaps(range) {
+                if Self.sameAudioWindow(volatile.range, range),
+                   Self.describesSamePhrase(volatile.text, text) {
+                    candidate = Self.mergeVolatile(volatile, final: candidate)
+                } else if Self.shouldReplaceSameAudio(
+                    existing: volatile,
+                    incoming: candidate
+                ) {
+                    // A different text over the same audio is a re-hearing
+                    // ("I scream" -> "ice cream"), not a second phrase. Keep
+                    // the final; splitting the two would show both spellings.
+                } else {
+                    Self.insertPhrase(
+                        Self.bounded(volatile, before: range),
+                        into: &state.finalized
+                    )
+                }
+                state.volatile = nil
+            } else if range.start >= volatile.range.start {
+                // The final begins after the open preview: that preview's
+                // phrase is finished. A later phrase must not leave a stale
+                // volatile tail attached to the row.
+                Self.insertPhrase(
+                    Self.bounded(volatile, before: range),
+                    into: &state.finalized
                 )
                 state.volatile = nil
-            } else {
-                state.volatile = RangePhrase(text: text, range: volatile.range.union(range))
             }
+        }
+
+        // A final for an already-finalized phrase revises that phrase only
+        // when it describes the same phrase. A different text is new content:
+        // keep both, in audio order. This is the invariant that prevents a
+        // short phrase between long phrases from being swallowed when padded
+        // ranges overlap.
+        if let index = Self.bestOverlapIndex(of: candidate.range, in: state.finalized) {
+            let existing = state.finalized[index]
+            let existingText = SpokenText.compact(existing.text)
+            let candidateText = SpokenText.compact(candidate.text)
+            let contains = existingText.contains(candidateText)
+                || candidateText.contains(existingText)
+            if Self.describesSamePhrase(existing.text, candidate.text),
+               contains || Self.sameAudioWindow(existing.range, candidate.range) {
+                state.finalized[index].text = Self.preferredPhraseText(
+                    existing: existing.text,
+                    incoming: candidate.text,
+                    incomingCovers: candidate.range.contains(existing.range)
+                )
+                state.finalized[index].range = existing.range.union(candidate.range)
+            } else if Self.shouldReplaceSameAudio(
+                existing: existing,
+                incoming: candidate
+            ) {
+                // The same audio answered differently. A transcriber final is
+                // authoritative for that audio.
+                state.finalized[index].text = candidate.text
+                state.finalized[index].range = candidate.range
+            } else {
+                Self.insertPhrase(candidate, into: &state.finalized)
+            }
+        } else {
+            Self.insertPhrase(candidate, into: &state.finalized)
+        }
+    }
+
+    private func applyVolatile(
+        range: SpeechRange,
+        text: String,
+        to state: inout LanguageRangeState
+    ) {
+        if let volatile = state.volatile, volatile.range.overlaps(range) {
+            if Self.sameVolatilePhrase(
+                existing: volatile,
+                incoming: RangePhrase(text: text, range: range)
+            ) {
+                state.volatile = RangePhrase(
+                    text: text,
+                    range: volatile.range.union(range)
+                )
+                return
+            }
+            // A different phrase begins inside the volatile's padded range,
+            // or the overlap is only padding. Bound the old phrase at the new
+            // phrase's start.
+            Self.insertPhrase(
+                Self.bounded(volatile, before: range),
+                into: &state.finalized
+            )
+            state.volatile = RangePhrase(text: text, range: range)
             return
         }
 
-        // The result belongs to a different phrase. An open volatile from an
-        // earlier range lies outside this result's range, and a volatile
-        // result makes no promise that it will be reissued as a final. Keep
-        // it as a consolidated phrase instead of discarding it; a later final
-        // for that range still revises it in place.
+        // An open volatile from an earlier range lies outside this result's
+        // range. Keep it as a consolidated phrase instead of discarding it; a
+        // later final for that range still revises it in place. Bound its end
+        // so its padded range cannot claim the new phrase's audio.
         if let volatile = state.volatile {
-            guard range.start >= volatile.range.start else {
-                // An out-of-order result before the open phrase: keep the
-                // volatile tail untouched.
-                if isFinal {
-                    state.finalized.append(RangePhrase(text: text, range: range))
-                }
-                return
-            }
-            state.finalized.append(volatile)
+            Self.insertPhrase(
+                Self.bounded(volatile, before: range),
+                into: &state.finalized
+            )
         }
-        state.volatile = nil
 
-        if isFinal {
-            if let last = state.finalized.last, last.range.overlaps(range) {
-                state.finalized[state.finalized.count - 1].text = text
-                state.finalized[state.finalized.count - 1].range = last.range.union(range)
-            } else {
-                state.finalized.append(RangePhrase(text: text, range: range))
-            }
-        } else {
-            // A newer volatile interpretation replaces the open phrase.
-            state.volatile = RangePhrase(text: text, range: range)
+        if let index = Self.bestOverlapIndex(of: range, in: state.finalized),
+           Self.describesSamePhrase(state.finalized[index].text, text) {
+            // The finalized text is authoritative; a preview must not reopen
+            // or rewrite it.
+            state.volatile = nil
+            return
         }
+        state.volatile = RangePhrase(text: text, range: range)
+    }
+
+    /// Two texts describe the same phrase when one contains the other or they
+    /// are close ASR refinements. Anything else is distinct content and must
+    /// never be merged by a "longer wins" rule.
+    private static func describesSamePhrase(_ existing: String, _ incoming: String) -> Bool {
+        let existingText = SpokenText.compact(existing)
+        let incomingText = SpokenText.compact(incoming)
+        guard !existingText.isEmpty, !incomingText.isEmpty else { return false }
+        if existingText.contains(incomingText) || incomingText.contains(existingText) {
+            return true
+        }
+        return SpokenText.isRefinement(existing, of: incoming)
+            || SpokenText.isRefinement(incoming, of: existing)
+    }
+
+    /// Merges a final into the volatile phrase it completes. The final range
+    /// stays tight unless the volatile text is demonstrably fuller: extending
+    /// a phrase's range into a speculative volatile tail is what lets a later
+    /// short phrase be mistaken for a revision of this one.
+    private static func mergeVolatile(
+        _ volatile: RangePhrase,
+        final: RangePhrase
+    ) -> RangePhrase {
+        let volatileText = SpokenText.compact(volatile.text)
+        let finalText = SpokenText.compact(final.text)
+        if volatileText.contains(finalText),
+           finalText.count * 2 < volatileText.count {
+            // The final dropped more than half of what the preview already
+            // showed: a truncation, not a cleanup. Keep the preview's text,
+            // but not its speculative tail: a phrase range that claims audio
+            // the final never covered lets a later distinct phrase be
+            // mistaken for a re-transcription.
+            return RangePhrase(text: volatile.text, range: final.range)
+        }
+        if volatileText.count > finalText.count,
+           !final.range.contains(volatile.range) {
+            // The final covers only part of the preview and drops content.
+            // Keep the fuller preview text, with the tight final range.
+            return RangePhrase(
+                text: preferredPhraseText(
+                    existing: volatile.text,
+                    incoming: final.text,
+                    incomingCovers: false
+                ),
+                range: final.range
+            )
+        }
+        // The final range stays tight even when its punctuation or wording
+        // loses to the preview's display text.
+        return RangePhrase(
+            text: preferredPhraseText(
+                existing: volatile.text,
+                incoming: final.text,
+                incomingCovers: final.range.contains(volatile.range)
+            ),
+            range: final.range
+        )
+    }
+
+    /// A volatile update continues the same phrase only when its range still
+    /// starts near the existing preview. A short fragment from the next phrase
+    /// ("you") can be contained in the preview's text and overlap its padded
+    /// tail; treating that as a revision replaces the preview with the
+    /// fragment and deletes words the user already saw.
+    private static func sameVolatilePhrase(
+        existing: RangePhrase,
+        incoming: RangePhrase
+    ) -> Bool {
+        guard sameAudioWindow(existing.range, incoming.range) else { return false }
+        let startTolerance = max(0.5, existing.range.duration * 0.25)
+        guard incoming.range.start <= existing.range.start + startTolerance else {
+            return false
+        }
+        let existingText = SpokenText.compact(existing.text)
+        let incomingText = SpokenText.compact(incoming.text)
+        if incomingText.count * 2 < existingText.count {
+            return false
+        }
+        return describesSamePhrase(existing.text, incoming.text)
+    }
+
+    /// True when the two ranges describe mostly the same audio window, not
+    /// merely adjacent phrases with a padded overlap. A volatile revision of
+    /// one phrase keeps (or grows) the same start; a new phrase starts later.
+    private static func sameAudioWindow(_ lhs: SpeechRange, _ rhs: SpeechRange) -> Bool {
+        let overlap = min(lhs.end, rhs.end) - max(lhs.start, rhs.start)
+        guard overlap > 0 else { return false }
+        let smaller = min(lhs.duration, rhs.duration)
+        guard smaller > 0 else { return false }
+        return overlap / smaller >= 0.5
+    }
+
+    /// A same-audio replacement is for a re-hearing of the phrase's beginning
+    /// or for a final that covers the whole phrase. A final that starts late
+    /// and only covers the tail is a new phrase inside the preview's padded
+    /// range; keep both rather than deleting the earlier text.
+    private static func shouldReplaceSameAudio(
+        existing: RangePhrase,
+        incoming: RangePhrase
+    ) -> Bool {
+        guard sameAudioWindow(existing.range, incoming.range) else { return false }
+        let existingText = SpokenText.compact(existing.text)
+        let incomingText = SpokenText.compact(incoming.text)
+        if incomingText.count * 2 < existingText.count {
+            // A final much shorter than the preview is a truncation or a
+            // fragment, not a re-hearing. Replacing would delete words the
+            // user already saw; keep the preview and insert the final after
+            // it instead.
+            return false
+        }
+        if incoming.range.contains(existing.range) { return true }
+        guard existing.range.duration > 0 else { return true }
+        let startFraction = (incoming.range.start - existing.range.start)
+            / existing.range.duration
+        return startFraction <= 0.6
+    }
+
+    /// Keeps a phrase out of audio the next result has already claimed. A
+    /// volatile range is a speculative window; its tail is not part of its
+    /// text and must not become part of the finalized row.
+    private static func bounded(
+        _ phrase: RangePhrase,
+        before range: SpeechRange
+    ) -> RangePhrase {
+        guard range.start > phrase.range.start,
+              range.start < phrase.range.end else {
+            return phrase
+        }
+        return RangePhrase(
+            text: phrase.text,
+            range: SpeechRange(start: phrase.range.start, end: range.start)
+        )
+    }
+
+    private static func insertPhrase(
+        _ phrase: RangePhrase,
+        into phrases: inout [RangePhrase]
+    ) {
+        let index = phrases.firstIndex { phrase.range.start < $0.range.start }
+            ?? phrases.endIndex
+        phrases.insert(phrase, at: index)
+    }
+
+    private static func bestOverlapIndex(
+        of range: SpeechRange,
+        in phrases: [RangePhrase]
+    ) -> Int? {
+        var best: (index: Int, overlap: Double)?
+        for (index, phrase) in phrases.enumerated() where phrase.range.overlaps(range) {
+            let overlap = min(phrase.range.end, range.end)
+                - max(phrase.range.start, range.start)
+            if best == nil || overlap > best!.overlap {
+                best = (index, overlap)
+            }
+        }
+        return best?.index
+    }
+
+    private static func maxEnd(of state: LanguageRangeState) -> Double? {
+        var ends = state.finalized.map(\.range.end)
+        if let volatile = state.volatile {
+            ends.append(volatile.range.end)
+        }
+        return ends.max()
     }
 
     /// A final that covers only part of an existing phrase cannot replace its
@@ -626,7 +1035,16 @@ struct UtteranceAssembler: Sendable {
         if let volatile = state.volatile {
             phrases.append(volatile)
         }
-        return joinPhrases(phrases)
+        let ordered = phrases.enumerated().sorted { lhs, rhs in
+            if lhs.element.range.start != rhs.element.range.start {
+                return lhs.element.range.start < rhs.element.range.start
+            }
+            if lhs.element.range.end != rhs.element.range.end {
+                return lhs.element.range.end < rhs.element.range.end
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
+        return joinPhrases(ordered)
     }
 
     private func closedRangeMatch(
@@ -651,6 +1069,61 @@ struct UtteranceAssembler: Sendable {
         closed.state = state
         closed.at = now()
         closedRanges[index] = closed
+    }
+
+    /// The preemption experiment must preserve the incumbent row's visible
+    /// text, not a re-joined range state. The two can differ when a late
+    /// phrase was already reconciled into `texts`.
+    private mutating func queueVisibleFinalForPreemption(
+        language: AppLanguage,
+        text: String
+    ) {
+        guard !text.isEmpty else { return }
+        if publishedFinalForCurrentID,
+           latestFinal?.id == utteranceID,
+           latestFinal?.text == text {
+            return
+        }
+        let utterance = Utterance(
+            id: utteranceID,
+            language: language,
+            text: text,
+            isFinal: true,
+            isRevision: publishedFinalForCurrentID
+        )
+        pendingFinals.append(utterance)
+        publishedFinalForCurrentID = true
+        latestFinal = FinalizedUtterance(
+            id: utterance.id,
+            language: utterance.language,
+            text: utterance.text,
+            at: now()
+        )
+    }
+
+    /// A row closed by a boundary must publish any text the user can already
+    /// see. The transcript only stores finals; closing an open volatile
+    /// without this final is silent content loss.
+    private mutating func queueFinalForBoundary(language: AppLanguage) {
+        guard let state = rangeStates[language] else { return }
+        let text = Self.joinedText(of: state)
+        guard !text.isEmpty else { return }
+        guard state.volatile != nil || !publishedFinalForCurrentID else { return }
+        let utterance = Utterance(
+            id: utteranceID,
+            language: language,
+            text: text,
+            isFinal: true,
+            isRevision: publishedFinalForCurrentID
+        )
+        pendingFinals.append(utterance)
+        publishedFinalForCurrentID = true
+        latestFinal = FinalizedUtterance(
+            id: utterance.id,
+            language: language,
+            text: text,
+            at: now()
+        )
     }
 
     private mutating func closeCurrentRangeRow(language: AppLanguage) {
@@ -828,6 +1301,9 @@ struct UtteranceAssembler: Sendable {
         suppressOtherUntil = .distantPast
         latestFinal = nil
         closedRanges.removeAll()
+        pendingFinals.removeAll()
+        dropEvents.removeAll()
+        preemptionEvents.removeAll()
         beginNextUtterance(keeping: nil)
     }
 
@@ -852,21 +1328,117 @@ struct UtteranceAssembler: Sendable {
         return true
     }
 
-    private mutating func preemptsIfNeeded(language: AppLanguage, text: String) -> Bool {
-        guard let locked = lockedLanguage, language != locked else { return true }
+    private enum PreemptionOutcome: Equatable {
+        case proceed
+        case rejected
+        case preempted
+    }
+
+    private mutating func preemptsIfNeeded(
+        language: AppLanguage,
+        text: String,
+        isFinal: Bool,
+        range: SpeechRange?
+    ) -> PreemptionOutcome {
+        guard let locked = lockedLanguage, language != locked else { return .proceed }
+        // Capture the incumbent id before a successful preemption starts the
+        // next utterance; the event must join to the row that was lost or
+        // published, not to the challenger's new id.
+        let incumbentID = utteranceID
         let incumbent = textFor(locked)
+        let challengerConfident = Self.isConfident(text, language: language)
+        let incumbentConfident = Self.isConfident(incumbent, language: locked)
         guard Self.shouldPreempt(
             challenger: text,
             challengerLanguage: language,
             incumbent: incumbent,
             incumbentLanguage: locked
         ) else {
-            return false
+            preemptionEvents.append(
+                SpeechPreemptionEvent(
+                    incumbentUtteranceID: incumbentID,
+                    incumbentLanguage: locked,
+                    challengerLanguage: language,
+                    incumbentTextLength: incumbent.count,
+                    challengerTextLength: text.count,
+                    incumbentConfident: incumbentConfident,
+                    challengerConfident: challengerConfident,
+                    incumbentVisible: !incumbent.isEmpty,
+                    queuedFinal: false,
+                    applied: false,
+                    range: range
+                )
+            )
+            return .rejected
         }
-        rangeStates.removeValue(forKey: locked)
-        clearText(for: locked)
-        lockedLanguage = language
-        return true
+
+        // DEBUG A/B: a critical visible incumbent may be published and closed
+        // before the challenger starts. The loser is never merged into the
+        // winner, and a non-confident incumbent keeps the old discard path.
+        let shouldPreserve = experiment.publishesPreemptedIncumbent
+            && !incumbent.isEmpty
+            && incumbentConfident
+        let pendingBefore = pendingFinals.count
+        if shouldPreserve {
+            // Publish exactly the text the user can already see. The range
+            // state can contain a duplicate/late phrase that the visible
+            // `texts` value already reconciled; joining it again would make
+            // the preserved final longer than the incumbent.
+            queueVisibleFinalForPreemption(language: locked, text: incumbent)
+            closeCurrentRangeRow(language: locked)
+            beginNextUtterance(keeping: language)
+        } else {
+            let incumbentIsFinal = isWinnerFinal(locked)
+            rangeStates.removeValue(forKey: locked)
+            clearText(for: locked)
+            lockedLanguage = language
+            if !incumbent.isEmpty {
+                dropEvents.append(
+                    SpeechDropEvent(
+                        language: locked,
+                        reason: .preemption,
+                        textLength: incumbent.count,
+                        isFinal: incumbentIsFinal,
+                        range: nil
+                    )
+                )
+            }
+        }
+
+        preemptionEvents.append(
+            SpeechPreemptionEvent(
+                incumbentUtteranceID: incumbentID,
+                incumbentLanguage: locked,
+                challengerLanguage: language,
+                incumbentTextLength: incumbent.count,
+                challengerTextLength: text.count,
+                incumbentConfident: incumbentConfident,
+                challengerConfident: challengerConfident,
+                incumbentVisible: !incumbent.isEmpty,
+                queuedFinal: pendingFinals.count > pendingBefore,
+                applied: true,
+                range: range
+            )
+        )
+        return .preempted
+    }
+
+    private mutating func recordDrop(
+        language: AppLanguage,
+        reason: SpeechDropReason,
+        textLength: Int,
+        isFinal: Bool,
+        range: SpeechRange?
+    ) {
+        dropEvents.append(
+            SpeechDropEvent(
+                language: language,
+                reason: reason,
+                textLength: textLength,
+                isFinal: isFinal,
+                range: range
+            )
+        )
     }
 
     private mutating func hold(_ language: AppLanguage, for seconds: TimeInterval) {

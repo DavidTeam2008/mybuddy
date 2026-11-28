@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "name": "ted-cue132-331-content-preservation",
+  "recordedAt": "2026-11-28",
+  "recordedFrom": {
+    "runId": "row82-fix-full-1",
+    "commit": "40d9aa7",
+    "fixtureSha256": "e3cde4b4bf4b2dfd01058d39da006a491c5e4ffbd4b754f9b0aa99e2dd260acc",
+    "groundTruth": "tools/fixtures/ted-cue132-331.tsv",
+    "appFinalRows": 85
+  },
+  "shortCueMaxTokens": 5,
+  "nameCues": [
+    "Cameron Russell",
+    "Lidia Yuknavitch",
+    "Fernando",
+    "Ben"
+  ],
+  "requiredCues": [
+    "She'll perform better.",
+    "She'll perform worse.",
+    "We'll call him Ben.",
+    "For four days, silence.",
+    "How would you interpret this?",
+    "Headset off.",
+    "I still have ropes I'm working to break.",
+    "It's the shame we carry.",
+    "The shame of not believing we deserve it.\"",
+    "there is the life that you can be living if you break your ropes."
+  ],
+  "metrics": {
+    "sourceCoverage": 0.9943396226415094,
+    "exactMatchRate": 0.979874213836478,
+    "wordErrorRate": 0.020754716981132074,
+    "shortCueRetention": 0.9333333333333333
+  },
+  "tolerance": {
+    "sourceCoverage": 0.01,
+    "exactMatchRate": 0.01,
+    "wordErrorRate": 0.01,
+    "shortCueRetention": 0.02
+  }
+}

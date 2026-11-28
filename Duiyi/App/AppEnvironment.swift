@@ -28,7 +28,7 @@ final class AppEnvironment {
     #endif
 
     init(
-        preferences: PreferencesStore = PreferencesStore(),
+        preferences: PreferencesStore = PreferencesStore.makeDefault(),
         permissions: any PermissionGranting = PermissionService(),
         speechModels: any SpeechModelPreparing = SpeechAssetPreparer(),
         translationAvailability: any TranslationAvailabilityChecking = TranslationAvailabilityService(),

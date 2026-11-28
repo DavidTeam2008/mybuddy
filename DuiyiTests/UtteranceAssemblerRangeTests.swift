@@ -211,6 +211,208 @@ struct UtteranceAssemblerRangeTests {
         #expect(next.text == "And then")
     }
 
+    @Test("Short final phrases between long contiguous phrases survive")
+    func shortFinalBetweenLongPhrasesSurvives() throws {
+        var assembler = UtteranceAssembler()
+        let intro = "Highlight an Asian woman's Asian identity before a math test."
+        let better = "She'll perform better."
+        let identity = "Highlight her female identity."
+        let worse = "She'll perform worse."
+        let lead = "Lead a group of men to believe an athletic task is diagnostic of sports intelligence."
+
+        _ = try requireIngest(&assembler, intro, range(0, 4.949), isFinal: false)
+        _ = try requireIngest(&assembler, intro, range(0.18, 3.96), isFinal: true)
+        _ = try requireIngest(&assembler, "she", range(3.96, 5.226), isFinal: false)
+        _ = try requireIngest(&assembler, better, range(3.96, 5.226), isFinal: false)
+        _ = try requireIngest(&assembler, better, range(4.14, 5.88), isFinal: true)
+        _ = try requireIngest(&assembler, identity, range(5.88, 9.749), isFinal: false)
+        _ = try requireIngest(&assembler, identity, range(6.24, 8.76), isFinal: true)
+        _ = try requireIngest(&assembler, "she", range(8.76, 10.78), isFinal: false)
+        _ = try requireIngest(&assembler, worse, range(8.76, 10.78), isFinal: false)
+        _ = try requireIngest(&assembler, worse, range(8.76, 9.78), isFinal: true)
+        _ = try requireIngest(&assembler, lead, range(9.78, 16.6), isFinal: false)
+        let last = try requireIngest(&assembler, lead, range(11.04, 16.44), isFinal: true)
+
+        #expect(last.text == "\(intro) \(better) \(identity) \(worse) \(lead)")
+    }
+
+    @Test("Disjoint finals with overlapping padded ranges both survive")
+    func disjointFinalsWithOverlappingRangesSurvive() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "The best designs came",
+            range(0, 4),
+            isFinal: true
+        )
+        let second = try requireIngest(
+            &assembler,
+            "only after multiple failed attempts.",
+            range(3.8, 6),
+            isFinal: true
+        )
+
+        #expect(second.text == "The best designs came only after multiple failed attempts.")
+    }
+
+    @Test("Similar consecutive finals with padded overlap both survive")
+    func similarConsecutiveFinalsWithPaddedOverlapSurvive() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "It's the shame of wanting something good.",
+            range(0, 4),
+            isFinal: true
+        )
+        let second = try requireIngest(
+            &assembler,
+            "It's the shame of feeling something good.",
+            range(3.5, 7),
+            isFinal: true
+        )
+
+        #expect(
+            second.text
+                == "It's the shame of wanting something good. "
+                + "It's the shame of feeling something good."
+        )
+    }
+
+    @Test("A distinct final inside a partial volatile's text keeps both")
+    func distinctFinalInsidePartialVolatileKeepsBoth() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "She'll perform better today.",
+            range(3.96, 5.6)
+        )
+        _ = try requireIngest(
+            &assembler,
+            "She'll perform better.",
+            range(4.14, 4.9),
+            isFinal: true
+        )
+        let last = try requireIngest(
+            &assembler,
+            "Headset off.",
+            range(5.0, 5.5),
+            isFinal: true
+        )
+
+        #expect(last.text == "She'll perform better today. Headset off.")
+    }
+
+    @Test("A late distinct final inside a finalized phrase keeps both")
+    func lateDistinctFinalInsideFinalizedPhraseKeepsBoth() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "She'll perform better today.",
+            range(3.96, 5.6),
+            isFinal: true
+        )
+        let final = try requireIngest(
+            &assembler,
+            "Headset off.",
+            range(5.0, 5.5),
+            isFinal: true
+        )
+
+        #expect(final.text == "She'll perform better today. Headset off.")
+    }
+
+    @Test("A late distinct final inside an open volatile keeps both")
+    func lateDistinctFinalInsideVolatileKeepsBoth() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "She'll perform better today.",
+            range(3.96, 5.6)
+        )
+        let final = try requireIngest(
+            &assembler,
+            "Headset off.",
+            range(5.0, 5.5),
+            isFinal: true
+        )
+
+        #expect(final.text == "She'll perform better today. Headset off.")
+    }
+
+    @Test("A same-audio mishearing is replaced, not duplicated")
+    func sameAudioMishearingReplaced() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(&assembler, "I scream", range(0, 3))
+        let final = try requireIngest(
+            &assembler, "ice cream", range(0.5, 2), isFinal: true
+        )
+
+        #expect(final.text == "ice cream")
+    }
+
+    @Test("A short same-audio correction replaces the preview")
+    func shortSameAudioCorrectionReplacesPreview() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(&assembler, "oh", range(0, 2))
+        let final = try requireIngest(
+            &assembler, "Okay.", range(1, 1.5), isFinal: true
+        )
+
+        #expect(final.text == "Okay.")
+    }
+
+    @Test("A volatile padding overlap does not replace the next phrase's final")
+    func volatilePaddingDoesNotReplaceNextFinal() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(&assembler, "First phrase", range(0, 4))
+        let second = try requireIngest(
+            &assembler,
+            "Second phrase",
+            range(3.8, 6),
+            isFinal: true
+        )
+
+        #expect(second.text == "First phrase Second phrase")
+    }
+
+    @Test("A final before an existing phrase keeps audio order")
+    func outOfOrderFinalKeepsAudioOrder() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "Second phrase",
+            range(2, 4),
+            isFinal: true
+        )
+        let first = try requireIngest(
+            &assembler,
+            "First phrase",
+            range(0, 2),
+            isFinal: true
+        )
+
+        #expect(first.text == "First phrase Second phrase")
+    }
+
+    @Test("A final that re-transcribes the same audio is authoritative")
+    func containedDisjointFinalIsAuthoritative() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "Their house",
+            range(0, 3),
+            isFinal: true
+        )
+        let corrected = try requireIngest(
+            &assembler,
+            "There house",
+            range(0.2, 2.8),
+            isFinal: true
+        )
+
+        #expect(corrected.text == "There house")
+    }
+
     @Test("A drastically truncated final keeps the fuller volatile text")
     func truncatedFinalKeepsFullerVolatile() throws {
         var assembler = UtteranceAssembler()
@@ -707,6 +909,39 @@ struct UtteranceAssemblerRangeTests {
         #expect(second.text == "Second phrase")
     }
 
+    @Test("A gap close publishes the open volatile as a final")
+    func gapClosePublishesOpenVolatile() throws {
+        var assembler = UtteranceAssembler()
+        let first = try requireIngest(&assembler, "First phrase", range(0, 2))
+        _ = try requireIngest(&assembler, "Second phrase", range(3, 5))
+
+        let pending = assembler.takePendingFinals()
+        #expect(pending.count == 1)
+        #expect(pending.first?.id == first.id)
+        #expect(pending.first?.text == "First phrase")
+        #expect(pending.first?.isFinal == true)
+        #expect(pending.first?.isRevision == false)
+        #expect(assembler.takePendingFinals().isEmpty)
+    }
+
+    @Test("A gap close publishes the finalized prefix plus the open volatile")
+    func gapClosePublishesPrefixAndVolatile() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler, "Hello.", range(0, 2), isFinal: true
+        )
+        _ = try requireIngest(&assembler, "there", range(2, 3))
+        let next = try requireIngest(
+            &assembler, "Next.", range(4, 6), isFinal: true
+        )
+
+        let pending = assembler.takePendingFinals()
+        #expect(pending.count == 1)
+        #expect(pending.first?.text == "Hello. there")
+        #expect(pending.first?.isRevision == true)
+        #expect(next.text == "Next.")
+    }
+
     @Test("A final after an audio gap starts a new row")
     func gapStartsNewRow() throws {
         var assembler = UtteranceAssembler()
@@ -868,5 +1103,164 @@ struct UtteranceAssemblerRangeTests {
         #expect(late.id == first.id)
         #expect(late.language == .english)
         #expect(late.isRevision == true)
+    }
+
+    @Test("A short final inside a long volatile cannot delete the preview")
+    func shortFinalInsideLongVolatileKeepsPreview() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "No matter who you are or where you are in this moment.",
+            range(761.033, 766.733),
+            isFinal: true
+        )
+        _ = try requireIngest(
+            &assembler,
+            "There is the life that you can be living.",
+            range(766.912, 770.859)
+        )
+        // The next phrase starts inside the preview's padded tail. Its first
+        // volatile chunk is a short word that also occurs in the preview.
+        _ = try requireIngest(&assembler, "you", range(769.912, 770.986))
+        _ = try requireIngest(&assembler, "If you break", range(769.912, 771.819))
+        let next = try requireIngest(
+            &assembler,
+            "If you break your ropes.",
+            range(769.972, 772.852),
+            isFinal: true
+        )
+
+        #expect(
+            next.text
+                == "No matter who you are or where you are in this moment. "
+                + "There is the life that you can be living. If you break your ropes."
+        )
+    }
+
+    @Test("Punctuation-only and purity drops are diagnosed without changing the result")
+    func diagnosticDropReasons() throws {
+        var assembler = UtteranceAssembler()
+        #expect(
+            assembler.ingest(
+                language: .english,
+                text: ".",
+                isFinal: true,
+                range: range(0, 1)
+            ) == nil
+        )
+        #expect(assembler.takeDropEvents().map(\.reason) == [.punctuationOnly])
+
+        #expect(
+            assembler.ingest(
+                language: .english,
+                text: "谢谢你的服务。",
+                isFinal: true,
+                range: range(1, 2)
+            ) == nil
+        )
+        #expect(assembler.takeDropEvents().map(\.reason) == [.purity])
+    }
+
+    @Test("A late volatile for a closed range records its drop reason")
+    func lateVolatileClosedRangeDropReason() throws {
+        var assembler = UtteranceAssembler()
+        let live = try requireIngest(
+            &assembler, "明天见吧", range(0, 2), language: .zhHans
+        )
+        let finalized = try requireSilenceFinal(&assembler)
+        #expect(finalized.id == live.id)
+        _ = assembler.takeDropEvents()
+
+        #expect(
+            assembler.ingest(
+                language: .zhHans,
+                text: "再见",
+                isFinal: false,
+                range: range(1.0, 1.8)
+            ) == nil
+        )
+        #expect(
+            assembler.takeDropEvents().map(\.reason)
+                == [.lateVolatileClosedRange]
+        )
+    }
+
+    @Test("The rollback path records the incumbent loss")
+    func preemptionRecordsIncumbentLoss() throws {
+        var assembler = UtteranceAssembler(
+            experiment: UtteranceAssemblerExperimentOptions(
+                publishesPreemptedIncumbent: false
+            )
+        )
+        let english = try requireIngest(&assembler, "you are right", range(0, 2))
+        _ = assembler.takePreemptionEvents()
+
+        let chinese = try requireIngest(
+            &assembler,
+            "在那时开始之前呢我想请大家想象一个画面",
+            range(0, 2),
+            language: .zhHans
+        )
+
+        #expect(chinese.language == .zhHans)
+        let events = assembler.takePreemptionEvents()
+        #expect(events.count == 1)
+        #expect(events[0].incumbentUtteranceID == english.id)
+        #expect(events[0].incumbentLanguage == .english)
+        #expect(events[0].challengerLanguage == .zhHans)
+        #expect(events[0].applied)
+        #expect(events[0].incumbentVisible)
+        #expect(events[0].queuedFinal == false)
+        #expect(events[0].incumbentTextLength == english.text.count)
+        #expect(assembler.takePendingFinals().isEmpty)
+        #expect(assembler.takeDropEvents().contains { $0.reason == .preemption })
+    }
+
+    @Test("The default preemption publishes a confident visible incumbent first")
+    func preemptionPublishesIncumbentByDefault() throws {
+        var assembler = UtteranceAssembler()
+        let english = try requireIngest(&assembler, "you are right", range(0, 2))
+        _ = assembler.takePreemptionEvents()
+
+        let chinese = try requireIngest(
+            &assembler,
+            "在那时开始之前呢我想请大家想象一个画面",
+            range(0, 2),
+            language: .zhHans
+        )
+
+        #expect(chinese.id != english.id)
+        #expect(chinese.language == .zhHans)
+        let pending = assembler.takePendingFinals()
+        #expect(pending.count == 1)
+        #expect(pending[0].id == english.id)
+        #expect(pending[0].language == .english)
+        #expect(pending[0].text == "you are right")
+        #expect(pending[0].isFinal)
+        #expect(assembler.takeDropEvents().contains { $0.reason == .preemption } == false)
+        let events = assembler.takePreemptionEvents()
+        #expect(events.count == 1)
+        #expect(events[0].incumbentUtteranceID == english.id)
+        #expect(events[0].queuedFinal)
+        #expect(events[0].applied)
+    }
+
+    @Test("A short final inside a long volatile cannot truncate the preview")
+    func shortFinalCannotTruncateLongVolatile() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "There is the life that you can be living.",
+            range(766.912, 770.859)
+        )
+        let next = try requireIngest(
+            &assembler,
+            "You only.",
+            range(767.152, 769.912),
+            isFinal: true
+        )
+
+        #expect(next.text.contains("There is the life that you can be living."))
+        #expect(next.text.contains("You only."))
     }
 }

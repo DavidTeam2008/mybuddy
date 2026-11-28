@@ -1,8 +1,49 @@
 import Foundation
 
-/// A translation result that failed the text-integrity check twice.
+/// A translation result that failed the text-integrity check after the
+/// normal retry and the clause-split fallback.
 enum TranslationIntegrityError: Error, Equatable {
     case corruptedOutput
+}
+
+/// Last-resort source split for a framework result that stays corrupted.
+///
+/// A long list ("..., and confused.") can corrupt at the conjunction even
+/// after a retry. Translating the two clauses separately avoids the boundary
+/// without fabricating source words; the caller joins the translated clauses.
+enum TranslationFallback {
+    static func split(_ text: String) -> [String]? {
+        let markers: [(needle: String, conjunction: String?, firstSuffix: String)] = [
+            (", and ", "and", ","),
+            (", but ", "but", ","),
+            (", or ", "or", ","),
+            (" and ", "and", ""),
+            (" but ", "but", ""),
+            (" or ", "or", ""),
+            ("; ", nil, ";"),
+        ]
+        for marker in markers {
+            guard let range = text.range(of: marker.needle, options: .backwards) else {
+                continue
+            }
+            let first = String(text[..<range.lowerBound]) + marker.firstSuffix
+            // A plain conjunction is only a clause boundary in a list; avoid
+            // splitting ordinary phrases such as "black and white".
+            if marker.firstSuffix.isEmpty, !first.contains(",") {
+                continue
+            }
+            let secondPrefix = marker.conjunction.map { "\($0) " } ?? ""
+            let second = secondPrefix + String(text[range.upperBound...])
+            let firstTrimmed = first.trimmingCharacters(in: .whitespacesAndNewlines)
+            let secondTrimmed = second.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard firstTrimmed.contains(where: { $0.isLetter }),
+                  secondTrimmed.contains(where: { $0.isLetter }) else {
+                continue
+            }
+            return [firstTrimmed, secondTrimmed]
+        }
+        return nil
+    }
 }
 
 /// What the pump needs from one translation attempt: the text plus the
@@ -84,9 +125,10 @@ struct TranslationJobPump {
                     let retryCount: Int
                     if TextIntegrity.isCorrupted(first.text) {
                         // A corrupted framework result is retried once with the
-                        // same source before it is treated as a failure. A
-                        // cancelled pump must requeue instead of reporting a
-                        // permanent failure.
+                        // same source; if it is still corrupt, a conjunction
+                        // sentence is translated as two clauses and joined.
+                        // A cancelled pump must requeue instead of reporting
+                        // a permanent failure.
                         if Task.isCancelled {
                             consumer.requeue(job)
                             return
@@ -99,7 +141,63 @@ struct TranslationJobPump {
                             consumer.requeue(job)
                             return
                         }
-                        guard !TextIntegrity.isCorrupted(retry.text) else {
+                        if !TextIntegrity.isCorrupted(retry.text) {
+                            result = retry
+                            retryCount = 1
+                        } else if let clauses = TranslationFallback.split(text) {
+                            #if DEBUG
+                            logIntegrity("fallback", job: job, source: text, translated: retry.text)
+                            #endif
+                            var clauseResults: [TranslationPumpResult] = []
+                            var fallbackFailed = false
+                            for clause in clauses {
+                                if Task.isCancelled {
+                                    consumer.requeue(job)
+                                    return
+                                }
+                                do {
+                                    let clauseResult = try await translate(clause)
+                                    if Task.isCancelled {
+                                        consumer.requeue(job)
+                                        return
+                                    }
+                                    let clauseText = clauseResult.text
+                                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                                    guard !clauseText.isEmpty,
+                                          !TextIntegrity.isCorrupted(clauseText) else {
+                                        fallbackFailed = true
+                                        break
+                                    }
+                                    clauseResults.append(clauseResult)
+                                } catch {
+                                    if Task.isCancelled || error is CancellationError {
+                                        consumer.requeue(job)
+                                        return
+                                    }
+                                    fallbackFailed = true
+                                    break
+                                }
+                            }
+                            guard !fallbackFailed, clauseResults.count == clauses.count else {
+                                recordFailure(
+                                    job: job,
+                                    failure: "corruptedOutput",
+                                    retryCount: 1
+                                )
+                                await onFailure(job, TranslationIntegrityError.corruptedOutput)
+                                continue
+                            }
+                            let fallback = TranslationPumpResult(
+                                text: clauseResults.map(\.text).joined(
+                                    separator: job.target.usesLatinScript ? " " : ""
+                                ),
+                                responseSourceLanguage: clauseResults.last?.responseSourceLanguage,
+                                responseTargetLanguage: clauseResults.last?.responseTargetLanguage
+                            )
+                            recordResponse(job: job, result: fallback, retryCount: 2)
+                            await onSuccess(job, fallback.text)
+                            continue
+                        } else {
                             #if DEBUG
                             logIntegrity("rejected", job: job, source: text, translated: retry.text)
                             #endif
@@ -107,8 +205,6 @@ struct TranslationJobPump {
                             await onFailure(job, TranslationIntegrityError.corruptedOutput)
                             continue
                         }
-                        result = retry
-                        retryCount = 1
                     } else {
                         result = first
                         retryCount = 0

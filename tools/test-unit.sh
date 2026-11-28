@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Authoritative unit-test wrapper.
 #
+# Runs the deterministic tooling tests first (fixture scorer), then DuiyiTests.
+#
 # Usage:
 #   tools/test-unit.sh [--simulator <name-or-udid>]
 #
@@ -39,5 +41,8 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+echo "==> tooling: fixture scorer tests"
+python3 -I -m unittest discover -s "$ROOT/tools/tests" -p 'test_*.py'
 
 run_tests "DuiyiTests" "unit" "strict" "$requested"

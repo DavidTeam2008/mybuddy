@@ -40,8 +40,11 @@ For agent or CI runs, use the wrappers. They select and boot a simulator, parse 
 
     tools/test-unit.sh
     tools/test-ui.sh
+    tools/test-tools.sh
 
-Physical iPhone verification: run `tools/device.sh check` and follow `docs/agents/device-testing.md` (signing, UI automation, acoustic smoke). Debug builds also accept a fixture audio path through the real speech engine, so the ASR → translation → persistence path can run without a quiet room: `tools/fixture-run.sh` (see §5.1 in that page).
+`tools/test-unit.sh` also runs the deterministic tooling tests first; `tools/test-tools.sh` runs only those (Python stdlib, including the fixture scorer's short-cue and baseline checks).
+
+Physical iPhone verification: run `tools/device.sh check` and follow `docs/agents/device-testing.md` (signing, UI automation, acoustic smoke). Debug builds also accept a fixture audio path through the real speech engine, so the ASR → translation → persistence path can run without a quiet room: `tools/fixture-run.sh` (see §5.1 in that page). The default fixture run now fails on a relative regression against `tools/fixtures/ted-baseline.json`, including short-cue retention; this is still a mechanical gate, not semantic translation signoff.
 
 Fast static checks, plus the optional committed pre-commit hook:
 

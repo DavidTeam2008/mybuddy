@@ -140,9 +140,28 @@ tools/fixture-run.sh --run-id ted-2 --noise     # Mac 外放人声，证环境�
 tools/fixture-run.sh --codec m4a                 # 9 MB 级夹具，便于快速传输
 tools/fixture-run.sh --pacing max                # 只用于 ASR 筛选，墙钟窗口不保真
 tools/fixture-run.sh --start 511 --duration 30 --ground-truth /tmp/gt-30s.tsv --min-coverage 0.5
+tools/fixture-run.sh --baseline none              # 只做结构检查，不做相对基线
+
+# P1-3 ASR A/B（DEBUG-only；同一 360 s 片段切换 fastResults / contextualStrings）
+tools/fixture-run.sh --asr-fast-results no --run-id p13-nofast \
+  --start 511 --duration 360 --ground-truth /tmp/p13-360.tsv --min-coverage 0.5
+tools/fixture-run.sh --asr-context-terms "Cameron Russell,Lidia Yuknavitch,Fernando" --run-id p13-context \
+  --start 511 --duration 360 --ground-truth /tmp/p13-360.tsv --min-coverage 0.5
+tools/fixture-run.sh --dump-asr-text --run-id p13-raw \
+  --start 511 --duration 30 --ground-truth /tmp/gt-30s.tsv --min-coverage 0.3
+
+# P1-1 双 locale 抢占 A/B（DEBUG-only；同一 fixture 只切换 incumbent final 发布）
+tools/fixture-run.sh --module conversation --user-language english --peer-language japanese \
+  --fixture /tmp/dual.wav --start 0 --duration 11 --ground-truth /tmp/dual.tsv \
+  --preemption-publish no --baseline none --min-coverage 0 --dump-asr-text --run-id p11-a
+tools/fixture-run.sh --module conversation --user-language english --peer-language japanese \
+  --fixture /tmp/dual.wav --start 0 --duration 11 --ground-truth /tmp/dual.tsv \
+  --preemption-publish yes --baseline none --min-coverage 0 --dump-asr-text --run-id p11-b
 ```
 
-前置：`Config/Local.xcconfig`、已连接的物理 iPhone、`ffmpeg`、`python3`、`docs/media/TED.mp3`。脚本会构建/安装 Debug、把夹具推到 App `Documents`、用 `-duiyi.fixtureAudio` 启动、轮询 `fixture-run-done.json`、结束 App、拉取证据并用 `tools/fixture-score.py` 计分。证据在 `.device-state/fixture-runs/<run-id>/`，不提交。
+前置：`Config/Local.xcconfig`、已连接的物理 iPhone、`ffmpeg`、`python3`、`docs/media/TED.mp3`。脚本会构建/安装 Debug、把夹具推到 App `Documents`、用 `-duiyi.fixtureAudio` 启动、轮询 `fixture-run-done.json`、结束 App、拉取证据并用 `tools/fixture-score.py` 计分。证据在 `.device-state/fixture-runs/<run-id>/`，不提交；每次运行写 `run-meta.json`（commit/dirty、fixture sha、窗口、ASR flags、baseline、app/toolchain）。`transcript.tsv` 只导出最新任务；同一 `--run-id` 复用 store 时会保留旧任务，复跑请用新的 run-id（或确认 store 已清空），否则人工查看 transcript 会看到旧任务行。
+
+默认窗口（511 s 起、785 s）、WAV、`realtime` 的全量跑会读取 `tools/fixtures/ted-baseline.json`，对同一 ground truth 做相对基线检查：`sourceCoverage`/`exactMatchRate` 不得低于基线 1 个百分点，`wordErrorRate` 不得高于基线 1 个百分点，≤5 词短句保留率不得低于基线 2 个百分点。短句保留率按 ground-truth 短 cue 的规范化 token 是否连续出现在整份文字稿中计算；合行不扣分，丢词/误听/丢整句会扣分。基线里的 `requiredCues` 是人工 canary 列表（silence、Ben、Headset off、`there is the life that you can be living…` 等），任一缺失直接失败；它覆盖短句门限够不到的长句丢失。改变窗口/codec/pacing 或自定义 `--ground-truth` 时默认关闭基线，避免拿不同口径硬比；需要时显式传 `--baseline <path>`，或 `--baseline none` 关闭。`score.json` 会写 `shortCueFound`/`shortCueTotal`/`shortCueRetention`/`missingShortCues` 和 `baselineRegressions`。
 
 运行参数（也可手工传给 `devicectl device process launch`）：
 
@@ -154,17 +173,58 @@ tools/fixture-run.sh --start 511 --duration 30 --ground-truth /tmp/gt-30s.tsv --
 | `-duiyi.fixtureSettleSeconds <n>` | EOF 后等待翻译落定的秒数（默认 10） |
 | `-duiyi.fixtureDeleteAfterRun YES` | 结束后删除设备上的夹具；脚本复用 `fixture-current.<ext>`，避免 72 MB 文件堆积 |
 | `-duiyi.storeFile fixture-<id>` | 隔离 SwiftData，避免污染真实历史 |
+| `-duiyi.prefsSuite fixture-<id>` | 隔离 UserDefaults；fixture/mic A/B 不覆盖真实语言、面对面换手方式等设置 |
+
+`--dump-asr-text` 是 fixture-only 的原始 ASR 证据：仅当同时有 `-duiyi.fixtureAudio` 时写入 `Documents/fixture-asr-raw.jsonl`（语言、range、text、alternatives、confidence 聚合），脚本拉回 `asr-raw.jsonl` 后用空文件覆盖设备文件；证据不提交、不上传、不做常规诊断导出。它不是麦克风路径，也不是 Release 行为。`score.json` 的 `missingCueAttribution` 只在有 `asr-raw.jsonl` 时可用：exact cue 在 raw final 但不在文字稿 → `assemblerLoss`；只有近似拼写 → `surfaceVariant`；raw 也没有 → `asrMiss`；没有 raw 证据 → `unavailable`。`nameCues`（Cameron Russell/Lidia Yuknavitch 等）只作非阻断观察，不进 `requiredCue` 硬门禁。
+
+`--module conversation` 使用 DEBUG-only 的 `ConversationViewModel` 自动链路（真实双 locale 引擎、assembler、翻译、落库），只替换音频采集；`--user-language` / `--peer-language` 选择语言对，`--preemption-publish yes` 打开调试抢占修复。证据里 `speech.start` 记录 requested/active/usingDual，`speech.preemption` 记录 incumbent/challenger 双方长度与 `applied/queuedFinal`，`asr.drop` 记录 dropReason；这些事件都不含正文。
+
+P1-3 ASR A/B 使用 DEBUG-only 的两个开关：`--asr-fast-results no` 去掉 `SpeechTranscriber` 的 `.fastResults`；`--asr-context-terms "a,b"` 设置 `AnalysisContext.contextualStrings[.general]`。**Apple 文档只把词表偏置写给 `DictationTranscriber`，论坛 811083 明确 `SpeechTranscriber` 当前不消费 contextualStrings，所以这个开关目前对 SpeechTranscriber 是 no-op，只能用于未来 OS 复测，不能作为专名修复。** Release 默认仍是 fast + 无词表偏置；不要用低置信度丢 final。证据目录按 run-id 隔离，`--skip-build` 可复用同一安装包只换 launch args。
 
 判定边界：
 
 - 能证明：文件音频走真实 ASR/组装/翻译/落库；同一夹具可重复；房间噪声不进入字幕；`EOF → endTask → 最后 final/译文` 的收口。
 - 不能证明：麦克风硬件、音频路由/回声、真实 TTS 出声、房间噪声下的 ASR 鲁棒性、长时热/内存稳定性。发布前的安静房间声学冒烟仍保留。
 - 1× 是常规回归口径：1.1 s 静音 finalize、40/90 ms 翻译防抖、380 ms TTS 结算都是墙钟；`max` 只用于 ASR 文本筛选，不用于句界/延迟结论。
-- 翻译语义质量不由脚本判定；`score.json` 只给源文覆盖/精确匹配/WER、前缀重复、空译、U+FFFD、中文译文行数。语义评审按 `docs/research/simultaneous-translation-quality.md` 的口径另做 LLM + 人工。
+- 翻译语义质量不由脚本判定；`score.json` 只给源文覆盖/精确匹配/WER、短句保留、前缀重复、空译、U+FFFD、中文译文行数。短句保留也只是 token 级机械检查，不能替代语义评审；语义评审按 `docs/research/simultaneous-translation-quality.md` 的口径另做 LLM + 人工。
 
 实现约束：所有夹具代码在 `#if DEBUG` 下，Release 不编译；不改 `UtteranceAssembler`/翻译语义；不 mock `SpeechTranscriber.isAvailable`；真机结果才算数。
 
-## 6. 常见故障
+### 5.2 真实麦克风抢占 A/B（P1-1）
+
+真机麦克风路径不能再用 `-duiyi.fixtureAudio`：那会绕过麦克风/ADC/房间声学，不能证明真实采集下的抢占。`DebugMicABRun` 是 DEBUG-only 的无夹具驱动：它只负责打开模块、建任务、开始监听、到点结束和导出诊断，音频仍由 Mac 扬声器播放、iPhone 麦克风采集。
+
+```bash
+# 生成脚本音频（本地，不入库）：英文短句 + 目标语言长句，中间不留静音
+say -v Samantha -r 180 -o /tmp/inc.aiff "They also cause"
+say -v Kyoko -r 180 -o /tmp/chal-ja.aiff \
+  "これはとてもたいへんなことですこれはわたしのせいかつにえいきょうをあたえます"
+ffmpeg -i /tmp/inc.aiff -t 1.1 -af "volume=0.55" -ar 44100 -ac 1 /tmp/inc.wav
+ffmpeg -i /tmp/chal-ja.aiff -ar 44100 -ac 1 /tmp/chal-ja.wav
+# 用 ffmpeg concat 重复 [inc.wav, chal-ja.wav, 2.5s 静音] 6 次
+
+# A/B 交错；每次新建 run-id，脚本自动隔离 store
+tools/mic-ab-run.sh --run-id cja-a-1 --arm a \
+  --module conversation --user-language english --peer-language japanese \
+  --audio /tmp/p11-ja-6cycles.wav
+tools/mic-ab-run.sh --run-id cja-b-1 --arm b \
+  --module conversation --user-language english --peer-language japanese \
+  --audio /tmp/p11-ja-6cycles.wav
+
+# Meeting 使用 en/zh（MeetingRecognition 固定 display + defaultPeer）
+tools/mic-ab-run.sh --run-id cme-a-1 --arm a \
+  --module meeting --user-language english --peer-language zhHans \
+  --audio /tmp/p11-zh-6cycles.wav
+
+python3 tools/mic-ab-analyze.py
+```
+
+- 每次证据在 `.device-state/mic-ab/runs/<run-id>/`：无正文诊断 JSON、marker/log、隔离 store；不提交。
+- 脚本同时传 `-duiyi.prefsSuite`，语言/换手/autoStart 写进隔离 suite；不会把真实 App 的面对面默认改成 automatic。
+- `speech.start.usingDual` 必须为 true；`speech.preemption` 的 `incumbentUtteranceID` 关联 store `ZID`。`final` 且不含混合脚本才算 clean retention；preview 和 mixed final 都不算。
+- 判定/结果见 [`face-to-face-dual-locale-quality.md`](../research/face-to-face-dual-locale-quality.md) §7.6。Release 默认已改为 B（D12）；`-duiyi.assemblerPreemptionPublish no` 保留回滚。真人 10 分钟验证按 D11 暂缓。
+
+
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |

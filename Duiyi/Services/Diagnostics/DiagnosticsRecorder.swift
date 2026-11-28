@@ -125,6 +125,82 @@ final class DiagnosticsRecorder: DiagnosticsRecording, @unchecked Sendable {
                 rangeStart: record.rangeStartSeconds,
                 rangeDuration: record.rangeDurationSeconds,
                 resultsFinalizationTime: record.resultsFinalizationTimeSeconds,
+                confidenceRunCount: record.confidenceRunCount,
+                confidenceMinimum: record.confidenceMinimum,
+                confidenceMean: record.confidenceMean,
+                confidenceBuckets: record.confidenceBuckets,
+                style: record.style
+            )
+        )
+        #endif
+    }
+
+    func record(_ record: ASRDropRecord) {
+        #if DEBUG
+        lock.lock()
+        defer { lock.unlock() }
+        ensureSessionLocked()
+        summary.asrDropCount += 1
+        appendLocked(
+            DiagnosticsEvent(
+                kind: "asr.drop",
+                at: now(),
+                feature: session?.feature,
+                language: record.language.rawValue,
+                isFinal: record.isFinal,
+                textLength: record.textLength,
+                rangeStart: record.rangeStartSeconds,
+                rangeDuration: record.rangeDurationSeconds,
+                dropReason: record.reason,
+                style: record.style
+            )
+        )
+        #endif
+    }
+
+    func record(_ record: SpeechPreemptionRecord) {
+        #if DEBUG
+        lock.lock()
+        defer { lock.unlock() }
+        ensureSessionLocked()
+        summary.preemptionCount += 1
+        appendLocked(
+            DiagnosticsEvent(
+                kind: "speech.preemption",
+                at: now(),
+                feature: session?.feature,
+                utteranceID: record.incumbentUtteranceID.uuidString,
+                language: record.incumbentLanguage.rawValue,
+                textLength: record.incumbentTextLength,
+                applied: record.applied,
+                rangeStart: record.rangeStartSeconds,
+                rangeDuration: record.rangeDurationSeconds,
+                challengerLanguage: record.challengerLanguage.rawValue,
+                challengerLength: record.challengerTextLength,
+                incumbentConfident: record.incumbentConfident,
+                challengerConfident: record.challengerConfident,
+                incumbentVisible: record.incumbentVisible,
+                queuedFinal: record.queuedFinal,
+                style: record.style
+            )
+        )
+        #endif
+    }
+
+    func record(_ record: SpeechStartRecord) {
+        #if DEBUG
+        lock.lock()
+        defer { lock.unlock() }
+        ensureSessionLocked()
+        summary.speechStartCount += 1
+        appendLocked(
+            DiagnosticsEvent(
+                kind: "speech.start",
+                at: now(),
+                feature: session?.feature,
+                requestedLanguages: record.requestedLanguages,
+                activeLanguages: record.activeLanguages,
+                usingDual: record.usingDual,
                 style: record.style
             )
         )

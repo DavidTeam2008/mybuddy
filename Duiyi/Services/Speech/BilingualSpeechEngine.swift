@@ -3,6 +3,145 @@ import CoreMedia
 import Foundation
 import Speech
 
+/// DEBUG-only ASR A/B configuration. Production defaults to the current
+/// fast-results/no-bias behavior; fixture launches can flip the fast switch.
+/// `contextualStrings` is retained only for future OS re-tests: Apple docs and
+/// forum thread 811083 say SpeechTranscriber currently ignores it.
+struct ASRExperimentOptions: Equatable, Sendable {
+    var fastResults = true
+    var contextualStrings: [String] = []
+
+    static func parse(arguments: [String]) -> ASRExperimentOptions {
+        func value(for flag: String) -> String? {
+            guard let index = arguments.firstIndex(of: flag) else { return nil }
+            let valueIndex = arguments.index(after: index)
+            guard valueIndex < arguments.endIndex else { return nil }
+            return arguments[valueIndex]
+        }
+
+        var options = ASRExperimentOptions()
+        if let raw = value(for: "-duiyi.asrFastResults") {
+            options.fastResults = !["no", "false", "0"].contains(raw.lowercased())
+        }
+        if let raw = value(for: "-duiyi.asrContextTerms") {
+            options.contextualStrings = raw
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        }
+        return options
+    }
+
+    static var current: ASRExperimentOptions {
+        #if DEBUG
+        parse(arguments: ProcessInfo.processInfo.arguments)
+        #else
+        ASRExperimentOptions()
+        #endif
+    }
+}
+
+/// Character-weighted transcription confidence for one ASR result. Diagnostic
+/// only: it never participates in acceptance, publishing, or selection.
+struct ASRConfidenceStats: Equatable, Sendable {
+    var runCount: Int
+    var minimum: Double
+    var mean: Double
+    /// Ten 0.1-wide buckets, weighted by characters.
+    var buckets: [Int]
+
+    static func from(_ text: AttributedString) -> ASRConfidenceStats? {
+        var runCount = 0
+        var characterCount = 0
+        var minimum = Double.infinity
+        var weightedSum = 0.0
+        var buckets = Array(repeating: 0, count: 10)
+
+        for run in text.runs {
+            guard let confidence = run.transcriptionConfidence else { continue }
+            let count = text[run.range].characters.count
+            guard count > 0 else { continue }
+            runCount += 1
+            characterCount += count
+            minimum = Swift.min(minimum, confidence)
+            weightedSum += confidence * Double(count)
+            let bucket = Swift.min(9, Swift.max(0, Int(confidence * 10)))
+            buckets[bucket] += count
+        }
+
+        guard characterCount > 0 else { return nil }
+        return ASRConfidenceStats(
+            runCount: runCount,
+            minimum: minimum,
+            mean: weightedSum / Double(characterCount),
+            buckets: buckets
+        )
+    }
+}
+
+#if DEBUG
+/// Fixture-only raw ASR evidence. Never enabled on the microphone path and
+/// never written into DiagnosticsRecorder; the fixture script pulls it and
+/// overwrites the device file with an empty payload.
+struct RawASRRecord: Codable, Sendable {
+    var language: String
+    var isFinal: Bool
+    var text: String
+    var alternatives: [String]
+    var rangeStart: Double?
+    var rangeDuration: Double?
+    var resultsFinalizationTime: Double?
+    var confidenceRunCount: Int?
+    var confidenceMinimum: Double?
+    var confidenceMean: Double?
+    var confidenceBuckets: [Int]?
+}
+
+enum DebugASRDump {
+    static var isEnabled: Bool {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("-duiyi.fixtureAudio") else { return false }
+        guard let index = arguments.firstIndex(of: "-duiyi.dumpASRText") else {
+            return false
+        }
+        let valueIndex = arguments.index(after: index)
+        guard valueIndex < arguments.endIndex else { return false }
+        return !["no", "false", "0"].contains(arguments[valueIndex].lowercased())
+    }
+
+    static var fileURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("fixture-asr-raw.jsonl")
+    }
+}
+
+actor ASRDebugDump {
+    static let shared = ASRDebugDump()
+    private var handle: FileHandle?
+
+    func reset() {
+        close()
+        let url = DebugASRDump.fileURL
+        FileManager.default.createFile(atPath: url.path, contents: Data())
+        handle = try? FileHandle(forWritingTo: url)
+    }
+
+    func append(_ record: RawASRRecord) {
+        guard let handle else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard var data = try? encoder.encode(record) else { return }
+        data.append(0x0A)
+        try? handle.write(contentsOf: data)
+    }
+
+    func close() {
+        try? handle?.close()
+        handle = nil
+    }
+}
+#endif
+
 actor BilingualSpeechEngine: SpeechRecognizing {
     private let capturer: AudioCapturing
     private let diagnostics: any DiagnosticsRecording
@@ -52,6 +191,11 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         style: SpeechRecognitionStyle
     ) async throws -> AsyncStream<Utterance> {
         await stop()
+        #if DEBUG
+        if DebugASRDump.isEnabled {
+            await ASRDebugDump.shared.reset()
+        }
+        #endif
         isRecoveringFromTranscriberFailure = false
         assembler.reset()
         lastFinalSignature = nil
@@ -74,6 +218,16 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         } catch {
             throw error
         }
+        diagnostics.record(
+            SpeechStartRecord(
+                requestedLanguages: requested.map(\.rawValue),
+                activeLanguages: (usingDual ? pairLanguages : [singleLanguage])
+                    .map(\.rawValue),
+                fallbackLanguage: fallbackLanguage.rawValue,
+                usingDual: usingDual,
+                style: styleName
+            )
+        )
 
         return stream
     }
@@ -105,6 +259,9 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             _ = await AssetInventory.release(reservedLocale: locale)
         }
         reservedLocales.removeAll()
+        #if DEBUG
+        await ASRDebugDump.shared.close()
+        #endif
     }
 
     /// Let the analyzer publish the final for the open range, then give the
@@ -267,6 +424,15 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             : nil
         let analyzer = SpeechAnalyzer(modules: modules, options: options)
         self.analyzer = analyzer
+        // SpeechTranscriber currently does not consume contextualStrings
+        // (Apple forum 811083). Keep this DEBUG path for future OS re-tests,
+        // but it must not be treated as a proper-name fix.
+        let contextTerms = ASRExperimentOptions.current.contextualStrings
+        if !contextTerms.isEmpty {
+            var context = AnalysisContext()
+            context.contextualStrings[.general] = contextTerms
+            try await analyzer.setContext(context)
+        }
         try await analyzer.prepareToAnalyze(in: format)
 
         let (input, continuation) = AsyncStream<AnalyzerInput>.makeStream()
@@ -310,13 +476,36 @@ actor BilingualSpeechEngine: SpeechRecognizing {
                 do {
                     for try await result in transcriber.results {
                         let text = String(result.text.characters)
+                        let confidence = ASRConfidenceStats.from(result.text)
+                        #if DEBUG
+                        if DebugASRDump.isEnabled {
+                            await ASRDebugDump.shared.append(
+                                RawASRRecord(
+                                    language: language.rawValue,
+                                    isFinal: result.isFinal,
+                                    text: text,
+                                    alternatives: result.alternatives.map {
+                                        String($0.characters)
+                                    },
+                                    rangeStart: Self.seconds(result.range.start),
+                                    rangeDuration: Self.seconds(result.range.duration),
+                                    resultsFinalizationTime: Self.seconds(result.resultsFinalizationTime),
+                                    confidenceRunCount: confidence?.runCount,
+                                    confidenceMinimum: confidence?.minimum,
+                                    confidenceMean: confidence?.mean,
+                                    confidenceBuckets: confidence?.buckets
+                                )
+                            )
+                        }
+                        #endif
                         await self?.handleTranscription(
                             language: language,
                             text: text,
                             isFinal: result.isFinal,
                             rangeStart: Self.seconds(result.range.start),
                             rangeDuration: Self.seconds(result.range.duration),
-                            resultsFinalizationTime: Self.seconds(result.resultsFinalizationTime)
+                            resultsFinalizationTime: Self.seconds(result.resultsFinalizationTime),
+                            confidence: confidence
                         )
                     }
                 } catch is CancellationError {
@@ -435,19 +624,47 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         isFinal: Bool,
         rangeStart: Double?,
         rangeDuration: Double?,
-        resultsFinalizationTime: Double?
+        resultsFinalizationTime: Double?,
+        confidence: ASRConfidenceStats? = nil
     ) {
         if Date() < ignoreTranscriptionUntil {
             return
         }
         let scriptMismatch = UtteranceAssembler.isScriptMismatch(text, claimed: language)
         let range = SpeechRange(rangeStart: rangeStart, rangeDuration: rangeDuration)
-        guard let utterance = assembler.ingest(
+        let utterance = assembler.ingest(
             language: language,
             text: text,
             isFinal: isFinal,
             range: range
-        ) else {
+        )
+        for drop in assembler.takeDropEvents() {
+            recordDrop(drop)
+        }
+        for preemption in assembler.takePreemptionEvents() {
+            recordPreemption(preemption)
+        }
+        // A boundary closed the previous row. Publish its final before the
+        // new row so an open volatile is not dropped at the gap/language
+        // change/cap.
+        for pending in assembler.takePendingFinals() {
+            let pendingPublished = publish(pending)
+            recordASR(
+                language: pending.language,
+                textLength: pending.text.count,
+                isFinal: true,
+                synthetic: false,
+                scriptMismatch: false,
+                accepted: true,
+                published: pendingPublished,
+                utterance: pending,
+                rangeStart: nil,
+                rangeDuration: nil,
+                resultsFinalizationTime: nil,
+                confidence: nil
+            )
+        }
+        guard let utterance else {
             recordASR(
                 language: language,
                 textLength: text.count,
@@ -459,7 +676,8 @@ actor BilingualSpeechEngine: SpeechRecognizing {
                 utterance: nil,
                 rangeStart: rangeStart,
                 rangeDuration: rangeDuration,
-                resultsFinalizationTime: resultsFinalizationTime
+                resultsFinalizationTime: resultsFinalizationTime,
+                confidence: confidence
             )
             return
         }
@@ -475,7 +693,8 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             utterance: utterance,
             rangeStart: rangeStart,
             rangeDuration: rangeDuration,
-            resultsFinalizationTime: resultsFinalizationTime
+            resultsFinalizationTime: resultsFinalizationTime,
+            confidence: confidence
         )
         if Self.shouldAcknowledgeFinal(utterance) {
             assembler.acknowledgeFinal(language: utterance.language)
@@ -501,7 +720,42 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             utterance: utterance,
             rangeStart: nil,
             rangeDuration: nil,
-            resultsFinalizationTime: nil
+            resultsFinalizationTime: nil,
+            confidence: nil
+        )
+    }
+
+    private func recordDrop(_ event: SpeechDropEvent) {
+        diagnostics.record(
+            ASRDropRecord(
+                language: event.language,
+                reason: event.reason.rawValue,
+                textLength: event.textLength,
+                isFinal: event.isFinal,
+                rangeStartSeconds: event.range?.start,
+                rangeDurationSeconds: event.range?.duration,
+                style: styleName
+            )
+        )
+    }
+
+    private func recordPreemption(_ event: SpeechPreemptionEvent) {
+        diagnostics.record(
+            SpeechPreemptionRecord(
+                incumbentUtteranceID: event.incumbentUtteranceID,
+                incumbentLanguage: event.incumbentLanguage,
+                challengerLanguage: event.challengerLanguage,
+                incumbentTextLength: event.incumbentTextLength,
+                challengerTextLength: event.challengerTextLength,
+                incumbentConfident: event.incumbentConfident,
+                challengerConfident: event.challengerConfident,
+                incumbentVisible: event.incumbentVisible,
+                queuedFinal: event.queuedFinal,
+                applied: event.applied,
+                rangeStartSeconds: event.range?.start,
+                rangeDurationSeconds: event.range?.duration,
+                style: styleName
+            )
         )
     }
 
@@ -516,7 +770,8 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         utterance: Utterance?,
         rangeStart: Double?,
         rangeDuration: Double?,
-        resultsFinalizationTime: Double?
+        resultsFinalizationTime: Double?,
+        confidence: ASRConfidenceStats?
     ) {
         diagnostics.record(
             ASRDiagnosticsRecord(
@@ -532,7 +787,11 @@ actor BilingualSpeechEngine: SpeechRecognizing {
                 rangeStartSeconds: rangeStart,
                 rangeDurationSeconds: rangeDuration,
                 resultsFinalizationTimeSeconds: resultsFinalizationTime,
-                style: styleName
+                style: styleName,
+                confidenceRunCount: confidence?.runCount,
+                confidenceMinimum: confidence?.minimum,
+                confidenceMean: confidence?.mean,
+                confidenceBuckets: confidence?.buckets
             )
         )
     }
@@ -705,10 +964,14 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private static func makeTranscriber(locale: Locale) -> SpeechTranscriber {
-        SpeechTranscriber(
+        var reportingOptions: Set<SpeechTranscriber.ReportingOption> = [.volatileResults]
+        if ASRExperimentOptions.current.fastResults {
+            reportingOptions.insert(.fastResults)
+        }
+        return SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [.etiquetteReplacements],
-            reportingOptions: [.volatileResults, .fastResults],
+            reportingOptions: reportingOptions,
             attributeOptions: [.transcriptionConfidence]
         )
     }
