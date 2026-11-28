@@ -150,3 +150,53 @@ H2 目前证据偏弱：面对面英文拒绝率 29.4%，同传 28.3%，几乎�
 - 2026-11-27 已补该缺口（PR #91）：失败 transcriber 写 `speech.failure`（language/errorDomain/errorCode/recovery），双路失败自动把失败语种重启为单路 `.trustedLocale`（meetingNotes 仍 `.strict`）；重启失败记 `restartFailed` 后结束。真机未验证。
 - 单路与同传的 ASR 请求相同（`[english]`、`.trustedLocale`、`.liveCaptions`），final 率也接近（约 0.227/s vs 0.230/s）。文字稿并非全面退化：单路在 `Highlight her female identity`、`your circumstances`、`Cameron Russell`、`doctor's lab coat`、`They'll perform better` 等行更好；坏行集中在 `agstic`、`. of the painters coat`、`noich`、孤立的 `we`、末行合并。双路/同传也有自己的坏行。
 - 结论：这次数据不支持“单路全面差于同传”；差异更像手机摆放/声学 + 单次波动。双路则明确更贵、更脆。下一步先做**同摆放**的 single vs simultaneous 对照，再决定是否把手动 turn + 单活跃 locale 作为面对面模式。
+
+## 7. P1-1 抢占修复：真实设备麦克风 A/B（2026-11-28）
+
+> 目的：验证 `-duiyi.assemblerPreemptionPublish` 在真实 Conversation/Meeting 双 locale 麦克风路径上是否保留可见 incumbent，而不是只靠合成音频。不是 ASR 质量 A/B，也不是翻译质量 A/B。
+
+### 7.1 臂与构建
+
+- 同一台 iPhone 13、同一 DEBUG 构建（`6650972` 或更新）；只切换 launch arg：
+  - A：`-duiyi.assemblerPreemptionPublish no`（生产默认）
+  - B：`-duiyi.assemblerPreemptionPublish yes`（实验）
+- 每次用新的 `-duiyi.storeFile fixture-preempt-<arm>-<n>`，避免历史任务污染；**不要**传 `-duiyi.fixtureAudio`，走真实麦克风。
+- Conversation：automatic 模式、双语言，确认 `speech.start` 的 `usingDual=true` 且 requested/active 包含两种语言。Meeting：打开多语言模式，同样确认 `usingDual=true`。
+- 先用 en/ja 做机制臂（两种模型都能稳定产生 challenger）；再用产品 en/zh 做真实频率/路由臂。中文 strict 纯度可能拒绝混合 hallucination，若 en/zh 没有 applied preemption，只能报告“未触发”，不能据此判断修复无效。
+
+### 7.2 触发脚本
+
+真实麦克风下最容易复现的是“短 incumbent + 立即被长 challenger 抢占”：
+
+1. 扬声器/人声 A 说 1–2 s 英文片段，截断在短语中间（如 `They also cause us to bump into each other—`）。
+2. 约 1.0 s 后 B 立即说 4–6 s 目标语言（日语优先；产品臂中文），中间不留静音；可略微提高 B 的音量，让 challenger 文本长度超过 incumbent 的 `1.5× + 2`。
+3. 停止 3 s，让 assembler 按静音关行；重复 5 次/轮。
+4. 固定手机位置、朝向、音量；A/B 交错（A B A B A B），每轮之间冷却 1 分钟。
+
+### 7.3 每次运行要留下的证据
+
+- 设置页 DEBUG 导出诊断 JSON；用 `docs/agents/device-testing.md` §6.1 拉 SwiftData store；保留每轮屏幕录制/关键截图。
+- 诊断中必须看到 `speech.start`（双 locale）、`speech.preemption`（`applied`、`incumbentVisible`、`queuedFinal`、`incumbentUtteranceID`）与 `asr.result`（同一 utteranceID 的 final）。
+- 文字稿按最新 task 导出；不要用旧 run 的 store。
+
+### 7.4 指标与判定
+
+主指标（每个 interrupted turn）：
+
+- B 中 `applied=true && incumbentVisible=true` 的抢占，`queuedFinal=true` 且同 `incumbentUtteranceID` 有 final/asr 行；A 中同条件应 `queuedFinal=false` 且该行只存在于 preview/屏幕。
+- 内容保留率 = 保留的 incumbent 文本 turn 数 / 发生的 visible preemption turn 数。
+
+护栏：
+
+- wrong-side rows、跨语言串行、duplicate `Utterance.id` 不增加；
+- final p95 不超过 A 的 +100 ms 或 +10%（取较大者）；
+- 空译、U+FFFD、`corruptedOutput`/permanent failure 不增加；
+- Translation submit/apply 量不异常上升。
+
+判定：至少 10 个真实 visible preemption turn/臂，且 Conversation 与 Meeting 都覆盖；B 保留率明显高于 A、护栏无回退，才把默认改为 publish。否则保持 DEBUG-only，记录未触发/样本不足，不签收 P1-1。
+
+### 7.5 局限
+
+- ASR 抢占是随机的；没有 applied preemption 的运行不是阴性结果。
+- 合成/扬声器脚本可复现机制，但不能替代双人真实对话；最后再做一轮 10 分钟中英真实对话。
+- `speech.preemption` 事件不含正文；可见性/内容保留必须用屏幕录制 + 文字稿，不能从长度推断。
