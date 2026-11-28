@@ -270,8 +270,11 @@ if [[ "$MARKER_READY" -ne 1 ]]; then
 fi
 
 echo "== stop app =="
+# `awk exit` closes the pipe early; devicectl may then receive SIGPIPE and
+# pipefail would abort the run after a successful marker. Keep the PID and
+# ignore that expected pipeline status.
 PID=$(xcrun devicectl device info processes --device "$DEVICE_UDID" 2>/dev/null \
-    | awk '/Duiyi.app\/Duiyi/ {print $1; exit}')
+    | awk '/Duiyi.app\/Duiyi/ {print $1; exit}' || true)
 if [[ -n "$PID" ]]; then
     xcrun devicectl device process terminate --device "$DEVICE_UDID" --pid "$PID" --kill \
         > "$EVIDENCE/terminate.log" 2>&1 || true

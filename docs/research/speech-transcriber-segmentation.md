@@ -630,15 +630,23 @@ Apple Developer Forums 帖 731761 与 Stack Overflow 79005416 报告：iOS 17/18
 | C fast + context | 40 | 98.35% | 96.69% | 3.31% | 22/24 | 3/6 | 102.1 ms | **Cameron Russell** 与 `For four days, silence.` 恢复；Lidia/Design/`white men` 仍错 |
 | C2 fast + context（重复） | 38 | 98.35% | 96.69% | 3.31% | 22/24 | 2/6 | 108.2 ms | Cameron Rushell；days/silence 恢复；Lidia/Design/`white men` 仍错 |
 | D no-fast + context | 71 | 95.80% | 93.38% | 6.62% | 22/24 | 3/6 | 61.3 ms | `White men`、`Design Thinking` 恢复；Cameron/Lidia 仍错，days/silence 被拆成 `silent.`，整体仍碎片化 |
-| A2 baseline（重复） | — | — | — | — | — | — | — | marker timeout（设备 unavailable，未产出证据） |
+| A2 baseline（重复） | 40 | 98.35% | 96.31% | 3.69% | 22/24 | 2/6 | 105.5 ms | days 恢复；Cameron/Lidia/`white men`/Design 仍错 |
 
 row 82 的 96 s 单独片段（1200–1296 s）：baseline 11 行/覆盖 100%/精确 100%/WER 0/required 1/1；context（`life` + 完整 clause）10 行/98.84%/98.26%/WER 2.33/required 1/1。两者都保留了完整 `there is the life…`，说明全量里的 `life` 丢失是随机/长窗 ASR 波动，context 没有额外收益。
+
+full 13 min context 两次：
+
+- `p13-full-context-1`：83 行/覆盖 99.43%/精确 98.11%/WER 2.01%、requiredCues **10/10**、0 permanent failures、0 重复/空译/U+FFFD，但短句 41/45（`white men`、Design、`Yet somehow, here I am.`、Recent graduates 缺失），比相对基线允许的 42/45 少一条，门限失败。
+- `p13-full-context-2`：85 行/覆盖 99.18%/精确 97.67%/WER 2.83%、requiredCues 10/10、短句 43/45、0 permanent failures、0 重复；手动计分 baselineRegressions 为空，门限通过。该次脚本在 stop-app 处因 `devicectl | awk exit` 的 SIGPIPE 退出 141，证据已手动拉取/计分；fixture-run 已加 `|| true` 修复。
+
+两次 full context 的 WER 是 2.01/2.83，baseline `row82-fix-full-1` 是 2.08；没有可靠优于 baseline 的证据。Cameron 仍是 Rushell、Design 仍是 thinkinging、`white men` 仍缺失；required 10/10 只覆盖已列 canary，不代表专名通过。
 
 结论：
 
 - **不关闭 `.fastResults`**：B 虽然恢复了几个词，但行数 40→73、WER 3.82→7.38、覆盖 98.35→95.67，明显不适合 live caption。
 - **contextualStrings 有轻微收益且部分可重复**：C/C2 两次精确都是 96.69%、WER 都是 3.31%，都恢复了 `For four days, silence.`；但 Cameron Russell 只在 C 恢复、C2 仍是 Rushell，Lidia/Design/`white men` 始终未修复。term 列表是夹具专用，产品没有来源。
-- ASR 仍有随机波动，A2 baseline 复跑因设备 unavailable 未完成；但 C/C2 的 WER 一致，说明 context 对整体词错和日期有可重复的小收益，对专名仍不稳定。D 也完成：虽然恢复 `White men`/`Design Thinking`，但 71 行、覆盖 95.80%、WER 6.62%，Cameron/Lidia 仍错，确认 no-fast 路径不划算。
+- ASR 仍有随机波动：A1/A2 baseline 的 WER 是 3.82%/3.69%，C/C2 都是 3.31%，context 的 WER 收益在两次 baseline 对照下仍存在；但 days 在 A2 也恢复，Cameron 只在 C1 恢复，专名不稳定。D 也完成：虽然恢复 `White men`/`Design Thinking`，但 71 行、覆盖 95.80%、WER 6.62%，Cameron/Lidia 仍错，确认 no-fast 路径不划算。
+- full 13 min context 两次 WER 2.01%/2.83%，baseline `row82-fix-full-1` 2.08%，没有稳定优于 baseline；required 10/10 但专名/`white men`/Design 仍错，短句 41/43 因 ASR 波动。context 不能作为默认修复。
 - row 82 `life` 的 96 s 对照：baseline 11 行/100%/100%/WER 0/required 1/1；context 10 行/98.84%/98.26%/WER 2.33/required 1/1。两者都保留完整 clause，说明全量里的 `life` 丢失是随机/长窗 ASR 波动，context 无额外收益。
 - 下一步：不要默认启用夹具专用词表；若做 P1-3 后续，优先评估“用户可提供的名称/术语”设置、`alternativeTranscriptions` 选词和置信度诊断；任何低置信度丢 final 都不应默认开启。
 
