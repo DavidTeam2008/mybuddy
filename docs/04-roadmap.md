@@ -34,7 +34,7 @@
 | Wave 3 C04 字幕/文字稿投影 | 已完成（#28–#31，PR #33–#36；#32 清理+文档+iPhone 13 真机矩阵，用户确认 2026-11-25）；候选台账见 [05-architecture-backlog.md](05-architecture-backlog.md) |
 | 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
 
-> **下一步（2026-11-26）**：P1-4b 真机回放（环境静音后）→ P1-3 ASR 精度 A/B（同一夹具）→ P0-6b 重试/可见状态。P1-5/P2 仍暂缓，见 research §4。
+> **下一步（2026-11-28）**：含 row 82 修复的 13 min 真机夹具复跑（确认 requiredCues/相对基线）→ P0-6b row 48 的 30 s 复现与可见状态/重试决策 → P1-3 ASR A/B（上下文提示/`.fastResults`）→ 面对面双 locale 抢占 A/B。P1-5/P2 仍暂缓，见 research §4。
 
 ### Wave 1 测试调整说明（2026-11-23）
 
