@@ -597,6 +597,25 @@ Apple Developer Forums 帖 731761 与 Stack Overflow 79005416 报告：iOS 17/18
 - 短句门限抓不到 row 82，因为该 clause 是 8 词；`tools/fixtures/ted-baseline.json` 因此增加了 `requiredCues` canary（含 `there is the life that you can be living if you break your ropes.`、silence、Ben、Headset off、I still have ropes 等）。用修复前的 `fix-full-edge` 计分时 `requiredCueMissing` 正好是该 clause，门限会失败；这是先验证门限能抓住已知回归，不是修复后的设备结果。
 - **待办**：用含 row 82 修复的构建重跑 13 min 夹具，确认该 clause 回到文字稿、且 84 行指标不回退；在重跑前，上表的 84 行/98.81% 只能标为“row 82 修复前”。该 LLM 评审的 critical/major 仍需人工抽样校准，不能单独作为 P1-1 签收。
 
+### 8.3 ASR 归因（P1-3 输入，2026-11-28）
+
+逐行评审把 24 行源文缺陷拆成 23 ASR + 1 组装器（row 82）。按是否改变意思分层：
+
+| 类型 | 行 | 证据 | 归因 |
+| --- | --- | --- | --- |
+| 漏词/误听改变意思 | 0/1 | `white men perform better.` 不在源文，row 1 以 `perform better.` 开头；行 0–4 的 ASR 事件已被 4096 ring 淘汰，无法证明事件层，但三次全量跑都缺 | 可能 ASR，非组装器；不能补写 |
+| 漏词/误听改变意思 | 17 | `she's afraid` → `he's afraid` | ASR |
+| 漏词/误听改变意思 | 21 | `he's feeling` → `you's feeling` | ASR |
+| 漏词/误听改变意思 | 22 | `invite him` → `invite them` | ASR |
+| 漏词/误听改变意思 | 24 | `past relationship` → `pastor relationship` | ASR |
+| 漏词/误听改变意思 | 43 | `designs` → `Dess` | ASR |
+| 漏词/误听改变意思 | 67 | `I remind` 缺失 | ASR；该行 volatile 最长 36 字符，正好等于保留文本 |
+| 漏词/误听改变意思 | 81 | `yours to break` → `yours to bring` | ASR |
+| 表面变体（内容仍可懂） | 7/8/38/63/71/73/83 | Rushell/Russell、Yuknovic/Yuknavitch、thinkinging/Thinking、TedED/TED、`of, of`、kindergartners、`until` 缺失 | ASR，不改变主旨 |
+| 组装器 | 82 | 41 字符 volatile 有 range、无 final，store 只剩前后两句；见 §8.2 | 已修复，待真机复跑 |
+
+`Fernando` 在 `fix-full-edge` row 59 已正确出现，此前“for Nando”没有在该跑复现。P1-3 的下一步不是组装器补词，而是同一夹具 A/B：`.fastResults` 去留、`AnalysisContext.contextualStrings`（Cameron Russell、Lidia Yuknavitch、Fernando、Ben、TED、Design Thinking 等）与 `transcriptionConfidence` 诊断；任何低置信度丢 final 都不应默认开启。完整逐行 SD-A 标注见 [`fixture-semantic-review-2026-11-28.md`](fixture-semantic-review-2026-11-28.md)。
+
 ## 9. 引用
 
 > 所有 Apple 文档/WWDC 链接于 2026-11-27 访问。社区来源单独标注，不能当作 API 规范。
