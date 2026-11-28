@@ -4,7 +4,10 @@
 > `fix-full-edge`, recorded before the row-82 assembler fix. The follow-up
 > full run `row82-fix-full-1` recovered the clause (requiredCues 10/10,
 > 85 rows, 99.43% coverage); the remaining rows below are pre-fix results.
-> Use this as a triage list, not as a release gate.
+> Later full runs made ASR omit `life` (row 82) and `days` (`For four days,
+> silence.`); the required-cue gate caught both, so they are P1-3 ASR
+> findings, not row-82 assembler regressions. Use this as a triage list,
+> not as a release gate.
 
 ## Inputs and method
 - Transcript: `.device-state/fixture-runs/fix-full-edge/transcript.tsv` (84 final rows, indexes 0–83).
