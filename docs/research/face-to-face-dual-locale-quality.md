@@ -198,7 +198,7 @@ H2 目前证据偏弱：面对面英文拒绝率 29.4%，同传 28.3%，几乎�
 ### 7.5 局限
 
 - ASR 抢占是随机的；没有 applied preemption 的运行不是阴性结果。
-- 合成/扬声器脚本可复现机制，但不能替代双人真实对话；最后再做一轮 10 分钟中英真实对话。
+- 合成/扬声器脚本可复现机制，但不能替代双人真实对话；原计划的 10 分钟中英真实对话按 D11 暂缓。
 - `speech.preemption` 事件不含正文；可见性/内容保留必须用屏幕录制 + 文字稿，不能从长度推断。
 
 ### 7.6 2026-11-28/29 真机执行：实现、数据与决策
@@ -255,8 +255,8 @@ python3 tools/mic-ab-analyze.py
 
 按 §7.4 预注册门槛：Conversation 已超过 10 个 visible preemption/臂，Meeting 覆盖，B 干净保留率显著高于 A，护栏无回退。**证据支持把 Release 默认改为 publish**，但本轮提交仍保持默认关闭（`publishesPreemptedIncumbent=false`），理由：
 
-1. 音频是 Mac 扬声器脚本，不是双人真实对话；§7.5 的 10 分钟真人验证尚未做。
+1. 音频是 Mac 扬声器脚本，不是双人真实对话；§7.5 的 10 分钟真人验证尚未做，且用户 2026-11-29 决定暂时不做（D11）。
 2. B 仍有 1/18 非 confident incumbent 走旧丢弃路径；P1-1 的 ASR 随机漏词/专名问题也未解决，不能签收 P1-1。
 3. 最近 3 次 B 是 visible-final 修正后的样本；翻默认前应再用真人对话确认没有新的重复/串行。
 
-下一步决策路径：真人 10 分钟中英 Conversation + Meeting（至少各 3 次可见抢占）；若 B 仍无重复/串行、护栏不回退，把默认改为 publish，并保留 `-duiyi.assemblerPreemptionPublish no` 作为灰度回滚开关；否则继续 DEBUG-only。不要因为本轮机械指标达标就标记 P1-1 完成。
+D11 已记录用户 2026-11-29 的决定：**暂时不做 10 分钟真人 Conversation + Meeting，保持 Release 默认关闭 / DEBUG-only**，真人验证未排期。后续若恢复验证且 B 无重复/串行、护栏不回退，再翻默认并保留 `-duiyi.assemblerPreemptionPublish no` 作为灰度回滚；在此之前不要因为本轮机械指标达标就标记 P1-1 完成。

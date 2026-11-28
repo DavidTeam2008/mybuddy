@@ -220,7 +220,7 @@ python3 tools/mic-ab-analyze.py
 
 - 每次证据在 `.device-state/mic-ab/runs/<run-id>/`：无正文诊断 JSON、marker/log、隔离 store；不提交。
 - `speech.start.usingDual` 必须为 true；`speech.preemption` 的 `incumbentUtteranceID` 关联 store `ZID`。`final` 且不含混合脚本才算 clean retention；preview 和 mixed final 都不算。
-- 判定/结果见 [`face-to-face-dual-locale-quality.md`](../research/face-to-face-dual-locale-quality.md) §7.6。Release 默认仍关闭，真人 10 分钟验证通过后才翻默认。
+- 判定/结果见 [`face-to-face-dual-locale-quality.md`](../research/face-to-face-dual-locale-quality.md) §7.6。Release 默认仍关闭；真人 10 分钟验证按 D11 暂缓，当前保持 DEBUG-only。
 
 
 

@@ -2,9 +2,9 @@
 
 > **唯一决策表**：其他文档只引用 D 编号，不复制内容。确认后更新本表并标注日期；未确认前不按假设实现。
 > 排期与验收见 [`04-roadmap.md`](04-roadmap.md)；工程论证见相关案例文档，不在此复述。
-> 状态：**D1–D7 已于 2026-11-23 确认；D8 已于 2026-11-24 确认；D9–D10 于 2026-11-28 确认**；D1–D10 之外的产品口径见文末「v1 冻结口径」。
+> 状态：**D1–D7 已于 2026-11-23 确认；D8 已于 2026-11-24 确认；D9–D10 于 2026-11-28 确认；D11 于 2026-11-29 确认**；D1–D11 之外的产品口径见文末「v1 冻结口径」。
 
-## D1–D10（产品 / 工程，状态：已确认 2026-11-23；D8 于 2026-11-24、D9–D10 于 2026-11-28 确认）
+## D1–D11（产品 / 工程，状态：已确认 2026-11-23；D8 于 2026-11-24、D9–D10 于 2026-11-28、D11 于 2026-11-29 确认）
 
 | ID | 决策点 | 当前事实 / 已实现 | 已确认决策 | 验收影响 |
 | --- | --- | --- | --- | --- |
@@ -20,9 +20,10 @@
 | D9 | ASR `.fastResults` 默认 | P1-3 360 s 同音频 A/B：fast 40 行/覆盖 98.35%/WER 3.82–3.69%；no-fast 73 行/95.67%/WER 7.38%，行碎片化；no-fast+context 71 行/95.80%/WER 6.62% | **Release 保持 `.fastResults` 开启**；`-duiyi.asrFastResults` 只作 DEBUG 实验开关。关闭 fast 必须重新做 p95/预览延迟与行稳定性 A/B，不能只为个别词恢复 | P1-3 A/B 默认 fast；no-fast 不进入产品 |
 | D10 | ASR `contextualStrings` 默认 | Apple DocC 只把词表偏置写给 `DictationTranscriber`；Apple 工程师论坛 811083（2026-01，iOS 26 时期）明确 `SpeechTranscriber` 当前不消费 `contextualStrings`；本机 SDK 也没有 contentHints/custom LM 参数。根因/复测计划见 [`research/asr-accuracy-root-cause-2026-11-28.md`](research/asr-accuracy-root-cause-2026-11-28.md)。我们的 360 s/full context A/B 因此不是有效偏置实验，观察到的 WER 差异是 ASR 随机波动（同配置 C/C2 专名仍切换，full context WER 2.01/2.83% vs baseline 2.08%）。 | **不默认启用 contextualStrings**；现有 DEBUG flag 只用于未来 OS 复测，不能当作已生效的专名修复。真正 Apple 支持的词表路径是 `DictationTranscriber` + 自定义 LM，属 later spike；用户可提供名称/术语的替换需另立产品决策和隐私/存储设计 | P1-3 不因夹具词表改变 Release；不得把 `contextualStrings` 宣传成 SpeechTranscriber 的修复 |
 
+| D11 | P1-1 抢占内容保留的 Release 默认 | 2026-11-29 真实麦克风 A/B（同构建/设备、交错、无 `fixtureAudio`）：Conversation en/ja A 干净保留 0/12、B 17/18；Meeting en/zh A 1/8、B 7/7；B `queuedFinal` 18/19；无 duplicate ID/U+FFFD/permanent failure，Conversation translation p95 不回退。详见 [`research/face-to-face-dual-locale-quality.md`](research/face-to-face-dual-locale-quality.md) §7.6 | **Release 默认保持 `publishesPreemptedIncumbent=false`；`-duiyi.assemblerPreemptionPublish YES` 只作 DEBUG 实验开关。用户 2026-11-29 决定暂时不做 10 分钟真人 Conversation + Meeting 验证；在真人验证完成前不翻默认、不签收 P1-1。** 后续若真人验证通过，再翻默认并保留 `no` 作为灰度回滚 | Release 仍走旧丢弃路径；P1-1/P1-3 不完成；不得把 A/B 机械指标当作发布签收 |
 ## v1 冻结口径（非 D 编号）
 
-> 本节只记录 D1–D10 之外、本次冻结的产品口径；涉及 D 的内容只引用编号，不复制。冻结日期：2026-11-23。
+> 本节只记录 D1–D11 之外、本次冻结的产品口径；涉及 D 的内容只引用编号，不复制。冻结日期：2026-11-23。
 
 ### 目标与范围
 
