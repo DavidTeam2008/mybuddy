@@ -52,6 +52,70 @@ struct SpeechRange: Equatable, Sendable {
     }
 }
 
+/// Diagnostic-only reason an ASR result did not become row content. These
+/// events never change acceptance, publication, or utterance identity.
+enum SpeechDropReason: String, Equatable, Sendable {
+    case empty
+    case punctuationOnly
+    case purity
+    case suppression
+    case lateVolatileClosedRange
+    case preemption
+}
+
+/// One diagnostic drop. It carries no caption text: only the language, result
+/// shape, length, and audio range.
+struct SpeechDropEvent: Equatable, Sendable {
+    var language: AppLanguage
+    var reason: SpeechDropReason
+    var textLength: Int
+    var isFinal: Bool
+    var range: SpeechRange?
+}
+
+/// One diagnostic language-preemption decision. `language` in the exported
+/// event is the incumbent; `challengerLanguage` is the result that arrived.
+struct SpeechPreemptionEvent: Equatable, Sendable {
+    var incumbentLanguage: AppLanguage
+    var challengerLanguage: AppLanguage
+    var incumbentTextLength: Int
+    var challengerTextLength: Int
+    var incumbentConfident: Bool
+    var challengerConfident: Bool
+    var incumbentVisible: Bool
+    var queuedFinal: Bool
+    var applied: Bool
+    var range: SpeechRange?
+}
+
+/// DEBUG-only A/B switch for the preemption content-loss experiment. Release
+/// always keeps the existing discard behavior.
+struct UtteranceAssemblerExperimentOptions: Equatable, Sendable {
+    /// When true, a confident visible incumbent row is published and closed
+    /// before the challenger starts; the loser is never merged into the winner.
+    var publishesPreemptedIncumbent = false
+
+    static func parse(arguments: [String]) -> UtteranceAssemblerExperimentOptions {
+        var options = UtteranceAssemblerExperimentOptions()
+        guard let index = arguments.firstIndex(of: "-duiyi.assemblerPreemptionPublish") else {
+            return options
+        }
+        let valueIndex = arguments.index(after: index)
+        guard valueIndex < arguments.endIndex else { return options }
+        options.publishesPreemptedIncumbent = !["no", "false", "0"]
+            .contains(arguments[valueIndex].lowercased())
+        return options
+    }
+
+    static var current: UtteranceAssemblerExperimentOptions {
+        #if DEBUG
+        parse(arguments: ProcessInfo.processInfo.arguments)
+        #else
+        UtteranceAssemblerExperimentOptions()
+        #endif
+    }
+}
+
 struct UtteranceAssembler: Sendable {
     private struct FinalizedUtterance: Equatable, Sendable {
         let id: UUID
@@ -105,16 +169,22 @@ struct UtteranceAssembler: Sendable {
     private var closedRanges: [ClosedRangeUtterance] = []
     private var pendingFinals: [Utterance] = []
     private var publishedFinalForCurrentID = false
+    /// Diagnostic-only queues. The engine drains them after every ingest.
+    private var dropEvents: [SpeechDropEvent] = []
+    private var preemptionEvents: [SpeechPreemptionEvent] = []
     private let reconciliationWindow: TimeInterval
+    private let experiment: UtteranceAssemblerExperimentOptions
     private let now: @Sendable () -> Date
 
     init(
         reconciliationWindow: TimeInterval = 3,
         languagePurity: SpeechLanguagePurity = .strict,
+        experiment: UtteranceAssemblerExperimentOptions = .current,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.reconciliationWindow = reconciliationWindow
         self.languagePurity = languagePurity
+        self.experiment = experiment
         self.now = now
     }
 
@@ -138,6 +208,13 @@ struct UtteranceAssembler: Sendable {
         // row of its own). Truly empty text still reaches the revoke path.
         if !trimmedInput.isEmpty,
            !normalized.contains(where: { $0.isLetter || $0.isNumber }) {
+            recordDrop(
+                language: language,
+                reason: .punctuationOnly,
+                textLength: trimmedInput.count,
+                isFinal: isFinal,
+                range: range
+            )
             return nil
         }
         guard let range else {
@@ -176,15 +253,53 @@ struct UtteranceAssembler: Sendable {
         return pendingFinals
     }
 
+    /// Diagnostic drops since the last drain. Never used for row decisions.
+    mutating func takeDropEvents() -> [SpeechDropEvent] {
+        defer { dropEvents.removeAll() }
+        return dropEvents
+    }
+
+    /// Diagnostic language-preemption decisions since the last drain. Never
+    /// used for row decisions.
+    mutating func takePreemptionEvents() -> [SpeechPreemptionEvent] {
+        defer { preemptionEvents.removeAll() }
+        return preemptionEvents
+    }
+
     private mutating func ingestByText(
         language: AppLanguage,
         text: String,
         isFinal: Bool
     ) -> Utterance? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        guard passesPurityGate(trimmed, language: language),
-              passesSuppressionGate(language: language) else {
+        guard !trimmed.isEmpty else {
+            recordDrop(
+                language: language,
+                reason: .empty,
+                textLength: 0,
+                isFinal: isFinal,
+                range: nil
+            )
+            return nil
+        }
+        guard passesPurityGate(trimmed, language: language) else {
+            recordDrop(
+                language: language,
+                reason: .purity,
+                textLength: trimmed.count,
+                isFinal: isFinal,
+                range: nil
+            )
+            return nil
+        }
+        guard passesSuppressionGate(language: language) else {
+            recordDrop(
+                language: language,
+                reason: .suppression,
+                textLength: trimmed.count,
+                isFinal: isFinal,
+                range: nil
+            )
             return nil
         }
 
@@ -271,7 +386,14 @@ struct UtteranceAssembler: Sendable {
             && !previousInLanguage.isEmpty
             && SpokenText.isNameSwap(trimmed, of: previousInLanguage)
 
-        guard preemptsIfNeeded(language: language, text: trimmed) else { return nil }
+        if preemptsIfNeeded(
+            language: language,
+            text: trimmed,
+            isFinal: isFinal,
+            range: nil
+        ) == .rejected {
+            return nil
+        }
 
         if isGreetingNameSwap {
             beginNextUtterance(keeping: language)
@@ -334,11 +456,34 @@ struct UtteranceAssembler: Sendable {
         // An empty volatile revokes the open interpretation for its range; an
         // empty final says the range contained no speech.
         if trimmed.isEmpty {
+            recordDrop(
+                language: language,
+                reason: .empty,
+                textLength: 0,
+                isFinal: isFinal,
+                range: range
+            )
             return revokeRange(language: language, range: range)
         }
 
-        guard passesPurityGate(trimmed, language: language),
-              passesSuppressionGate(language: language) else {
+        guard passesPurityGate(trimmed, language: language) else {
+            recordDrop(
+                language: language,
+                reason: .purity,
+                textLength: trimmed.count,
+                isFinal: isFinal,
+                range: range
+            )
+            return nil
+        }
+        guard passesSuppressionGate(language: language) else {
+            recordDrop(
+                language: language,
+                reason: .suppression,
+                textLength: trimmed.count,
+                isFinal: isFinal,
+                range: range
+            )
             return nil
         }
 
@@ -350,7 +495,16 @@ struct UtteranceAssembler: Sendable {
         if !isFinal, let closed = closedRangeMatch(language: language, range: range) {
             let extendsClosedRange = range.end > closed.range.end + 0.05
             let rowIsEmpty = texts.values.allSatisfy(\.isEmpty)
-            guard extendsClosedRange, rowIsEmpty else { return nil }
+            guard extendsClosedRange, rowIsEmpty else {
+                recordDrop(
+                    language: language,
+                    reason: .lateVolatileClosedRange,
+                    textLength: trimmed.count,
+                    isFinal: false,
+                    range: range
+                )
+                return nil
+            }
         }
 
         // A final for a range the silence timer already closed belongs to that
@@ -412,7 +566,6 @@ struct UtteranceAssembler: Sendable {
             beginNextUtterance(keeping: language)
         }
 
-        var state = rangeStates[language] ?? LanguageRangeState()
         let previousText = texts[language] ?? ""
         let isGreetingNameSwap = (lockedLanguage == nil || lockedLanguage == language)
             && !previousText.isEmpty
@@ -423,10 +576,21 @@ struct UtteranceAssembler: Sendable {
             // audio belongs to the new person's row, not the name it replaced.
             queueFinalForBoundary(language: language)
             beginNextUtterance(keeping: language)
-            state = LanguageRangeState()
         }
 
-        guard preemptsIfNeeded(language: language, text: trimmed) else { return nil }
+        if preemptsIfNeeded(
+            language: language,
+            text: trimmed,
+            isFinal: isFinal,
+            range: range
+        ) == .rejected {
+            return nil
+        }
+
+        // A preemption experiment may have closed the incumbent row and
+        // started a new utterance. Read the challenger's state only after the
+        // decision so the new id never inherits the loser's phrases.
+        var state = rangeStates[language] ?? LanguageRangeState()
 
         // A phrase after a real audio gap starts a new utterance even when the
         // transcriber did not add sentence punctuation. This covers both a new
@@ -1103,6 +1267,8 @@ struct UtteranceAssembler: Sendable {
         latestFinal = nil
         closedRanges.removeAll()
         pendingFinals.removeAll()
+        dropEvents.removeAll()
+        preemptionEvents.removeAll()
         beginNextUtterance(keeping: nil)
     }
 
@@ -1127,21 +1293,125 @@ struct UtteranceAssembler: Sendable {
         return true
     }
 
-    private mutating func preemptsIfNeeded(language: AppLanguage, text: String) -> Bool {
-        guard let locked = lockedLanguage, language != locked else { return true }
+    private enum PreemptionOutcome: Equatable {
+        case proceed
+        case rejected
+        case preempted
+    }
+
+    private mutating func preemptsIfNeeded(
+        language: AppLanguage,
+        text: String,
+        isFinal: Bool,
+        range: SpeechRange?
+    ) -> PreemptionOutcome {
+        guard let locked = lockedLanguage, language != locked else { return .proceed }
         let incumbent = textFor(locked)
+        let challengerConfident = Self.isConfident(text, language: language)
+        let incumbentConfident = Self.isConfident(incumbent, language: locked)
         guard Self.shouldPreempt(
             challenger: text,
             challengerLanguage: language,
             incumbent: incumbent,
             incumbentLanguage: locked
         ) else {
-            return false
+            preemptionEvents.append(
+                SpeechPreemptionEvent(
+                    incumbentLanguage: locked,
+                    challengerLanguage: language,
+                    incumbentTextLength: incumbent.count,
+                    challengerTextLength: text.count,
+                    incumbentConfident: incumbentConfident,
+                    challengerConfident: challengerConfident,
+                    incumbentVisible: !incumbent.isEmpty,
+                    queuedFinal: false,
+                    applied: false,
+                    range: range
+                )
+            )
+            return .rejected
         }
-        rangeStates.removeValue(forKey: locked)
-        clearText(for: locked)
-        lockedLanguage = language
-        return true
+
+        // DEBUG A/B: a critical visible incumbent may be published and closed
+        // before the challenger starts. The loser is never merged into the
+        // winner, and a non-confident incumbent keeps the old discard path.
+        let shouldPreserve = experiment.publishesPreemptedIncumbent
+            && !incumbent.isEmpty
+            && incumbentConfident
+        let pendingBefore = pendingFinals.count
+        if shouldPreserve {
+            if rangeStates[locked] != nil {
+                queueFinalForBoundary(language: locked)
+            } else if !(latestFinal?.id == utteranceID && latestFinal?.text == incumbent) {
+                let utterance = Utterance(
+                    id: utteranceID,
+                    language: locked,
+                    text: incumbent,
+                    isFinal: true,
+                    isRevision: false
+                )
+                pendingFinals.append(utterance)
+                publishedFinalForCurrentID = true
+                latestFinal = FinalizedUtterance(
+                    id: utterance.id,
+                    language: utterance.language,
+                    text: utterance.text,
+                    at: now()
+                )
+            }
+            closeCurrentRangeRow(language: locked)
+            beginNextUtterance(keeping: language)
+        } else {
+            let incumbentIsFinal = isWinnerFinal(locked)
+            rangeStates.removeValue(forKey: locked)
+            clearText(for: locked)
+            lockedLanguage = language
+            if !incumbent.isEmpty {
+                dropEvents.append(
+                    SpeechDropEvent(
+                        language: locked,
+                        reason: .preemption,
+                        textLength: incumbent.count,
+                        isFinal: incumbentIsFinal,
+                        range: nil
+                    )
+                )
+            }
+        }
+
+        preemptionEvents.append(
+            SpeechPreemptionEvent(
+                incumbentLanguage: locked,
+                challengerLanguage: language,
+                incumbentTextLength: incumbent.count,
+                challengerTextLength: text.count,
+                incumbentConfident: incumbentConfident,
+                challengerConfident: challengerConfident,
+                incumbentVisible: !incumbent.isEmpty,
+                queuedFinal: pendingFinals.count > pendingBefore,
+                applied: true,
+                range: range
+            )
+        )
+        return .preempted
+    }
+
+    private mutating func recordDrop(
+        language: AppLanguage,
+        reason: SpeechDropReason,
+        textLength: Int,
+        isFinal: Bool,
+        range: SpeechRange?
+    ) {
+        dropEvents.append(
+            SpeechDropEvent(
+                language: language,
+                reason: reason,
+                textLength: textLength,
+                isFinal: isFinal,
+                range: range
+            )
+        )
     }
 
     private mutating func hold(_ language: AppLanguage, for seconds: TimeInterval) {

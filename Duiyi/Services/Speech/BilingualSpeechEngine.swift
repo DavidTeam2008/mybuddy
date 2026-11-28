@@ -218,6 +218,16 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         } catch {
             throw error
         }
+        diagnostics.record(
+            SpeechStartRecord(
+                requestedLanguages: requested.map(\.rawValue),
+                activeLanguages: (usingDual ? pairLanguages : [singleLanguage])
+                    .map(\.rawValue),
+                fallbackLanguage: fallbackLanguage.rawValue,
+                usingDual: usingDual,
+                style: styleName
+            )
+        )
 
         return stream
     }
@@ -628,6 +638,12 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             isFinal: isFinal,
             range: range
         )
+        for drop in assembler.takeDropEvents() {
+            recordDrop(drop)
+        }
+        for preemption in assembler.takePreemptionEvents() {
+            recordPreemption(preemption)
+        }
         // A boundary closed the previous row. Publish its final before the
         // new row so an open volatile is not dropped at the gap/language
         // change/cap.
@@ -706,6 +722,39 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             rangeDuration: nil,
             resultsFinalizationTime: nil,
             confidence: nil
+        )
+    }
+
+    private func recordDrop(_ event: SpeechDropEvent) {
+        diagnostics.record(
+            ASRDropRecord(
+                language: event.language,
+                reason: event.reason.rawValue,
+                textLength: event.textLength,
+                isFinal: event.isFinal,
+                rangeStartSeconds: event.range?.start,
+                rangeDurationSeconds: event.range?.duration,
+                style: styleName
+            )
+        )
+    }
+
+    private func recordPreemption(_ event: SpeechPreemptionEvent) {
+        diagnostics.record(
+            SpeechPreemptionRecord(
+                incumbentLanguage: event.incumbentLanguage,
+                challengerLanguage: event.challengerLanguage,
+                incumbentTextLength: event.incumbentTextLength,
+                challengerTextLength: event.challengerTextLength,
+                incumbentConfident: event.incumbentConfident,
+                challengerConfident: event.challengerConfident,
+                incumbentVisible: event.incumbentVisible,
+                queuedFinal: event.queuedFinal,
+                applied: event.applied,
+                rangeStartSeconds: event.range?.start,
+                rangeDurationSeconds: event.range?.duration,
+                style: styleName
+            )
         )
     }
 

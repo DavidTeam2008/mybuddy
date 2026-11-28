@@ -44,6 +44,10 @@ GROUND_TRUTH_EXPLICIT=0
 ASR_FAST_RESULTS="yes"
 ASR_CONTEXT_TERMS=""
 DUMP_ASR_TEXT=0
+FIXTURE_MODULE="interpretation"
+PREEMPTION_PUBLISH="no"
+FIXTURE_USER_LANGUAGE="zhHans"
+FIXTURE_PEER_LANGUAGE="english"
 
 usage() {
     cat <<'EOF'
@@ -59,12 +63,20 @@ Options:
   --settle <seconds>     Wait after EOF before ending the task (default: 12)
   --noise                Play speech on the Mac speakers during the run
   --ground-truth <path>  Cue TSV for scoring
+  --module interpretation|conversation
+                         Fixture driver (default: interpretation; conversation
+                         runs the real dual-locale face-to-face path)
   --baseline <path|none> Regression baseline (default: tools/fixtures/ted-baseline.json
                          for the default full WAV/realtime run; pass none to disable)
   --asr-fast-results yes|no
                          Toggle SpeechTranscriber.fastResults for A/B (default: yes)
   --asr-context-terms <csv>
                          AnalysisContext contextual strings for A/B (default: empty)
+  --preemption-publish yes|no
+                         DEBUG A/B: publish a confident visible incumbent row
+                         before a dual-locale preemption (default: no = Release)
+  --user-language <lang> Conversation fixture user language (default: zhHans)
+  --peer-language <lang> Conversation fixture peer language (default: english)
   --dump-asr-text       Pull fixture-only raw ASR JSONL into evidence (default: off)
   --min-coverage <0-1>   Fail below this source coverage (default: 0.90)
   --skip-build           Reuse the installed app and last build
@@ -83,9 +95,13 @@ while [[ $# -gt 0 ]]; do
         --settle) SETTLE="$2"; shift 2 ;;
         --noise) NOISE=1; shift ;;
         --ground-truth) GROUND_TRUTH="$2"; GROUND_TRUTH_EXPLICIT=1; shift 2 ;;
+        --module) FIXTURE_MODULE="$2"; shift 2 ;;
+        --user-language) FIXTURE_USER_LANGUAGE="$2"; shift 2 ;;
+        --peer-language) FIXTURE_PEER_LANGUAGE="$2"; shift 2 ;;
         --baseline) BASELINE="$2"; BASELINE_EXPLICIT=1; shift 2 ;;
         --asr-fast-results) ASR_FAST_RESULTS="$2"; shift 2 ;;
         --asr-context-terms) ASR_CONTEXT_TERMS="$2"; shift 2 ;;
+        --preemption-publish) PREEMPTION_PUBLISH="$2"; shift 2 ;;
         --dump-asr-text) DUMP_ASR_TEXT=1; shift ;;
         --min-coverage) MIN_COVERAGE="$2"; shift 2 ;;
         --skip-build) SKIP_BUILD=1; shift ;;
@@ -114,6 +130,23 @@ if [[ "$ASR_FAST_RESULTS" != "yes" && "$ASR_FAST_RESULTS" != "no" ]]; then
     printf 'Unsupported --asr-fast-results: %s\n' "$ASR_FAST_RESULTS" >&2
     exit 2
 fi
+if [[ "$FIXTURE_MODULE" != "interpretation" && "$FIXTURE_MODULE" != "conversation" ]]; then
+    printf 'Unsupported --module: %s\n' "$FIXTURE_MODULE" >&2
+    exit 2
+fi
+if [[ "$PREEMPTION_PUBLISH" != "yes" && "$PREEMPTION_PUBLISH" != "no" ]]; then
+    printf 'Unsupported --preemption-publish: %s\n' "$PREEMPTION_PUBLISH" >&2
+    exit 2
+fi
+for language in "$FIXTURE_USER_LANGUAGE" "$FIXTURE_PEER_LANGUAGE"; do
+    case "$language" in
+        zhHans|english|japanese|korean|thai|vietnamese) ;;
+        *)
+            printf 'Unsupported fixture language: %s\n' "$language" >&2
+            exit 2
+            ;;
+    esac
+done
 
 config_value() {
     local key="$1"
@@ -169,6 +202,7 @@ echo "sha256:  $(cut -d' ' -f1 "$EVIDENCE/fixture.sha256")"
 echo "info:    $(grep -E 'Data format|estimated duration' "$EVIDENCE/fixture-info.txt" | tr '\n' ' ')"
 echo "baseline: ${BASELINE:-none}"
 echo "asr:      fast=$ASR_FAST_RESULTS context=${ASR_CONTEXT_TERMS:-none}"
+echo "module:   $FIXTURE_MODULE languages=$FIXTURE_USER_LANGUAGE/$FIXTURE_PEER_LANGUAGE preemption-publish=$PREEMPTION_PUBLISH"
 
 COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
 DIRTY=false
@@ -192,8 +226,12 @@ jq -n \
     --argjson duration "$DURATION" \
     --arg codec "$CODEC" \
     --arg pacing "$PACING" \
+    --arg module "$FIXTURE_MODULE" \
     --arg asrFastResults "$ASR_FAST_RESULTS" \
     --arg asrContextTerms "$ASR_CONTEXT_TERMS" \
+    --arg preemptionPublish "$PREEMPTION_PUBLISH" \
+    --arg fixtureUserLanguage "$FIXTURE_USER_LANGUAGE" \
+    --arg fixturePeerLanguage "$FIXTURE_PEER_LANGUAGE" \
     --argjson skipBuild "$([[ "$SKIP_BUILD" -eq 1 ]] && echo true || echo false)" \
     --argjson dumpASRText "$([[ "$DUMP_ASR_TEXT" -eq 1 ]] && echo true || echo false)" \
     --arg appVersion "$APP_VERSION" \
@@ -208,8 +246,11 @@ jq -n \
         fixtureSha256: $fixtureSha256,
         groundTruth: $groundTruth,
         baseline: $baseline,
+        module: $module,
+        fixtureLanguages: {user: $fixtureUserLanguage, peer: $fixturePeerLanguage},
         window: {startSeconds: $start, durationSeconds: $duration, codec: $codec, pacing: $pacing},
         asr: {fastResults: $asrFastResults, contextTerms: $asrContextTerms, dumpText: $dumpASRText},
+        preemption: {publishIncumbent: $preemptionPublish},
         skipBuild: $skipBuild,
         app: {version: $appVersion, build: $appBuild},
         toolchain: {xcode: $xcodeVersion, macOS: $macOSVersion}
@@ -279,7 +320,11 @@ xcrun devicectl device process launch \
     -duiyi.onboardingComplete YES \
     -duiyi.storeFile "fixture-$RUN_ID" \
     -duiyi.fixtureAudio "Documents/$FIXTURE_NAME" \
+    -duiyi.fixtureModule "$FIXTURE_MODULE" \
+    -duiyi.fixtureUserLanguage "$FIXTURE_USER_LANGUAGE" \
+    -duiyi.fixturePeerLanguage "$FIXTURE_PEER_LANGUAGE" \
     -duiyi.fixturePacing "$PACING" \
+    -duiyi.assemblerPreemptionPublish "$PREEMPTION_PUBLISH" \
     -duiyi.asrFastResults "$ASR_FAST_RESULTS" \
     -duiyi.asrContextTerms "$ASR_CONTEXT_TERMS" \
     -duiyi.dumpASRText "$([[ "$DUMP_ASR_TEXT" -eq 1 ]] && echo YES || echo NO)" \
@@ -392,6 +437,9 @@ SCORE_ARGS=(
 if [[ -n "$BASELINE" ]]; then
     SCORE_ARGS+=(--baseline "$BASELINE")
 fi
+if [[ -f "$EVIDENCE/asr-raw.jsonl" ]]; then
+    SCORE_ARGS+=(--asr-raw "$EVIDENCE/asr-raw.jsonl")
+fi
 python3 -I "$ROOT/tools/fixture-score.py" "${SCORE_ARGS[@]}" >/dev/null
 
 echo "== result =="
@@ -411,6 +459,8 @@ jq -r '
     "short-cue missing:  \(.missingShortCues | join(" | "))",
     "baseline:           \(.baselineName // "none")",
     "baseline fails:     \(.baselineRegressions // [] | length)",
+    "name cues:          \(.nameCueFound // 0)/\(.nameCueTotal // 0) (non-blocking)",
+    "missing attribution: \(.missingCueAttribution.counts // {})",
     "prefix duplicates:  \(.prefixDuplicatePairs)",
     "empty translations: \(.emptyTranslationRows)",
     "U+FFFD:             \(.replacementCharacters)",
@@ -420,6 +470,9 @@ jq -r '
     "permanent failures: \(.diagnostics.summary.permanentFailureCount // "?")",
     "synthetic finals:   \(.diagnostics.syntheticFinals // "?")",
     "revision finals:    \(.diagnostics.revisionFinals // "?")",
+    "asr drops:          \(.diagnostics.asrDropEvents // "?") \(.diagnostics.asrDropReasons // {})",
+    "preemptions:        \(.diagnostics.preemptionEvents // "?") (applied \(.diagnostics.preemptionApplied // "?") / queued final \(.diagnostics.preemptionQueuedFinal // "?"))",
+    "speech starts:      \(.diagnostics.speechStarts // [])",
     "apply rejects:      \(.diagnostics.applyRejects // {})",
     "final latency p95:  \(.diagnostics.finalLatencyP95Ms // "?") ms"
 ' "$EVIDENCE/score.json"

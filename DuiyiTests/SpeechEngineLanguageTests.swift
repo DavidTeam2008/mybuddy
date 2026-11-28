@@ -147,6 +147,21 @@ struct SpeechEngineLanguageTests {
         #expect(options.contextualStrings.isEmpty)
     }
 
+    @Test("Preemption experiment defaults off and parses the DEBUG flag")
+    func preemptionExperimentFlagParses() {
+        #expect(UtteranceAssemblerExperimentOptions.parse(arguments: []).publishesPreemptedIncumbent == false)
+        #expect(
+            UtteranceAssemblerExperimentOptions.parse(arguments: [
+                "-duiyi.assemblerPreemptionPublish", "YES",
+            ]).publishesPreemptedIncumbent
+        )
+        #expect(
+            UtteranceAssemblerExperimentOptions.parse(arguments: [
+                "-duiyi.assemblerPreemptionPublish", "NO",
+            ]).publishesPreemptedIncumbent == false
+        )
+    }
+
     @Test("ASR confidence aggregates runs by character weight")
     func asrConfidenceAggregates() {
         var text = AttributedString("hello world")

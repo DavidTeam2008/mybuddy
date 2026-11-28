@@ -32,6 +32,46 @@ struct ASRDiagnosticsRecord: Equatable, Sendable {
     var confidenceBuckets: [Int]? = nil
 }
 
+/// Diagnostic-only reason an ASR result did not become row content. The
+/// record carries no caption text or audio.
+struct ASRDropRecord: Equatable, Sendable {
+    var language: AppLanguage
+    /// `SpeechDropReason` raw value.
+    var reason: String
+    var textLength: Int
+    var isFinal: Bool
+    var rangeStartSeconds: Double?
+    var rangeDurationSeconds: Double?
+    var style: String
+}
+
+/// Diagnostic-only language-preemption decision. The incumbent is the losing
+/// row; the challenger is the result that arrived. No caption text is carried.
+struct SpeechPreemptionRecord: Equatable, Sendable {
+    var incumbentLanguage: AppLanguage
+    var challengerLanguage: AppLanguage
+    var incumbentTextLength: Int
+    var challengerTextLength: Int
+    var incumbentConfident: Bool
+    var challengerConfident: Bool
+    var incumbentVisible: Bool
+    var queuedFinal: Bool
+    var applied: Bool
+    var rangeStartSeconds: Double?
+    var rangeDurationSeconds: Double?
+    var style: String
+}
+
+/// Diagnostic-only speech pipeline selection. It records the requested and
+/// active language sets, never caption text.
+struct SpeechStartRecord: Equatable, Sendable {
+    var requestedLanguages: [String]
+    var activeLanguages: [String]
+    var fallbackLanguage: String
+    var usingDual: Bool
+    var style: String
+}
+
 struct TranslationSubmitRecord: Equatable, Sendable {
     var jobID: UUID
     var utteranceID: UUID
@@ -122,6 +162,7 @@ struct DiagnosticsEvent: Codable, Equatable, Sendable {
     var synthetic: Bool?
     var scriptMismatch: Bool?
     var accepted: Bool?
+    var applied: Bool?
     var published: Bool?
     var revision: Bool?
     var rangeStart: Double?
@@ -131,6 +172,16 @@ struct DiagnosticsEvent: Codable, Equatable, Sendable {
     var confidenceMinimum: Double?
     var confidenceMean: Double?
     var confidenceBuckets: [Int]?
+    var dropReason: String?
+    var challengerLanguage: String?
+    var challengerLength: Int?
+    var incumbentConfident: Bool?
+    var challengerConfident: Bool?
+    var incumbentVisible: Bool?
+    var queuedFinal: Bool?
+    var requestedLanguages: [String]?
+    var activeLanguages: [String]?
+    var usingDual: Bool?
     var style: String?
     var sourceLanguage: String?
     var targetLanguage: String?
@@ -153,6 +204,12 @@ struct DiagnosticsEvent: Codable, Equatable, Sendable {
 /// ring-buffer eviction never rewrites history.
 struct DiagnosticsSummary: Codable, Equatable, Sendable {
     var asrResultCount = 0
+    /// Diagnostic drops attributed by the assembler.
+    var asrDropCount = 0
+    /// Language preemption decisions, applied or rejected.
+    var preemptionCount = 0
+    /// Speech pipeline starts in this task.
+    var speechStartCount = 0
     /// Distinct utterances that reached a finalized row (synthetic or real).
     var settledUtterances = 0
     var translationSubmitCount = 0

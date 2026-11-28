@@ -1137,6 +1137,112 @@ struct UtteranceAssemblerRangeTests {
         )
     }
 
+    @Test("Punctuation-only and purity drops are diagnosed without changing the result")
+    func diagnosticDropReasons() throws {
+        var assembler = UtteranceAssembler()
+        #expect(
+            assembler.ingest(
+                language: .english,
+                text: ".",
+                isFinal: true,
+                range: range(0, 1)
+            ) == nil
+        )
+        #expect(assembler.takeDropEvents().map(\.reason) == [.punctuationOnly])
+
+        #expect(
+            assembler.ingest(
+                language: .english,
+                text: "谢谢你的服务。",
+                isFinal: true,
+                range: range(1, 2)
+            ) == nil
+        )
+        #expect(assembler.takeDropEvents().map(\.reason) == [.purity])
+    }
+
+    @Test("A late volatile for a closed range records its drop reason")
+    func lateVolatileClosedRangeDropReason() throws {
+        var assembler = UtteranceAssembler()
+        let live = try requireIngest(
+            &assembler, "明天见吧", range(0, 2), language: .zhHans
+        )
+        let finalized = try requireSilenceFinal(&assembler)
+        #expect(finalized.id == live.id)
+        _ = assembler.takeDropEvents()
+
+        #expect(
+            assembler.ingest(
+                language: .zhHans,
+                text: "再见",
+                isFinal: false,
+                range: range(1.0, 1.8)
+            ) == nil
+        )
+        #expect(
+            assembler.takeDropEvents().map(\.reason)
+                == [.lateVolatileClosedRange]
+        )
+    }
+
+    @Test("A language preemption records the incumbent loss")
+    func preemptionRecordsIncumbentLoss() throws {
+        var assembler = UtteranceAssembler()
+        let english = try requireIngest(&assembler, "you are right", range(0, 2))
+        _ = assembler.takePreemptionEvents()
+
+        let chinese = try requireIngest(
+            &assembler,
+            "在那时开始之前呢我想请大家想象一个画面",
+            range(0, 2),
+            language: .zhHans
+        )
+
+        #expect(chinese.language == .zhHans)
+        let events = assembler.takePreemptionEvents()
+        #expect(events.count == 1)
+        #expect(events[0].incumbentLanguage == .english)
+        #expect(events[0].challengerLanguage == .zhHans)
+        #expect(events[0].applied)
+        #expect(events[0].incumbentVisible)
+        #expect(events[0].queuedFinal == false)
+        #expect(events[0].incumbentTextLength == english.text.count)
+        #expect(assembler.takePendingFinals().isEmpty)
+        #expect(assembler.takeDropEvents().contains { $0.reason == .preemption })
+    }
+
+    @Test("The preemption experiment publishes a confident visible incumbent first")
+    func preemptionExperimentPublishesIncumbent() throws {
+        var assembler = UtteranceAssembler(
+            experiment: UtteranceAssemblerExperimentOptions(
+                publishesPreemptedIncumbent: true
+            )
+        )
+        let english = try requireIngest(&assembler, "you are right", range(0, 2))
+        _ = assembler.takePreemptionEvents()
+
+        let chinese = try requireIngest(
+            &assembler,
+            "在那时开始之前呢我想请大家想象一个画面",
+            range(0, 2),
+            language: .zhHans
+        )
+
+        #expect(chinese.id != english.id)
+        #expect(chinese.language == .zhHans)
+        let pending = assembler.takePendingFinals()
+        #expect(pending.count == 1)
+        #expect(pending[0].id == english.id)
+        #expect(pending[0].language == .english)
+        #expect(pending[0].text == "you are right")
+        #expect(pending[0].isFinal)
+        #expect(assembler.takeDropEvents().contains { $0.reason == .preemption } == false)
+        let events = assembler.takePreemptionEvents()
+        #expect(events.count == 1)
+        #expect(events[0].queuedFinal)
+        #expect(events[0].applied)
+    }
+
     @Test("A short final inside a long volatile cannot truncate the preview")
     func shortFinalCannotTruncateLongVolatile() throws {
         var assembler = UtteranceAssembler()

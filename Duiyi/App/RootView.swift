@@ -62,6 +62,13 @@ struct RootView: View {
                 into: environment.taskStore,
                 language: environment.preferences.userLanguage
             )
+            if let conversationViewModel {
+                DebugFixtureRun.startIfRequested(
+                    conversationViewModel: conversationViewModel,
+                    coordinator: coordinator,
+                    environment: environment
+                )
+            }
             if let interpretationViewModel {
                 DebugFixtureRun.startIfRequested(
                     viewModel: interpretationViewModel,

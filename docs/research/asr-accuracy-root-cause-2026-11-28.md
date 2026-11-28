@@ -4,7 +4,7 @@
 >
 > 相关决策：[D9/D10](../decisions.md)；夹具研究：[speech-transcriber-segmentation.md](speech-transcriber-segmentation.md) §8.4；语义评审：[fixture-semantic-review-2026-11-28.md](fixture-semantic-review-2026-11-28.md)。
 >
-> 实施状态（2026-11-28）：run-meta、ASR confidence 只读诊断、fixture-only raw ASR dump 已实现并在 iPhone 13 验证（raw dump 132 行，含 text/alternatives/confidence；拉取后设备文件为 0 字节）。30 s raw dump 的所有 final 文本里没有 `white men`，transcript 从 `perform better` 开始，直接证明这是 ASR 漏词而不是组装器丢句。assembler `dropReason`、canary 归因、用户术语表、alternatives 选词、preemption/closed-range 改造仍待实施。
+> 实施状态（2026-11-28）：run-meta、ASR confidence 只读诊断、fixture-only raw ASR dump 已实现并在 iPhone 13 验证（raw dump 132 行，含 text/alternatives/confidence；拉取后设备文件为 0 字节）。30 s raw dump 的所有 final 文本里没有 `white men`，transcript 从 `perform better` 开始，直接证明这是 ASR 漏词而不是组装器丢句。assembler `dropReason`/`speech.preemption`/`speech.start` 诊断与 canary 归因已实现；`preemption-publish` DEBUG A/B 在双 locale Conversation 夹具上复现并验证 incumbent final 保留（§6）。用户术语表、alternatives 选词、closed-range 改造仍待实施。
 
 ## 0. 结论摘要
 
@@ -60,10 +60,10 @@
 
 ### next（opt-in/实验，需产品决策）
 
-4. **canary 归因**：保留 coverage/exact/WER/短句/重复/空译/U+FFFD 单跑硬门禁；`missingCueAttribution` 区分 ASR miss / 表面变体 / assembler loss。名称 canary 先做非阻断 `nameCues`，只有确定性机制 + held-out 证据后才进 requiredCues；ASR-dependent canary 可要求连续两跑，best-of 不用于内容缺失。
+4. **canary 归因（已实现）**：保留 coverage/exact/WER/短句/重复/空译/U+FFFD 单跑硬门禁；`missingCueAttribution` 区分 ASR miss / 表面变体 / assembler loss，无 raw dump 时明确 `unavailable`。`nameCues` 已加入基线但保持非阻断；只有确定性机制 + held-out 证据后才进 requiredCues；ASR-dependent canary 可要求连续两跑，best-of 不用于内容缺失。
 5. **用户术语表（opt-in）**：设置页 per-language canonical + aliases（≤100 条、1–4 token、无正则、不自动学习）；纯 `SpeechTextCanonicalizer` 在 **assembler 之后**按同一 Utterance.id 做最长整词/整短语替换，只改匹配 span，不插入/删除/改数字否定；Release 默认 off，需产品/隐私/存储决策；held-out 音频测误替换率。只改源文，不保证中文译名（TranslationSession 无术语 API）。
 6. **alternativeTranscriptions final-only 选词**：默认 off；只对有用户术语表的 locale 开；候选必须非空、含 canonical/alias、匹配 span 外前后缀逐字相等、token 数不变；空候选视为无语音/撤销；不选不含术语的候选；volatile 永远 alternatives[0]；iPhone 13 单/双 locale 测 p95/资源，超预算回退。不改 fast/volatile/assembler identity。
-7. **P1-1 抢占先诊断**：加 `preempted` 诊断（双方语言、长度、是否 confident、是否可见、是否 queue final，无正文）；DEBUG flag 下仅当 incumbent 有可见文本且 isConfident 时 `queueFinalForBoundary` + `closeCurrentRangeRow`，绝不 merge 到 challenger；Release 需双 locale Conversation/Meeting A/B（wrong-side row、duplicate ID、p95、翻译量）。
+7. **P1-1 抢占先诊断（已实现 DEBUG 实验）**：`speech.preemption` 诊断记录双方语言、长度、是否 confident、是否可见、是否 queue final、是否 applied，无正文；`-duiyi.assemblerPreemptionPublish YES` 下仅当 incumbent 有可见文本且 isConfident 时 `queueFinalForBoundary` + `closeCurrentRangeRow`，绝不 merge 到 challenger。双 locale Conversation 夹具 A/B 已证实 A 只剩非 final preview、B 保留 incumbent final（§6）；Release 默认仍为 no，真实 Conversation/Meeting A/B（wrong-side row、duplicate ID、p95、翻译量）通过前不改默认。
 
 ### later
 
@@ -98,7 +98,27 @@
 - verify-utterance-identity sync commit 过期；未在 HEAD 重跑前 P1-1 不能签收。
 - 翻译层剩余 critical（rows 33/66/67、row 48）仍在。
 
-## 6. 引用
+## 6. 实施与 A/B 结果（2026-11-28）
+
+### 6.1 已落地
+
+- `UtteranceAssembler` 只读诊断：`SpeechDropEvent`（empty/punctuationOnly/purity/suppression/lateVolatileClosedRange/preemption）与 `SpeechPreemptionEvent`（双方语言/长度/confident/visible/queuedFinal/applied）。引擎写 `asr.drop` / `speech.preemption` / `speech.start`（requested/active/usingDual）；事件不含正文，不参与接受/发布/identity。
+- `fixture-score.py`：`missingCueAttribution` 用 raw final 区分 `assemblerLoss` / `surfaceVariant` / `asrMiss`；无 raw dump 时 `unavailable`。`nameCues` 非阻断。
+- `tools/fixture-run.sh`：`--module conversation`、`--user-language`/`--peer-language`、`--preemption-publish`；自动把 `asr-raw.jsonl` 传给 scorer。
+- 单测 575 logical/610 expanded，0 failed/0 skipped；`verify-utterance-identity` 在文本/range 两 pass 均 clean；`check-static.sh` PASS。
+
+### 6.2 双 locale 抢占 A/B
+
+夹具：1 s 英文（截断）+ 日语 TTS，`ConversationViewModel` 自动双 locale（english/japanese），真实 ASR/assembler/翻译/落库，仅音频采集替换。A/B 只切 `-duiyi.assemblerPreemptionPublish`。
+
+| 臂 | run | appFinalRows | preemption applied/queued | 结果 |
+| --- | --- | --- | --- | --- |
+| A（no） | `p11-preempt-ja-a-3`、`p11-preempt-ja-a-4` | 0 | 1 / 0 | 英文 `They also cause us` 只在非 final preview；文字稿无该行，结构性失败 |
+| B（yes） | `p11-preempt-ja-b-1`、`p11-preempt-ja-b-2` | 2 | 1 / 1 | 英文 final 保留，日语行照常；PASS |
+
+两次交错复现同一结果。结论：`preemptsIfNeeded` 的“直接 remove/clear 不 queue final”确实是可见内容丢失路径；DEBUG 条件修复能保留 incumbent 且不把 loser 并入 winner。限制：合成音频、固定 en/ja；Release/真实 Conversation/Meeting 的默认行为未改，仍需真实麦克风 A/B 才能签收 P1-1。
+
+## 7. 引用
 
 ### Apple 一手资料
 

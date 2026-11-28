@@ -395,6 +395,87 @@ struct DiagnosticsRecorderTests {
         #expect(events.first?["text"] == nil)
     }
 
+    @Test("ASR drops and preemptions are counted without caption text")
+    func dropAndPreemptionEvents() throws {
+        let recorder = DiagnosticsRecorder()
+        recorder.beginSession(feature: .faceToFace, taskID: UUID())
+        recorder.record(
+            ASRDropRecord(
+                language: .english,
+                reason: "purity",
+                textLength: 12,
+                isFinal: true,
+                rangeStartSeconds: 4,
+                rangeDurationSeconds: 1,
+                style: "liveCaptions"
+            )
+        )
+        recorder.record(
+            SpeechPreemptionRecord(
+                incumbentLanguage: .english,
+                challengerLanguage: .zhHans,
+                incumbentTextLength: 18,
+                challengerTextLength: 14,
+                incumbentConfident: true,
+                challengerConfident: true,
+                incumbentVisible: true,
+                queuedFinal: true,
+                applied: true,
+                rangeStartSeconds: 9,
+                rangeDurationSeconds: 2,
+                style: "liveCaptions"
+            )
+        )
+
+        let snapshot = recorder.snapshot()
+        #expect(snapshot.summary.asrDropCount == 1)
+        #expect(snapshot.summary.preemptionCount == 1)
+        let drop = try #require(snapshot.events.first)
+        #expect(drop.kind == "asr.drop")
+        #expect(drop.language == AppLanguage.english.rawValue)
+        #expect(drop.dropReason == "purity")
+        #expect(drop.textLength == 12)
+        let preemption = try #require(snapshot.events.last)
+        #expect(preemption.kind == "speech.preemption")
+        #expect(preemption.language == AppLanguage.english.rawValue)
+        #expect(preemption.challengerLanguage == AppLanguage.zhHans.rawValue)
+        #expect(preemption.challengerLength == 14)
+        #expect(preemption.incumbentVisible == true)
+        #expect(preemption.queuedFinal == true)
+        #expect(preemption.applied == true)
+
+        let data = try #require(recorder.makeExportJSON())
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(!text.contains("\"text\""))
+        #expect(text.contains("speech.preemption"))
+        #expect(text.contains("asr.drop"))
+    }
+
+    @Test("Speech start records requested and active language sets without text")
+    func speechStartEvent() throws {
+        let recorder = DiagnosticsRecorder()
+        recorder.beginSession(feature: .faceToFace, taskID: UUID())
+        recorder.record(
+            SpeechStartRecord(
+                requestedLanguages: ["english", "japanese"],
+                activeLanguages: ["english", "japanese"],
+                fallbackLanguage: "english",
+                usingDual: true,
+                style: "liveCaptions"
+            )
+        )
+
+        let snapshot = recorder.snapshot()
+        #expect(snapshot.summary.speechStartCount == 1)
+        let event = try #require(snapshot.events.first)
+        #expect(event.kind == "speech.start")
+        #expect(event.requestedLanguages == ["english", "japanese"])
+        #expect(event.activeLanguages == ["english", "japanese"])
+        #expect(event.usingDual == true)
+        let data = try #require(recorder.makeExportJSON())
+        #expect(!String(decoding: data, as: UTF8.self).contains("\"text\""))
+    }
+
     @Test("Export is nil until a session exists")
     func exportRequiresSession() {
         let recorder = DiagnosticsRecorder()

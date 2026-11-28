@@ -7,6 +7,7 @@ Run with:
 from __future__ import annotations
 
 import importlib.util
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -133,6 +134,118 @@ class RequiredCueTests(unittest.TestCase):
                 result["requiredCueMissing"],
                 ["For four days, silence."],
             )
+
+
+class MissingCueAttributionTests(unittest.TestCase):
+    def _score(
+        self,
+        cues: list[str],
+        app_text: str,
+        raw_finals: list[str],
+        required: list[str] | None = None,
+        names: list[str] | None = None,
+    ) -> dict:
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            ground_truth = directory / "cues.tsv"
+            ground_truth.write_text(
+                "\n".join(f"{index * 1000}\t{cue}" for index, cue in enumerate(cues))
+                + "\n",
+                encoding="utf-8",
+            )
+            store = make_store(directory, [(app_text, "译文", 1)])
+            raw_path = directory / "asr-raw.jsonl"
+            raw_path.write_text(
+                "\n".join(
+                    json.dumps({"isFinal": True, "text": text})
+                    for text in raw_finals
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            baseline = {
+                "requiredCues": required or [],
+                "nameCues": names or [],
+            }
+            return fixture_score.score(
+                store,
+                ground_truth,
+                None,
+                None,
+                baseline=baseline,
+                asr_raw=raw_path,
+            )
+
+    def test_exact_raw_cue_missing_from_transcript_is_assembler_loss(self) -> None:
+        result = self._score(
+            ["For four days, silence."],
+            "She'll perform better.",
+            ["For four days, silence."],
+            required=["For four days, silence."],
+        )
+
+        self.assertEqual(
+            result["missingCueAttribution"]["counts"],
+            {"assemblerLoss": 1},
+        )
+
+    def test_name_near_spelling_is_a_surface_variant(self) -> None:
+        result = self._score(
+            ["Cameron Russell"],
+            "She'll perform better.",
+            ["Cameron Rushell"],
+            required=["Cameron Russell"],
+        )
+
+        self.assertEqual(
+            result["missingCueAttribution"]["counts"],
+            {"surfaceVariant": 1},
+        )
+
+    def test_absent_cue_is_an_asr_miss(self) -> None:
+        result = self._score(
+            ["white men perform better."],
+            "She'll perform better.",
+            ["She'll perform better."],
+            required=["white men perform better."],
+        )
+
+        self.assertEqual(
+            result["missingCueAttribution"]["counts"],
+            {"asrMiss": 1},
+        )
+
+    def test_no_raw_dump_marks_attribution_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            ground_truth = directory / "cues.tsv"
+            ground_truth.write_text("0\twhite men perform better.\n", encoding="utf-8")
+            store = make_store(directory, [("She'll perform better.", "译文", 1)])
+            baseline = {"requiredCues": ["white men perform better."]}
+
+            result = fixture_score.score(
+                store,
+                ground_truth,
+                None,
+                None,
+                baseline=baseline,
+            )
+
+            self.assertFalse(result["missingCueAttribution"]["available"])
+            self.assertEqual(result["missingCueAttribution"]["items"], [])
+
+    def test_name_cues_are_reported_but_not_required(self) -> None:
+        result = self._score(
+            ["Cameron Russell"],
+            "She'll perform better.",
+            ["Cameron Russell"],
+            names=["Cameron Russell"],
+        )
+
+        self.assertEqual(result["nameCueTotal"], 1)
+        self.assertEqual(result["nameCueFound"], 0)
+        self.assertEqual(result["nameCueMissing"], ["Cameron Russell"])
+        self.assertEqual(result["requiredCueTotal"], 0)
 
 
 class BaselineRegressionTests(unittest.TestCase):

@@ -149,6 +149,14 @@ tools/fixture-run.sh --asr-context-terms "Cameron Russell,Lidia Yuknavitch,Ferna
   --start 511 --duration 360 --ground-truth /tmp/p13-360.tsv --min-coverage 0.5
 tools/fixture-run.sh --dump-asr-text --run-id p13-raw \
   --start 511 --duration 30 --ground-truth /tmp/gt-30s.tsv --min-coverage 0.3
+
+# P1-1 双 locale 抢占 A/B（DEBUG-only；同一 fixture 只切换 incumbent final 发布）
+tools/fixture-run.sh --module conversation --user-language english --peer-language japanese \
+  --fixture /tmp/dual.wav --start 0 --duration 11 --ground-truth /tmp/dual.tsv \
+  --preemption-publish no --baseline none --min-coverage 0 --dump-asr-text --run-id p11-a
+tools/fixture-run.sh --module conversation --user-language english --peer-language japanese \
+  --fixture /tmp/dual.wav --start 0 --duration 11 --ground-truth /tmp/dual.tsv \
+  --preemption-publish yes --baseline none --min-coverage 0 --dump-asr-text --run-id p11-b
 ```
 
 前置：`Config/Local.xcconfig`、已连接的物理 iPhone、`ffmpeg`、`python3`、`docs/media/TED.mp3`。脚本会构建/安装 Debug、把夹具推到 App `Documents`、用 `-duiyi.fixtureAudio` 启动、轮询 `fixture-run-done.json`、结束 App、拉取证据并用 `tools/fixture-score.py` 计分。证据在 `.device-state/fixture-runs/<run-id>/`，不提交；每次运行写 `run-meta.json`（commit/dirty、fixture sha、窗口、ASR flags、baseline、app/toolchain）。`transcript.tsv` 只导出最新任务；同一 `--run-id` 复用 store 时会保留旧任务，复跑请用新的 run-id（或确认 store 已清空），否则人工查看 transcript 会看到旧任务行。
@@ -166,7 +174,9 @@ tools/fixture-run.sh --dump-asr-text --run-id p13-raw \
 | `-duiyi.fixtureDeleteAfterRun YES` | 结束后删除设备上的夹具；脚本复用 `fixture-current.<ext>`，避免 72 MB 文件堆积 |
 | `-duiyi.storeFile fixture-<id>` | 隔离 SwiftData，避免污染真实历史 |
 
-`--dump-asr-text` 是 fixture-only 的原始 ASR 证据：仅当同时有 `-duiyi.fixtureAudio` 时写入 `Documents/fixture-asr-raw.jsonl`（语言、range、text、alternatives、confidence 聚合），脚本拉回 `asr-raw.jsonl` 后用空文件覆盖设备文件；证据不提交、不上传、不做常规诊断导出。它不是麦克风路径，也不是 Release 行为。
+`--dump-asr-text` 是 fixture-only 的原始 ASR 证据：仅当同时有 `-duiyi.fixtureAudio` 时写入 `Documents/fixture-asr-raw.jsonl`（语言、range、text、alternatives、confidence 聚合），脚本拉回 `asr-raw.jsonl` 后用空文件覆盖设备文件；证据不提交、不上传、不做常规诊断导出。它不是麦克风路径，也不是 Release 行为。`score.json` 的 `missingCueAttribution` 只在有 `asr-raw.jsonl` 时可用：exact cue 在 raw final 但不在文字稿 → `assemblerLoss`；只有近似拼写 → `surfaceVariant`；raw 也没有 → `asrMiss`；没有 raw 证据 → `unavailable`。`nameCues`（Cameron Russell/Lidia Yuknavitch 等）只作非阻断观察，不进 `requiredCue` 硬门禁。
+
+`--module conversation` 使用 DEBUG-only 的 `ConversationViewModel` 自动链路（真实双 locale 引擎、assembler、翻译、落库），只替换音频采集；`--user-language` / `--peer-language` 选择语言对，`--preemption-publish yes` 打开调试抢占修复。证据里 `speech.start` 记录 requested/active/usingDual，`speech.preemption` 记录 incumbent/challenger 双方长度与 `applied/queuedFinal`，`asr.drop` 记录 dropReason；这些事件都不含正文。
 
 P1-3 ASR A/B 使用 DEBUG-only 的两个开关：`--asr-fast-results no` 去掉 `SpeechTranscriber` 的 `.fastResults`；`--asr-context-terms "a,b"` 设置 `AnalysisContext.contextualStrings[.general]`。**Apple 文档只把词表偏置写给 `DictationTranscriber`，论坛 811083 明确 `SpeechTranscriber` 当前不消费 contextualStrings，所以这个开关目前对 SpeechTranscriber 是 no-op，只能用于未来 OS 复测，不能作为专名修复。** Release 默认仍是 fast + 无词表偏置；不要用低置信度丢 final。证据目录按 run-id 隔离，`--skip-build` 可复用同一安装包只换 launch args。
 

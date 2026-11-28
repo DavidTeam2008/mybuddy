@@ -10,6 +10,12 @@
     "appFinalRows": 85
   },
   "shortCueMaxTokens": 5,
+  "nameCues": [
+    "Cameron Russell",
+    "Lidia Yuknavitch",
+    "Fernando",
+    "Ben"
+  ],
   "requiredCues": [
     "She'll perform better.",
     "She'll perform worse.",
