@@ -271,6 +271,7 @@ struct TranslationJobPumpTests {
             ) == ["I was astounded, proud, liberated", "and confused."]
         )
         #expect(TranslationFallback.split("I was astounded, proud, liberated.") == nil)
+        #expect(TranslationFallback.split("A black and white photo.") == nil)
         #expect(TranslationFallback.split("No comma here.") == nil)
     }
 

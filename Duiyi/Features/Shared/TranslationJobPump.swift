@@ -27,6 +27,11 @@ enum TranslationFallback {
                 continue
             }
             let first = String(text[..<range.lowerBound]) + marker.firstSuffix
+            // A plain conjunction is only a clause boundary in a list; avoid
+            // splitting ordinary phrases such as "black and white".
+            if marker.firstSuffix.isEmpty, !first.contains(",") {
+                continue
+            }
             let secondPrefix = marker.conjunction.map { "\($0) " } ?? ""
             let second = secondPrefix + String(text[range.upperBound...])
             let firstTrimmed = first.trimmingCharacters(in: .whitespacesAndNewlines)
