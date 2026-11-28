@@ -79,6 +79,69 @@ struct ASRConfidenceStats: Equatable, Sendable {
     }
 }
 
+#if DEBUG
+/// Fixture-only raw ASR evidence. Never enabled on the microphone path and
+/// never written into DiagnosticsRecorder; the fixture script pulls it and
+/// overwrites the device file with an empty payload.
+struct RawASRRecord: Codable, Sendable {
+    var language: String
+    var isFinal: Bool
+    var text: String
+    var alternatives: [String]
+    var rangeStart: Double?
+    var rangeDuration: Double?
+    var resultsFinalizationTime: Double?
+    var confidenceRunCount: Int?
+    var confidenceMinimum: Double?
+    var confidenceMean: Double?
+    var confidenceBuckets: [Int]?
+}
+
+enum DebugASRDump {
+    static var isEnabled: Bool {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("-duiyi.fixtureAudio") else { return false }
+        guard let index = arguments.firstIndex(of: "-duiyi.dumpASRText") else {
+            return false
+        }
+        let valueIndex = arguments.index(after: index)
+        guard valueIndex < arguments.endIndex else { return false }
+        return !["no", "false", "0"].contains(arguments[valueIndex].lowercased())
+    }
+
+    static var fileURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("fixture-asr-raw.jsonl")
+    }
+}
+
+actor ASRDebugDump {
+    static let shared = ASRDebugDump()
+    private var handle: FileHandle?
+
+    func reset() {
+        close()
+        let url = DebugASRDump.fileURL
+        FileManager.default.createFile(atPath: url.path, contents: Data())
+        handle = try? FileHandle(forWritingTo: url)
+    }
+
+    func append(_ record: RawASRRecord) {
+        guard let handle else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard var data = try? encoder.encode(record) else { return }
+        data.append(0x0A)
+        try? handle.write(contentsOf: data)
+    }
+
+    func close() {
+        try? handle?.close()
+        handle = nil
+    }
+}
+#endif
+
 actor BilingualSpeechEngine: SpeechRecognizing {
     private let capturer: AudioCapturing
     private let diagnostics: any DiagnosticsRecording
@@ -128,6 +191,11 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         style: SpeechRecognitionStyle
     ) async throws -> AsyncStream<Utterance> {
         await stop()
+        #if DEBUG
+        if DebugASRDump.isEnabled {
+            await ASRDebugDump.shared.reset()
+        }
+        #endif
         isRecoveringFromTranscriberFailure = false
         assembler.reset()
         lastFinalSignature = nil
@@ -181,6 +249,9 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             _ = await AssetInventory.release(reservedLocale: locale)
         }
         reservedLocales.removeAll()
+        #if DEBUG
+        await ASRDebugDump.shared.close()
+        #endif
     }
 
     /// Let the analyzer publish the final for the open range, then give the
@@ -396,6 +467,27 @@ actor BilingualSpeechEngine: SpeechRecognizing {
                     for try await result in transcriber.results {
                         let text = String(result.text.characters)
                         let confidence = ASRConfidenceStats.from(result.text)
+                        #if DEBUG
+                        if DebugASRDump.isEnabled {
+                            await ASRDebugDump.shared.append(
+                                RawASRRecord(
+                                    language: language.rawValue,
+                                    isFinal: result.isFinal,
+                                    text: text,
+                                    alternatives: result.alternatives.map {
+                                        String($0.characters)
+                                    },
+                                    rangeStart: Self.seconds(result.range.start),
+                                    rangeDuration: Self.seconds(result.range.duration),
+                                    resultsFinalizationTime: Self.seconds(result.resultsFinalizationTime),
+                                    confidenceRunCount: confidence?.runCount,
+                                    confidenceMinimum: confidence?.minimum,
+                                    confidenceMean: confidence?.mean,
+                                    confidenceBuckets: confidence?.buckets
+                                )
+                            )
+                        }
+                        #endif
                         await self?.handleTranscription(
                             language: language,
                             text: text,

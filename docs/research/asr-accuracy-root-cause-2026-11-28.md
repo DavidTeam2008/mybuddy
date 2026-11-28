@@ -3,6 +3,8 @@
 > 状态：研究结论与实施计划；不是 P1-3/P1-1 签收。Apple API 结论来自本机 iOS 27.1 SDK 与官方 DocC/论坛；夹具结论只适用于同一 WAV / iPhone 13 / 当前 OS，不外推为 API 语义。
 >
 > 相关决策：[D9/D10](../decisions.md)；夹具研究：[speech-transcriber-segmentation.md](speech-transcriber-segmentation.md) §8.4；语义评审：[fixture-semantic-review-2026-11-28.md](fixture-semantic-review-2026-11-28.md)。
+>
+> 实施状态（2026-11-28）：run-meta、ASR confidence 只读诊断、fixture-only raw ASR dump 已实现并在 iPhone 13 验证（raw dump 132 行，含 text/alternatives/confidence；拉取后设备文件为 0 字节）；assembler `dropReason`、canary 归因、用户术语表、alternatives 选词、preemption/closed-range 改造仍待实施。
 
 ## 0. 结论摘要
 
@@ -41,15 +43,16 @@
 
 ### now（不改 Release 行为）
 
-1. **夹具证据归因包**
-   - `run-meta.json`：git commit/dirty、fixture sha、window/codec/pacing、ASR flags、baseline、app/device/OS、launch args；`--skip-build` 记录安装包来源。
-   - fixture-only raw ASR dump：仅 `#if DEBUG` + `-duiyi.fixtureAudio` + 显式 `-duiyi.dumpASRText`；记录 accepted/published、utteranceID/revision、range、text、alternatives、confidence；run 后删除，不提交正文，不进 DiagnosticsRecorder/上传。
-   - assembler dropReason：purity/suppression/lateVolatileClosedRange/preemption/empty/punctuationOnly；只观察，不改变接受/发布/identity。
+1. **夹具证据归因包**（run-meta/raw 已实现；dropReason 待实施）
+   - `run-meta.json`：git commit/dirty、fixture sha、window/codec/pacing、ASR flags、baseline、app/toolchain；`--skip-build` 记录安装包来源。已实现。
+   - fixture-only raw ASR dump：仅 `#if DEBUG` + `-duiyi.fixtureAudio` + 显式 `-duiyi.dumpASRText`；记录 language/isFinal/range/text/alternatives/confidence 聚合；accepted/published/utteranceID 通过同 range/time 的 diagnostics 关联。脚本拉回后用空文件覆盖设备文件，不提交正文、不进 DiagnosticsRecorder/上传。已实现并真机验证（132 行，设备文件 0 字节）。
+   - assembler dropReason：purity/suppression/lateVolatileClosedRange/preemption/empty/punctuationOnly；只观察，不改变接受/发布/identity。待实施。
    - 价值：把每个 missing cue 归因为 ASR miss / 表面变体 / 组装器丢句；解决 full run ring buffer 丢早期事件后无法解释 `white men` 的问题。
 
-2. **置信度只读诊断**
+2. **置信度只读诊断**（已实现并真机验证）
    - 读取 `ConfidenceAttribute`，聚合 runCount、字符加权 min/mean、0.1 分桶；缺失记 nil；只写聚合，不写正文。
    - confidence 永不参与 accept/publish/assembler/translation；不设 Release 阈值；不因低置信度丢 final。
+   - 真机 30 s/96 s 片段已出现 `confidenceRunCount/Min/Mean/Buckets`；仅 final 事件带属性（132 条 ASR 中 8 条有 confidence）。
    - 先验证 run 粒度（phrase 还是词）；final 全量、volatile 可采样。
 
 3. **在 assembler HEAD 重跑 `verify-utterance-identity` 并推进 SKILL sync commit**

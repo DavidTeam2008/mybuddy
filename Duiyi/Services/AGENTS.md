@@ -46,7 +46,7 @@
 ## 4.1 诊断（P1-4a）
 
 - `DiagnosticsRecorder`（`Services/Diagnostics`）是进程内唯一 sink，`AppEnvironment` 注入；读写都过同一把锁（ASR 来自 speech actor，翻译来自主线程）。`TaskLifecycle` 负责 begin/end 会话：任务开始/恢复时重置，结束后保留快照，迟到事件仍写入最近结束任务。
-- payload 只含 ID、语言、长度、时间、失败类与 App/设备版本元数据（型号、系统版本、App 版本；不含 UDID），**不得写正文或音频**；`source_hash` 只用于关联重复 job。ring buffer 有界（默认 4096），聚合计数增量维护。ASR 的 `range`/`resultsFinalizationTime` 只在引擎消费 `SpeechTranscriber.Result` 处记录，不要为诊断改组装行为。ASR confidence 只记录 `runCount`/字符加权 min/mean/10 桶聚合，不写正文；confidence 不参与接受、选词或丢 final。
+- payload 只含 ID、语言、长度、时间、失败类与 App/设备版本元数据（型号、系统版本、App 版本；不含 UDID），**不得写正文或音频**；`source_hash` 只用于关联重复 job。ring buffer 有界（默认 4096），聚合计数增量维护。ASR 的 `range`/`resultsFinalizationTime` 只在引擎消费 `SpeechTranscriber.Result` 处记录，不要为诊断改组装行为。ASR confidence 只记录 `runCount`/字符加权 min/mean/10 桶聚合，不写正文；confidence 不参与接受、选词或丢 final。**唯一正文例外**是 DEBUG fixture-only `-duiyi.dumpASRText`：必须同时有 `-duiyi.fixtureAudio`，写 `Documents/fixture-asr-raw.jsonl`；fixture 脚本拉回后用空文件覆盖，证据不提交/不上传；麦克风与 Release 永不写 raw text。
 - 语音失败写 `speech.failure`：失败语言、`errorDomain`/`errorCode`（不写错误文案）与恢复决策 `singleFallback`/`none`/`restartFailed`；feature 由 recorder 会话附加。
 - 导出仅 DEBUG：设置页写 Documents JSON 并 ShareLink，不上传、不新增网络路径。测试用 `DiagnosticsRecorder(eventLimit:now:)` 或 no-op；不要把 recorder 变成全局单例。
 

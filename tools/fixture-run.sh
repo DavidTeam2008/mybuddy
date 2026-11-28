@@ -43,6 +43,7 @@ BASELINE_EXPLICIT=0
 GROUND_TRUTH_EXPLICIT=0
 ASR_FAST_RESULTS="yes"
 ASR_CONTEXT_TERMS=""
+DUMP_ASR_TEXT=0
 
 usage() {
     cat <<'EOF'
@@ -64,6 +65,7 @@ Options:
                          Toggle SpeechTranscriber.fastResults for A/B (default: yes)
   --asr-context-terms <csv>
                          AnalysisContext contextual strings for A/B (default: empty)
+  --dump-asr-text       Pull fixture-only raw ASR JSONL into evidence (default: off)
   --min-coverage <0-1>   Fail below this source coverage (default: 0.90)
   --skip-build           Reuse the installed app and last build
   -h, --help             Show this help
@@ -84,6 +86,7 @@ while [[ $# -gt 0 ]]; do
         --baseline) BASELINE="$2"; BASELINE_EXPLICIT=1; shift 2 ;;
         --asr-fast-results) ASR_FAST_RESULTS="$2"; shift 2 ;;
         --asr-context-terms) ASR_CONTEXT_TERMS="$2"; shift 2 ;;
+        --dump-asr-text) DUMP_ASR_TEXT=1; shift ;;
         --min-coverage) MIN_COVERAGE="$2"; shift 2 ;;
         --skip-build) SKIP_BUILD=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -192,6 +195,7 @@ jq -n \
     --arg asrFastResults "$ASR_FAST_RESULTS" \
     --arg asrContextTerms "$ASR_CONTEXT_TERMS" \
     --argjson skipBuild "$([[ "$SKIP_BUILD" -eq 1 ]] && echo true || echo false)" \
+    --argjson dumpASRText "$([[ "$DUMP_ASR_TEXT" -eq 1 ]] && echo true || echo false)" \
     --arg appVersion "$APP_VERSION" \
     --arg appBuild "$APP_BUILD" \
     --arg xcodeVersion "$XCODE_VERSION" \
@@ -205,7 +209,7 @@ jq -n \
         groundTruth: $groundTruth,
         baseline: $baseline,
         window: {startSeconds: $start, durationSeconds: $duration, codec: $codec, pacing: $pacing},
-        asr: {fastResults: $asrFastResults, contextTerms: $asrContextTerms},
+        asr: {fastResults: $asrFastResults, contextTerms: $asrContextTerms, dumpText: $dumpASRText},
         skipBuild: $skipBuild,
         app: {version: $appVersion, build: $appBuild},
         toolchain: {xcode: $xcodeVersion, macOS: $macOSVersion}
@@ -278,6 +282,7 @@ xcrun devicectl device process launch \
     -duiyi.fixturePacing "$PACING" \
     -duiyi.asrFastResults "$ASR_FAST_RESULTS" \
     -duiyi.asrContextTerms "$ASR_CONTEXT_TERMS" \
+    -duiyi.dumpASRText "$([[ "$DUMP_ASR_TEXT" -eq 1 ]] && echo YES || echo NO)" \
     -duiyi.fixtureAutoRun YES \
     -duiyi.fixtureSettleSeconds "$SETTLE" \
     -duiyi.fixtureDeleteAfterRun YES \
@@ -341,6 +346,30 @@ xcrun devicectl device copy from \
     --domain-identifier "$BUNDLE_ID" \
     --source 'Library/Application Support/UITestStores' \
     --destination "$EVIDENCE/UITestStores" >/dev/null 2>&1 || true
+
+if [[ "$DUMP_ASR_TEXT" -eq 1 ]]; then
+    if xcrun devicectl device copy from \
+        --device "$DEVICE_UDID" \
+        --domain-type appDataContainer \
+        --domain-identifier "$BUNDLE_ID" \
+        --source 'Documents/fixture-asr-raw.jsonl' \
+        --destination "$EVIDENCE/asr-raw.jsonl" >/dev/null 2>&1; then
+        echo "== raw ASR: $EVIDENCE/asr-raw.jsonl =="
+    else
+        echo "WARN: raw ASR pull failed" >&2
+    fi
+    # The raw dump contains fixture caption text. Overwrite it on the device
+    # after pulling; keep the empty file so the next fixture run resets it.
+    EMPTY_RAW="$(mktemp)"
+    xcrun devicectl device copy to \
+        --device "$DEVICE_UDID" \
+        --domain-type appDataContainer \
+        --domain-identifier "$BUNDLE_ID" \
+        --source "$EMPTY_RAW" \
+        --destination 'Documents/fixture-asr-raw.jsonl' >/dev/null 2>&1 \
+        || echo "WARN: raw ASR cleanup failed" >&2
+    rm -f "$EMPTY_RAW"
+fi
 
 STORE="$EVIDENCE/UITestStores/fixture-$RUN_ID.store"
 if [[ ! -f "$STORE" ]]; then
