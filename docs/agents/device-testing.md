@@ -149,7 +149,7 @@ tools/fixture-run.sh --asr-context-terms "Cameron Russell,Lidia Yuknavitch,Ferna
   --start 511 --duration 360 --ground-truth /tmp/p13-360.tsv --min-coverage 0.5
 ```
 
-前置：`Config/Local.xcconfig`、已连接的物理 iPhone、`ffmpeg`、`python3`、`docs/media/TED.mp3`。脚本会构建/安装 Debug、把夹具推到 App `Documents`、用 `-duiyi.fixtureAudio` 启动、轮询 `fixture-run-done.json`、结束 App、拉取证据并用 `tools/fixture-score.py` 计分。证据在 `.device-state/fixture-runs/<run-id>/`，不提交。
+前置：`Config/Local.xcconfig`、已连接的物理 iPhone、`ffmpeg`、`python3`、`docs/media/TED.mp3`。脚本会构建/安装 Debug、把夹具推到 App `Documents`、用 `-duiyi.fixtureAudio` 启动、轮询 `fixture-run-done.json`、结束 App、拉取证据并用 `tools/fixture-score.py` 计分。证据在 `.device-state/fixture-runs/<run-id>/`，不提交。`transcript.tsv` 只导出最新任务；同一 `--run-id` 复用 store 时会保留旧任务，复跑请用新的 run-id（或确认 store 已清空），否则人工查看 transcript 会看到旧任务行。
 
 默认窗口（511 s 起、785 s）、WAV、`realtime` 的全量跑会读取 `tools/fixtures/ted-baseline.json`，对同一 ground truth 做相对基线检查：`sourceCoverage`/`exactMatchRate` 不得低于基线 1 个百分点，`wordErrorRate` 不得高于基线 1 个百分点，≤5 词短句保留率不得低于基线 2 个百分点。短句保留率按 ground-truth 短 cue 的规范化 token 是否连续出现在整份文字稿中计算；合行不扣分，丢词/误听/丢整句会扣分。基线里的 `requiredCues` 是人工 canary 列表（silence、Ben、Headset off、`there is the life that you can be living…` 等），任一缺失直接失败；它覆盖短句门限够不到的长句丢失。改变窗口/codec/pacing 或自定义 `--ground-truth` 时默认关闭基线，避免拿不同口径硬比；需要时显式传 `--baseline <path>`，或 `--baseline none` 关闭。`score.json` 会写 `shortCueFound`/`shortCueTotal`/`shortCueRetention`/`missingShortCues` 和 `baselineRegressions`。
 

@@ -628,14 +628,19 @@ Apple Developer Forums 帖 731761 与 Stack Overflow 79005416 报告：iOS 17/18
 | A baseline（fast） | 40 | 98.35% | 96.31% | 3.82% | 21/24 | 1/6 | 104.7 ms | Cameron Rushell；Lydia Yuknovich；Design thinkinging；`white men`/`days` 缺失 |
 | B no-fast | 73 | 95.67% | 92.88% | 7.38% | 20/24 | 3/6 | 61.4 ms | `White men` 与 `Design Thinking` 恢复，`four days` 出现；但 Cameron 变成 camera，行碎片化明显 |
 | C fast + context | 40 | 98.35% | 96.69% | 3.31% | 22/24 | 3/6 | 102.1 ms | **Cameron Russell** 与 `For four days, silence.` 恢复；Lidia/Design/`white men` 仍错 |
-| D no-fast + context | — | — | — | — | — | — | — | marker timeout（设备 unavailable，未产出证据） |
+| C2 fast + context（重复） | 38 | 98.35% | 96.69% | 3.31% | 22/24 | 2/6 | 108.2 ms | Cameron Rushell；days/silence 恢复；Lidia/Design/`white men` 仍错 |
+| D no-fast + context | 71 | 95.80% | 93.38% | 6.62% | 22/24 | 3/6 | 61.3 ms | `White men`、`Design Thinking` 恢复；Cameron/Lidia 仍错，days/silence 被拆成 `silent.`，整体仍碎片化 |
+| A2 baseline（重复） | — | — | — | — | — | — | — | marker timeout（设备 unavailable，未产出证据） |
+
+row 82 的 96 s 单独片段（1200–1296 s）：baseline 11 行/覆盖 100%/精确 100%/WER 0/required 1/1；context（`life` + 完整 clause）10 行/98.84%/98.26%/WER 2.33/required 1/1。两者都保留了完整 `there is the life…`，说明全量里的 `life` 丢失是随机/长窗 ASR 波动，context 没有额外收益。
 
 结论：
 
 - **不关闭 `.fastResults`**：B 虽然恢复了几个词，但行数 40→73、WER 3.82→7.38、覆盖 98.35→95.67，明显不适合 live caption。
-- **contextualStrings 有轻微收益**：C 与 A 行数/覆盖相同，精确 +0.38 pp、WER −0.51 pp、短句 +1、required +2，p95 基本不变；但 Lidia Yuknavitch、Design Thinking、`white men` 仍未修复，且 term 列表是夹具专用，产品没有来源。
-- 单次 ASR 有随机波动，A/C 的差异需要重复或 full 13 min 复核；D 未完成。
-- 下一步：row 82 的 96 s 片段单独测 `life`（context 词表加 `life`/`There is the life…`），再决定是否值得为用户可提供的名称/术语做设置；不要默认启用词表偏置来“修”夹具。
+- **contextualStrings 有轻微收益且部分可重复**：C/C2 两次精确都是 96.69%、WER 都是 3.31%，都恢复了 `For four days, silence.`；但 Cameron Russell 只在 C 恢复、C2 仍是 Rushell，Lidia/Design/`white men` 始终未修复。term 列表是夹具专用，产品没有来源。
+- ASR 仍有随机波动，A2 baseline 复跑因设备 unavailable 未完成；但 C/C2 的 WER 一致，说明 context 对整体词错和日期有可重复的小收益，对专名仍不稳定。D 也完成：虽然恢复 `White men`/`Design Thinking`，但 71 行、覆盖 95.80%、WER 6.62%，Cameron/Lidia 仍错，确认 no-fast 路径不划算。
+- row 82 `life` 的 96 s 对照：baseline 11 行/100%/100%/WER 0/required 1/1；context 10 行/98.84%/98.26%/WER 2.33/required 1/1。两者都保留完整 clause，说明全量里的 `life` 丢失是随机/长窗 ASR 波动，context 无额外收益。
+- 下一步：不要默认启用夹具专用词表；若做 P1-3 后续，优先评估“用户可提供的名称/术语”设置、`alternativeTranscriptions` 选词和置信度诊断；任何低置信度丢 final 都不应默认开启。
 
 ## 9. 引用
 

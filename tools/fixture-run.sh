@@ -301,7 +301,7 @@ if [[ ! -f "$STORE" ]]; then
 fi
 
 sqlite3 -header -separator $'\t' "$STORE" \
-    "select ZSORTINDEX, ZISFINAL, ZSOURCETEXT, ZTRANSLATEDTEXT from ZTRANSCRIPTENTITY order by ZSORTINDEX;" \
+    "select ZSORTINDEX, ZISFINAL, ZSOURCETEXT, ZTRANSLATEDTEXT from ZTRANSCRIPTENTITY where ZTASK=(select Z_PK from ZTASKENTITY order by ZSTARTEDAT desc limit 1) order by ZSORTINDEX;" \
     > "$EVIDENCE/transcript.tsv"
 
 echo "== score =="
