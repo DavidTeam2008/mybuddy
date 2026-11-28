@@ -5,7 +5,7 @@ End-to-end, on-device iOS real-time translation app. See `README.md` for build/t
 ## Project rules
 
 - Architecture: `docs/02-architecture.md`; tech choices: `docs/03-tech-choices.md`; current issues and schedule: `docs/04-roadmap.md`.
-- Frozen v1 decisions: `docs/decisions.md` (D1–D11 + v1 冻结口径).
+- Frozen v1 decisions: `docs/decisions.md` (D1–D13 + v1 冻结口径).
 - Domain vocabulary: `GLOSSARY.md`; use its terms in issues, tests, and proposals.
 - No third-party dependencies; iPhone portrait only; on-device, no backend, no API key.
 

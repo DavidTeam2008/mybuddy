@@ -147,9 +147,9 @@ struct SpeechEngineLanguageTests {
         #expect(options.contextualStrings.isEmpty)
     }
 
-    @Test("Preemption experiment defaults off and parses the DEBUG flag")
+    @Test("Preemption publish defaults on and parses the rollback flag")
     func preemptionExperimentFlagParses() {
-        #expect(UtteranceAssemblerExperimentOptions.parse(arguments: []).publishesPreemptedIncumbent == false)
+        #expect(UtteranceAssemblerExperimentOptions.parse(arguments: []).publishesPreemptedIncumbent)
         #expect(
             UtteranceAssemblerExperimentOptions.parse(arguments: [
                 "-duiyi.assemblerPreemptionPublish", "YES",

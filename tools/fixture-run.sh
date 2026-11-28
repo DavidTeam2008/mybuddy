@@ -319,6 +319,7 @@ xcrun devicectl device process launch \
     -- \
     -duiyi.onboardingComplete YES \
     -duiyi.storeFile "fixture-$RUN_ID" \
+    -duiyi.prefsSuite "fixture-$RUN_ID" \
     -duiyi.fixtureAudio "Documents/$FIXTURE_NAME" \
     -duiyi.fixtureModule "$FIXTURE_MODULE" \
     -duiyi.fixtureUserLanguage "$FIXTURE_USER_LANGUAGE" \

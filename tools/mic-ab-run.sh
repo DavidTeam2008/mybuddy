@@ -129,6 +129,7 @@ launch_app() {
         -- \
         -duiyi.onboardingComplete YES \
         -duiyi.storeFile "$STORE_FILE" \
+        -duiyi.prefsSuite "micab-$RUN_ID" \
         -duiyi.micABModule "$MODULE" \
         -duiyi.micABUserLanguage "$USER_LANGUAGE" \
         -duiyi.micABPeerLanguage "$PEER_LANGUAGE" \

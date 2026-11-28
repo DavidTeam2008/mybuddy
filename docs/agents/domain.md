@@ -34,6 +34,6 @@ If the concept you need isn't in the glossary yet, that's a signal: either you'r
 
 ## Flag decision conflicts
 
-If your output contradicts D1–D11 or the "v1 冻结口径", surface it explicitly rather than silently overriding:
+If your output contradicts D1–D13 or the "v1 冻结口径", surface it explicitly rather than silently overriding:
 
 > _Contradicts D6 (no digest fallback), but worth reopening because…_

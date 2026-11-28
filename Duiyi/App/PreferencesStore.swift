@@ -98,6 +98,30 @@ final class PreferencesStore {
     }
     #endif
 
+    /// The app composition root uses this instead of `PreferencesStore()`
+    /// so DEBUG fixture/mic-A/B runs can opt into an isolated defaults suite
+    /// and never overwrite the developer's real language/turn settings.
+    static func makeDefault() -> PreferencesStore {
+        #if DEBUG
+        if let suite = launchArgument("-duiyi.prefsSuite"),
+           let defaults = UserDefaults(suiteName: "duiyi.debug.\(suite)") {
+            return PreferencesStore(defaults: defaults)
+        }
+        #endif
+        return PreferencesStore()
+    }
+
+    #if DEBUG
+    private static func launchArgument(_ flag: String) -> String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: flag) else { return nil }
+        let valueIndex = arguments.index(after: index)
+        guard valueIndex < arguments.endIndex else { return nil }
+        let value = arguments[valueIndex]
+        return value.isEmpty ? nil : value
+    }
+    #endif
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let resolvedUser: AppLanguage

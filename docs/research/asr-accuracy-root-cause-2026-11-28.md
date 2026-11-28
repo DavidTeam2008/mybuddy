@@ -63,7 +63,7 @@
 4. **canary 归因（已实现）**：保留 coverage/exact/WER/短句/重复/空译/U+FFFD 单跑硬门禁；`missingCueAttribution` 区分 ASR miss / 表面变体 / assembler loss，无 raw dump 时明确 `unavailable`。`nameCues` 已加入基线但保持非阻断；只有确定性机制 + held-out 证据后才进 requiredCues；ASR-dependent canary 可要求连续两跑，best-of 不用于内容缺失。
 5. **用户术语表（opt-in）**：设置页 per-language canonical + aliases（≤100 条、1–4 token、无正则、不自动学习）；纯 `SpeechTextCanonicalizer` 在 **assembler 之后**按同一 Utterance.id 做最长整词/整短语替换，只改匹配 span，不插入/删除/改数字否定；Release 默认 off，需产品/隐私/存储决策；held-out 音频测误替换率。只改源文，不保证中文译名（TranslationSession 无术语 API）。
 6. **alternativeTranscriptions final-only 选词**：默认 off；只对有用户术语表的 locale 开；候选必须非空、含 canonical/alias、匹配 span 外前后缀逐字相等、token 数不变；空候选视为无语音/撤销；不选不含术语的候选；volatile 永远 alternatives[0]；iPhone 13 单/双 locale 测 p95/资源，超预算回退。不改 fast/volatile/assembler identity。
-7. **P1-1 抢占先诊断（已实现 DEBUG 实验）**：`speech.preemption` 诊断记录双方语言、长度、是否 confident、是否可见、是否 queue final、是否 applied，无正文；`-duiyi.assemblerPreemptionPublish YES` 下仅当 incumbent 有可见文本且 isConfident 时发布 visible final（`queueVisibleFinalForPreemption`）+ `closeCurrentRangeRow`，绝不 merge 到 challenger。双 locale Conversation 夹具 A/B 已证实 A 只剩非 final preview、B 保留 incumbent final（§6）；真实麦克风 A/B 见 §6.4/§7.6，已完成但真人复测前 Release 默认仍为 no。
+7. **P1-1 抢占先诊断（已实现 DEBUG 实验）**：`speech.preemption` 诊断记录双方语言、长度、是否 confident、是否可见、是否 queue final、是否 applied，无正文；`-duiyi.assemblerPreemptionPublish YES` 下仅当 incumbent 有可见文本且 isConfident 时发布 visible final（`queueVisibleFinalForPreemption`）+ `closeCurrentRangeRow`，绝不 merge 到 challenger。双 locale Conversation 夹具 A/B 已证实 A 只剩非 final preview、B 保留 incumbent final（§6）；真实麦克风 A/B 见 §6.4/§7.6，已完成；D12 已把 Release 默认改为 B。
 
 ### later
 

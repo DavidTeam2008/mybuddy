@@ -208,6 +208,7 @@ H2 目前证据偏弱：面对面英文拒绝率 29.4%，同传 28.3%，几乎�
 #### 7.6.1 实现
 
 - `DebugMicABRun`（DEBUG-only）：`-duiyi.micABModule conversation|meeting`、`-duiyi.micABUserLanguage`、`-duiyi.micABPeerLanguage`、`-duiyi.micABDuration`；自动打开模块、建任务、开始监听、到点结束、导出诊断并写无正文 marker。它不替换音频采集，仍走真实麦克风。
+- 真机脚本同时传 `-duiyi.prefsSuite micab-<run-id>`，语言/换手/autoStart 写入隔离 UserDefaults；不会覆盖真实 App 的面对面设置。早期版本没有隔离，曾把设备持久值写成 automatic（manual 默认本身未变，见 D13）。
 - `tools/mic-ab-run.sh`：Mac 播放脚本音频、轮询 ready/done、拉诊断与隔离 SwiftData store；证据在 `.device-state/mic-ab/runs/<run-id>/`，不提交。
 - `tools/mic-ab-analyze.py`：把 `speech.preemption.incumbentUtteranceID` 关联到 SwiftData `ZTRANSCRIPTENTITY.ZID`，区分 final / mixed-script final / preview，并汇总 A/B。
 
@@ -253,10 +254,10 @@ python3 tools/mic-ab-analyze.py
 
 #### 7.6.5 决策
 
-按 §7.4 预注册门槛：Conversation 已超过 10 个 visible preemption/臂，Meeting 覆盖，B 干净保留率显著高于 A，护栏无回退。**证据支持把 Release 默认改为 publish**，但本轮提交仍保持默认关闭（`publishesPreemptedIncumbent=false`），理由：
+按 §7.4 预注册门槛：Conversation 已超过 10 个 visible preemption/臂，Meeting 覆盖，B 干净保留率显著高于 A，护栏无回退。2026-11-29 用户决定采用 B（D12）：**Release 默认 `publishesPreemptedIncumbent=true`**，`-duiyi.assemblerPreemptionPublish no` 保留为回滚/对比开关。决策依据与残余风险：
 
 1. 音频是 Mac 扬声器脚本，不是双人真实对话；§7.5 的 10 分钟真人验证尚未做，且用户 2026-11-29 决定暂时不做（D11）。
-2. B 仍有 1/18 非 confident incumbent 走旧丢弃路径；P1-1 的 ASR 随机漏词/专名问题也未解决，不能签收 P1-1。
-3. 最近 3 次 B 是 visible-final 修正后的样本；翻默认前应再用真人对话确认没有新的重复/串行。
+2. B 仍有 1/18 非 confident incumbent 走旧丢弃路径；P1-1 的 ASR 随机漏词/专名问题也未解决，不能签收 P1-1。用户接受该残余风险，先把默认行为切到 B。
+3. 最近 3 次 B 是 visible-final 修正后的样本；真人对话确认没有新的重复/串行仍按 D11 暂缓。
 
-D11 已记录用户 2026-11-29 的决定：**暂时不做 10 分钟真人 Conversation + Meeting，保持 Release 默认关闭 / DEBUG-only**，真人验证未排期。后续若恢复验证且 B 无重复/串行、护栏不回退，再翻默认并保留 `-duiyi.assemblerPreemptionPublish no` 作为灰度回滚；在此之前不要因为本轮机械指标达标就标记 P1-1 完成。
+D12 已记录用户 2026-11-29 的决定：**Release 默认改为 B**，同时 D11 的“暂时不做 10 分钟真人 Conversation + Meeting”继续有效，真人验证未排期。`-duiyi.assemblerPreemptionPublish no` 保留为灰度回滚；不要因为默认切换或机械指标达标就标记 P1-1 完成。

@@ -91,12 +91,14 @@ struct SpeechPreemptionEvent: Equatable, Sendable {
     var range: SpeechRange?
 }
 
-/// DEBUG-only A/B switch for the preemption content-loss experiment. Release
-/// always keeps the existing discard behavior.
+/// Preemption publish behavior. On by default in Release: a visible,
+/// confident incumbent is finalized before the challenger starts. The DEBUG
+/// `-duiyi.assemblerPreemptionPublish no` flag keeps the legacy discard path
+/// for comparison and rollback.
 struct UtteranceAssemblerExperimentOptions: Equatable, Sendable {
     /// When true, a confident visible incumbent row is published and closed
     /// before the challenger starts; the loser is never merged into the winner.
-    var publishesPreemptedIncumbent = false
+    var publishesPreemptedIncumbent = true
 
     static func parse(arguments: [String]) -> UtteranceAssemblerExperimentOptions {
         var options = UtteranceAssemblerExperimentOptions()

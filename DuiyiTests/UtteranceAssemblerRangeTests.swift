@@ -1185,9 +1185,13 @@ struct UtteranceAssemblerRangeTests {
         )
     }
 
-    @Test("A language preemption records the incumbent loss")
+    @Test("The rollback path records the incumbent loss")
     func preemptionRecordsIncumbentLoss() throws {
-        var assembler = UtteranceAssembler()
+        var assembler = UtteranceAssembler(
+            experiment: UtteranceAssemblerExperimentOptions(
+                publishesPreemptedIncumbent: false
+            )
+        )
         let english = try requireIngest(&assembler, "you are right", range(0, 2))
         _ = assembler.takePreemptionEvents()
 
@@ -1212,13 +1216,9 @@ struct UtteranceAssemblerRangeTests {
         #expect(assembler.takeDropEvents().contains { $0.reason == .preemption })
     }
 
-    @Test("The preemption experiment publishes a confident visible incumbent first")
-    func preemptionExperimentPublishesIncumbent() throws {
-        var assembler = UtteranceAssembler(
-            experiment: UtteranceAssemblerExperimentOptions(
-                publishesPreemptedIncumbent: true
-            )
-        )
+    @Test("The default preemption publishes a confident visible incumbent first")
+    func preemptionPublishesIncumbentByDefault() throws {
+        var assembler = UtteranceAssembler()
         let english = try requireIngest(&assembler, "you are right", range(0, 2))
         _ = assembler.takePreemptionEvents()
 

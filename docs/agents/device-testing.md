@@ -173,6 +173,7 @@ tools/fixture-run.sh --module conversation --user-language english --peer-langua
 | `-duiyi.fixtureSettleSeconds <n>` | EOF 后等待翻译落定的秒数（默认 10） |
 | `-duiyi.fixtureDeleteAfterRun YES` | 结束后删除设备上的夹具；脚本复用 `fixture-current.<ext>`，避免 72 MB 文件堆积 |
 | `-duiyi.storeFile fixture-<id>` | 隔离 SwiftData，避免污染真实历史 |
+| `-duiyi.prefsSuite fixture-<id>` | 隔离 UserDefaults；fixture/mic A/B 不覆盖真实语言、面对面换手方式等设置 |
 
 `--dump-asr-text` 是 fixture-only 的原始 ASR 证据：仅当同时有 `-duiyi.fixtureAudio` 时写入 `Documents/fixture-asr-raw.jsonl`（语言、range、text、alternatives、confidence 聚合），脚本拉回 `asr-raw.jsonl` 后用空文件覆盖设备文件；证据不提交、不上传、不做常规诊断导出。它不是麦克风路径，也不是 Release 行为。`score.json` 的 `missingCueAttribution` 只在有 `asr-raw.jsonl` 时可用：exact cue 在 raw final 但不在文字稿 → `assemblerLoss`；只有近似拼写 → `surfaceVariant`；raw 也没有 → `asrMiss`；没有 raw 证据 → `unavailable`。`nameCues`（Cameron Russell/Lidia Yuknavitch 等）只作非阻断观察，不进 `requiredCue` 硬门禁。
 
@@ -219,8 +220,9 @@ python3 tools/mic-ab-analyze.py
 ```
 
 - 每次证据在 `.device-state/mic-ab/runs/<run-id>/`：无正文诊断 JSON、marker/log、隔离 store；不提交。
+- 脚本同时传 `-duiyi.prefsSuite`，语言/换手/autoStart 写进隔离 suite；不会把真实 App 的面对面默认改成 automatic。
 - `speech.start.usingDual` 必须为 true；`speech.preemption` 的 `incumbentUtteranceID` 关联 store `ZID`。`final` 且不含混合脚本才算 clean retention；preview 和 mixed final 都不算。
-- 判定/结果见 [`face-to-face-dual-locale-quality.md`](../research/face-to-face-dual-locale-quality.md) §7.6。Release 默认仍关闭；真人 10 分钟验证按 D11 暂缓，当前保持 DEBUG-only。
+- 判定/结果见 [`face-to-face-dual-locale-quality.md`](../research/face-to-face-dual-locale-quality.md) §7.6。Release 默认已改为 B（D12）；`-duiyi.assemblerPreemptionPublish no` 保留回滚。真人 10 分钟验证按 D11 暂缓。
 
 
 
