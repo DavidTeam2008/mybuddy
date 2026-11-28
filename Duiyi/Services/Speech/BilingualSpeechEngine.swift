@@ -3,6 +3,42 @@ import CoreMedia
 import Foundation
 import Speech
 
+/// DEBUG-only ASR A/B configuration. Production defaults to the current
+/// fast-results/no-bias behavior; fixture launches can flip either switch.
+struct ASRExperimentOptions: Equatable, Sendable {
+    var fastResults = true
+    var contextualStrings: [String] = []
+
+    static func parse(arguments: [String]) -> ASRExperimentOptions {
+        func value(for flag: String) -> String? {
+            guard let index = arguments.firstIndex(of: flag) else { return nil }
+            let valueIndex = arguments.index(after: index)
+            guard valueIndex < arguments.endIndex else { return nil }
+            return arguments[valueIndex]
+        }
+
+        var options = ASRExperimentOptions()
+        if let raw = value(for: "-duiyi.asrFastResults") {
+            options.fastResults = !["no", "false", "0"].contains(raw.lowercased())
+        }
+        if let raw = value(for: "-duiyi.asrContextTerms") {
+            options.contextualStrings = raw
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        }
+        return options
+    }
+
+    static var current: ASRExperimentOptions {
+        #if DEBUG
+        parse(arguments: ProcessInfo.processInfo.arguments)
+        #else
+        ASRExperimentOptions()
+        #endif
+    }
+}
+
 actor BilingualSpeechEngine: SpeechRecognizing {
     private let capturer: AudioCapturing
     private let diagnostics: any DiagnosticsRecording
@@ -267,6 +303,12 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             : nil
         let analyzer = SpeechAnalyzer(modules: modules, options: options)
         self.analyzer = analyzer
+        let contextTerms = ASRExperimentOptions.current.contextualStrings
+        if !contextTerms.isEmpty {
+            var context = AnalysisContext()
+            context.contextualStrings[.general] = contextTerms
+            try await analyzer.setContext(context)
+        }
         try await analyzer.prepareToAnalyze(in: format)
 
         let (input, continuation) = AsyncStream<AnalyzerInput>.makeStream()
@@ -725,10 +767,14 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     }
 
     private static func makeTranscriber(locale: Locale) -> SpeechTranscriber {
-        SpeechTranscriber(
+        var reportingOptions: Set<SpeechTranscriber.ReportingOption> = [.volatileResults]
+        if ASRExperimentOptions.current.fastResults {
+            reportingOptions.insert(.fastResults)
+        }
+        return SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [.etiquetteReplacements],
-            reportingOptions: [.volatileResults, .fastResults],
+            reportingOptions: reportingOptions,
             attributeOptions: [.transcriptionConfidence]
         )
     }

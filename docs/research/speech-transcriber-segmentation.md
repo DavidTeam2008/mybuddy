@@ -14,7 +14,7 @@
 4. **建议规则：句号只影响显示/TTS，不影响 `Utterance.id`。** 行只由真实边界关闭：range gap > 0.75 s、语言切换/name swap、静音计时器、max row 保险丝。分两步落：**R0** 删除标点关行，直接修复本次假拆分；**R1** 把静音计时器改为能关闭“只有 final phrase、没有 volatile”的行，否则长停顿且下一 range 连续时仍会合并。`isFinal` 先保持 F0（现状，所有 phrase final 就发 final）；F1（关行才 final）另开 ticket。优先合并而不是拆开：假合并的伤害（一行两句、一次翻译、语义保留）小于假拆分（两个 ID、两条翻译、语义断裂）。
 5. **D8 决定了不能事后合并。** `Utterance.id` 是行/文字稿条目的唯一身份；`CaptionProjection` 一 ID 一条记录、不删除，`TranslationPipeline` 一 ID 一个 job。D8 只定义同一 ID 原地更新、新 ID 新行，没有“把两个已发布 ID 合并/删除”的语义；必须在发布第二个 ID 之前决定不拆（[D8]）。
 6. **最大未决风险是 range gap 是否可信。** 社区报告 per-word time ranges 背靠背、停顿会被下一个词的首个 range 吸收；如果 result 级 range 也如此，0.75 s gap 可能漏掉真实停顿。需要静音计时器兜底，必要时在 app 侧对已采集 PCM 做能量 VAD。真机验证项见 §8。
-7. **2026-11-27 夹具回归补丁**：R0/R1 让行身份正确，但短句被两种独立机制吞掉：finalized phrase 的 range 被 volatile 尾部膨胀后被当成短 final 的 revision（`preferredPhraseText` 更长者胜），以及 gap/language/cap 关行只关状态、不发布 open volatile。修复见 §8.1：tight range、same-phrase/same-audio-window 合并、disjoint 文本按 range 保留、boundary pending finals，以及 reviewer 发现的同音频误听替换/partial volatile tight range。单元 563/598、identity verifier clean（含 row82 回归 2 条）；全量中间跑 85 行/97.92%、全量 pending-final 82 行/98.99%、180 s 边界硬化 17 行/98.98%、全量边界硬化 84 行/98.81%（旧跑 93.33%、问题跑 90.44%）。row 82 修复后全量 85 行/99.43%/精确 97.99%/WER 2.08%，requiredCues 10/10；语义评审 5 critical/16 major（row 82 已修，余下为 ASR/翻译层）。P1-1 仍因 ASR、翻译语义和 row 47 corruptedOutput 不签收。
+7. **2026-11-27 夹具回归补丁**：R0/R1 让行身份正确，但短句被两种独立机制吞掉：finalized phrase 的 range 被 volatile 尾部膨胀后被当成短 final 的 revision（`preferredPhraseText` 更长者胜），以及 gap/language/cap 关行只关状态、不发布 open volatile。修复见 §8.1：tight range、same-phrase/same-audio-window 合并、disjoint 文本按 range 保留、boundary pending finals，以及 reviewer 发现的同音频误听替换/partial volatile tight range。单元 565/600、identity verifier clean（含 row82 回归 2 条）；全量中间跑 85 行/97.92%、全量 pending-final 82 行/98.99%、180 s 边界硬化 17 行/98.98%、全量边界硬化 84 行/98.81%（旧跑 93.33%、问题跑 90.44%）。row 82 修复后全量 85 行/99.43%/精确 97.99%/WER 2.08%，requiredCues 10/10；语义评审 5 critical/16 major（row 82 已修，余下为 ASR/翻译层）。P1-1 仍因 ASR、翻译语义和 row 47 corruptedOutput 不签收。
 
 ## 1. 观测证据
 
@@ -555,7 +555,7 @@ Apple Developer Forums 帖 731761 与 Stack Overflow 79005416 报告：iOS 17/18
 **验证**：
 
 - 新增确定性回归（`UtteranceAssemblerRangeTests`）：`shortFinalBetweenLongPhrasesSurvives`（完整首行序列）、`disjointFinalsWithOverlappingRangesSurvive`、`similarConsecutiveFinalsWithPaddedOverlapSurvive`、`distinctFinalInsidePartialVolatileKeepsBoth`、`sameAudioMishearingReplaced`、`shortSameAudioCorrectionReplacesPreview`、`volatilePaddingDoesNotReplaceNextFinal`、`outOfOrderFinalKeepsAudioOrder`、`containedDisjointFinalIsAuthoritative`、`gapClosePublishesOpenVolatile`、`gapClosePublishesPrefixAndVolatile`。
-- 单元：范围测试 63 条（含 `shortFinalInsideLongVolatileKeepsPreview`、`shortFinalCannotTruncateLongVolatile`）；全量 563 logical / 598 expanded，0 failed，0 skipped；`verify-utterance-identity` clean。关键回归用精确文本断言，不只 `.contains`，避免“同时保留误听和纠正”也通过。
+- 单元：范围测试 63 条（含 `shortFinalInsideLongVolatileKeepsPreview`、`shortFinalCannotTruncateLongVolatile`）；全量 565 logical / 600 expanded，0 failed，0 skipped；`verify-utterance-identity` clean。关键回归用精确文本断言，不只 `.contains`，避免“同时保留误听和纠正”也通过。
 - 真机夹具（同一音频起点）：
 
 | 运行 | 行数 | 覆盖 | 精确 | WER | 空译/乱码/前缀重复 | final p95 |
@@ -618,6 +618,24 @@ Apple Developer Forums 帖 731761 与 Stack Overflow 79005416 报告：iOS 17/18
 | 组装器 | 82 | 41 字符 volatile 有 range、无 final，store 只剩前后两句；见 §8.2 | 已修复，待真机复跑 |
 
 `Fernando` 在 `fix-full-edge` row 59 已正确出现，此前“for Nando”没有在该跑复现。P1-3 的下一步不是组装器补词，而是同一夹具 A/B：`.fastResults` 去留、`AnalysisContext.contextualStrings`（Cameron Russell、Lidia Yuknavitch、Fernando、Ben、TED、Design Thinking 等）与 `transcriptionConfidence` 诊断；任何低置信度丢 final 都不应默认开启。完整逐行 SD-A 标注见 [`fixture-semantic-review-2026-11-28.md`](fixture-semantic-review-2026-11-28.md)。
+
+### 8.4 P1-3 ASR A/B（2026-11-28，360 s 片段）
+
+同一 WAV 的 511–871 s 片段（TED 08:31–14:31），DEBUG-only 开关，单次运行，用于筛掉明显不划算的配置；不是统计显著的结论。
+
+| 配置 | 行数 | 覆盖 | 精确 | WER | 短句 | requiredCues | final p95 | 关键 ASR 文本 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| A baseline（fast） | 40 | 98.35% | 96.31% | 3.82% | 21/24 | 1/6 | 104.7 ms | Cameron Rushell；Lydia Yuknovich；Design thinkinging；`white men`/`days` 缺失 |
+| B no-fast | 73 | 95.67% | 92.88% | 7.38% | 20/24 | 3/6 | 61.4 ms | `White men` 与 `Design Thinking` 恢复，`four days` 出现；但 Cameron 变成 camera，行碎片化明显 |
+| C fast + context | 40 | 98.35% | 96.69% | 3.31% | 22/24 | 3/6 | 102.1 ms | **Cameron Russell** 与 `For four days, silence.` 恢复；Lidia/Design/`white men` 仍错 |
+| D no-fast + context | — | — | — | — | — | — | — | marker timeout（设备 unavailable，未产出证据） |
+
+结论：
+
+- **不关闭 `.fastResults`**：B 虽然恢复了几个词，但行数 40→73、WER 3.82→7.38、覆盖 98.35→95.67，明显不适合 live caption。
+- **contextualStrings 有轻微收益**：C 与 A 行数/覆盖相同，精确 +0.38 pp、WER −0.51 pp、短句 +1、required +2，p95 基本不变；但 Lidia Yuknavitch、Design Thinking、`white men` 仍未修复，且 term 列表是夹具专用，产品没有来源。
+- 单次 ASR 有随机波动，A/C 的差异需要重复或 full 13 min 复核；D 未完成。
+- 下一步：row 82 的 96 s 片段单独测 `life`（context 词表加 `life`/`There is the life…`），再决定是否值得为用户可提供的名称/术语做设置；不要默认启用词表偏置来“修”夹具。
 
 ## 9. 引用
 

@@ -141,6 +141,12 @@ tools/fixture-run.sh --codec m4a                 # 9 MB 级夹具，便于快速
 tools/fixture-run.sh --pacing max                # 只用于 ASR 筛选，墙钟窗口不保真
 tools/fixture-run.sh --start 511 --duration 30 --ground-truth /tmp/gt-30s.tsv --min-coverage 0.5
 tools/fixture-run.sh --baseline none              # 只做结构检查，不做相对基线
+
+# P1-3 ASR A/B（DEBUG-only；同一 360 s 片段切换 fastResults / contextualStrings）
+tools/fixture-run.sh --asr-fast-results no --run-id p13-nofast \
+  --start 511 --duration 360 --ground-truth /tmp/p13-360.tsv --min-coverage 0.5
+tools/fixture-run.sh --asr-context-terms "Cameron Russell,Lidia Yuknavitch,Fernando" --run-id p13-context \
+  --start 511 --duration 360 --ground-truth /tmp/p13-360.tsv --min-coverage 0.5
 ```
 
 前置：`Config/Local.xcconfig`、已连接的物理 iPhone、`ffmpeg`、`python3`、`docs/media/TED.mp3`。脚本会构建/安装 Debug、把夹具推到 App `Documents`、用 `-duiyi.fixtureAudio` 启动、轮询 `fixture-run-done.json`、结束 App、拉取证据并用 `tools/fixture-score.py` 计分。证据在 `.device-state/fixture-runs/<run-id>/`，不提交。
@@ -157,6 +163,8 @@ tools/fixture-run.sh --baseline none              # 只做结构检查，不做�
 | `-duiyi.fixtureSettleSeconds <n>` | EOF 后等待翻译落定的秒数（默认 10） |
 | `-duiyi.fixtureDeleteAfterRun YES` | 结束后删除设备上的夹具；脚本复用 `fixture-current.<ext>`，避免 72 MB 文件堆积 |
 | `-duiyi.storeFile fixture-<id>` | 隔离 SwiftData，避免污染真实历史 |
+
+P1-3 ASR A/B 使用 DEBUG-only 的两个开关：`--asr-fast-results no` 去掉 `SpeechTranscriber` 的 `.fastResults`；`--asr-context-terms "a,b"` 设置 `AnalysisContext.contextualStrings[.general]`。Release 默认仍是 fast + 无词表偏置；不要用低置信度丢 final。证据目录按 run-id 隔离，`--skip-build` 可复用同一安装包只换 launch args。
 
 判定边界：
 

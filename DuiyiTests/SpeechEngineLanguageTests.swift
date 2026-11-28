@@ -123,4 +123,26 @@ struct SpeechEngineLanguageTests {
             ) == .strict
         )
     }
+
+    @Test("ASR experiment flags parse fast results and contextual terms")
+    func asrExperimentFlagsParse() {
+        let options = ASRExperimentOptions.parse(arguments: [
+            "-duiyi.asrFastResults", "NO",
+            "-duiyi.asrContextTerms", "Cameron Russell, Lidia Yuknavitch, Fernando",
+        ])
+
+        #expect(options.fastResults == false)
+        #expect(
+            options.contextualStrings
+                == ["Cameron Russell", "Lidia Yuknavitch", "Fernando"]
+        )
+    }
+
+    @Test("ASR experiments default to fast results and no contextual bias")
+    func asrExperimentDefaults() {
+        let options = ASRExperimentOptions.parse(arguments: [])
+
+        #expect(options.fastResults)
+        #expect(options.contextualStrings.isEmpty)
+    }
 }

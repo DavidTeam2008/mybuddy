@@ -41,6 +41,8 @@ MIN_COVERAGE="0.90"
 BASELINE="$ROOT/tools/fixtures/ted-baseline.json"
 BASELINE_EXPLICIT=0
 GROUND_TRUTH_EXPLICIT=0
+ASR_FAST_RESULTS="yes"
+ASR_CONTEXT_TERMS=""
 
 usage() {
     cat <<'EOF'
@@ -58,6 +60,10 @@ Options:
   --ground-truth <path>  Cue TSV for scoring
   --baseline <path|none> Regression baseline (default: tools/fixtures/ted-baseline.json
                          for the default full WAV/realtime run; pass none to disable)
+  --asr-fast-results yes|no
+                         Toggle SpeechTranscriber.fastResults for A/B (default: yes)
+  --asr-context-terms <csv>
+                         AnalysisContext contextual strings for A/B (default: empty)
   --min-coverage <0-1>   Fail below this source coverage (default: 0.90)
   --skip-build           Reuse the installed app and last build
   -h, --help             Show this help
@@ -76,6 +82,8 @@ while [[ $# -gt 0 ]]; do
         --noise) NOISE=1; shift ;;
         --ground-truth) GROUND_TRUTH="$2"; GROUND_TRUTH_EXPLICIT=1; shift 2 ;;
         --baseline) BASELINE="$2"; BASELINE_EXPLICIT=1; shift 2 ;;
+        --asr-fast-results) ASR_FAST_RESULTS="$2"; shift 2 ;;
+        --asr-context-terms) ASR_CONTEXT_TERMS="$2"; shift 2 ;;
         --min-coverage) MIN_COVERAGE="$2"; shift 2 ;;
         --skip-build) SKIP_BUILD=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -98,6 +106,10 @@ fi
 if [[ -n "$BASELINE" && ! -f "$BASELINE" ]]; then
     printf 'Missing baseline: %s\n' "$BASELINE" >&2
     exit 1
+fi
+if [[ "$ASR_FAST_RESULTS" != "yes" && "$ASR_FAST_RESULTS" != "no" ]]; then
+    printf 'Unsupported --asr-fast-results: %s\n' "$ASR_FAST_RESULTS" >&2
+    exit 2
 fi
 
 config_value() {
@@ -153,6 +165,7 @@ echo "fixture: $FIXTURE_PATH"
 echo "sha256:  $(cut -d' ' -f1 "$EVIDENCE/fixture.sha256")"
 echo "info:    $(grep -E 'Data format|estimated duration' "$EVIDENCE/fixture-info.txt" | tr '\n' ' ')"
 echo "baseline: ${BASELINE:-none}"
+echo "asr:      fast=$ASR_FAST_RESULTS context=${ASR_CONTEXT_TERMS:-none}"
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
     echo "== build for device =="
@@ -218,6 +231,8 @@ xcrun devicectl device process launch \
     -duiyi.storeFile "fixture-$RUN_ID" \
     -duiyi.fixtureAudio "Documents/$FIXTURE_NAME" \
     -duiyi.fixturePacing "$PACING" \
+    -duiyi.asrFastResults "$ASR_FAST_RESULTS" \
+    -duiyi.asrContextTerms "$ASR_CONTEXT_TERMS" \
     -duiyi.fixtureAutoRun YES \
     -duiyi.fixtureSettleSeconds "$SETTLE" \
     -duiyi.fixtureDeleteAfterRun YES \
