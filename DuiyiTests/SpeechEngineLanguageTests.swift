@@ -1,4 +1,5 @@
 import Foundation
+import Speech
 import Testing
 @testable import Duiyi
 
@@ -144,5 +145,29 @@ struct SpeechEngineLanguageTests {
 
         #expect(options.fastResults)
         #expect(options.contextualStrings.isEmpty)
+    }
+
+    @Test("ASR confidence aggregates runs by character weight")
+    func asrConfidenceAggregates() {
+        var text = AttributedString("hello world")
+        if let hello = text.range(of: "hello") {
+            text[hello].transcriptionConfidence = 0.8
+        }
+        if let world = text.range(of: "world") {
+            text[world].transcriptionConfidence = 0.4
+        }
+
+        let stats = ASRConfidenceStats.from(text)
+
+        #expect(stats?.runCount == 2)
+        #expect(abs((stats?.minimum ?? 0) - 0.4) < 0.0001)
+        #expect(abs((stats?.mean ?? 0) - 0.6) < 0.0001)
+        #expect(stats?.buckets[4] == 5)
+        #expect(stats?.buckets[8] == 5)
+    }
+
+    @Test("ASR confidence is nil when the framework omits the attribute")
+    func asrConfidenceMissing() {
+        #expect(ASRConfidenceStats.from(AttributedString("plain")) == nil)
     }
 }

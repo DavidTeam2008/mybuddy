@@ -354,6 +354,47 @@ struct DiagnosticsRecorderTests {
         #expect(text.contains("\"asr.result\""))
     }
 
+    @Test("ASR confidence aggregates are recorded without caption text")
+    func asrConfidenceFields() throws {
+        let recorder = DiagnosticsRecorder()
+        recorder.beginSession(feature: .simultaneous, taskID: UUID())
+        recorder.record(
+            ASRDiagnosticsRecord(
+                language: .english,
+                textLength: 11,
+                isFinal: true,
+                synthetic: false,
+                scriptMismatch: false,
+                accepted: true,
+                published: true,
+                utteranceID: UUID(),
+                revision: false,
+                rangeStartSeconds: 1,
+                rangeDurationSeconds: 1,
+                resultsFinalizationTimeSeconds: 2,
+                style: "liveCaptions",
+                confidenceRunCount: 2,
+                confidenceMinimum: 0.4,
+                confidenceMean: 0.6,
+                confidenceBuckets: [0, 0, 0, 0, 5, 0, 0, 0, 5, 0]
+            )
+        )
+
+        let event = try #require(recorder.snapshot().events.first)
+        #expect(event.confidenceRunCount == 2)
+        #expect(event.confidenceMinimum == 0.4)
+        #expect(event.confidenceMean == 0.6)
+        #expect(event.confidenceBuckets == [0, 0, 0, 0, 5, 0, 0, 0, 5, 0])
+
+        let data = try #require(recorder.makeExportJSON())
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let events = try #require(object["events"] as? [[String: Any]])
+        #expect(events.first?["confidenceMean"] as? Double == 0.6)
+        #expect(events.first?["text"] == nil)
+    }
+
     @Test("Export is nil until a session exists")
     func exportRequiresSession() {
         let recorder = DiagnosticsRecorder()

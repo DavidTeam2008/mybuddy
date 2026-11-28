@@ -167,6 +167,51 @@ echo "info:    $(grep -E 'Data format|estimated duration' "$EVIDENCE/fixture-inf
 echo "baseline: ${BASELINE:-none}"
 echo "asr:      fast=$ASR_FAST_RESULTS context=${ASR_CONTEXT_TERMS:-none}"
 
+COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
+DIRTY=false
+if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+    DIRTY=true
+fi
+FIXTURE_SHA="$(cut -d' ' -f1 "$EVIDENCE/fixture.sha256")"
+XCODE_VERSION="$(xcodebuild -version 2>/dev/null | tr '\n' ' ' || true)"
+MACOS_VERSION="$(sw_vers -productVersion 2>/dev/null || true)"
+APP_PATH="$DERIVED_DATA/Build/Products/Debug-iphoneos/Duiyi.app"
+APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist" 2>/dev/null || true)"
+APP_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist" 2>/dev/null || true)"
+jq -n \
+    --arg runId "$RUN_ID" \
+    --arg commit "$COMMIT" \
+    --argjson dirty "$DIRTY" \
+    --arg fixtureSha256 "$FIXTURE_SHA" \
+    --arg groundTruth "$GROUND_TRUTH" \
+    --arg baseline "${BASELINE:-none}" \
+    --argjson start "$START" \
+    --argjson duration "$DURATION" \
+    --arg codec "$CODEC" \
+    --arg pacing "$PACING" \
+    --arg asrFastResults "$ASR_FAST_RESULTS" \
+    --arg asrContextTerms "$ASR_CONTEXT_TERMS" \
+    --argjson skipBuild "$([[ "$SKIP_BUILD" -eq 1 ]] && echo true || echo false)" \
+    --arg appVersion "$APP_VERSION" \
+    --arg appBuild "$APP_BUILD" \
+    --arg xcodeVersion "$XCODE_VERSION" \
+    --arg macOSVersion "$MACOS_VERSION" \
+    '{
+        schemaVersion: 1,
+        runId: $runId,
+        commit: $commit,
+        dirty: $dirty,
+        fixtureSha256: $fixtureSha256,
+        groundTruth: $groundTruth,
+        baseline: $baseline,
+        window: {startSeconds: $start, durationSeconds: $duration, codec: $codec, pacing: $pacing},
+        asr: {fastResults: $asrFastResults, contextTerms: $asrContextTerms},
+        skipBuild: $skipBuild,
+        app: {version: $appVersion, build: $appBuild},
+        toolchain: {xcode: $xcodeVersion, macOS: $macOSVersion}
+    }' > "$EVIDENCE/run-meta.json"
+echo "meta:     $EVIDENCE/run-meta.json"
+
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
     echo "== build for device =="
     xcodebuild \

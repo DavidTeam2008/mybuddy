@@ -125,6 +125,10 @@ final class DiagnosticsRecorder: DiagnosticsRecording, @unchecked Sendable {
                 rangeStart: record.rangeStartSeconds,
                 rangeDuration: record.rangeDurationSeconds,
                 resultsFinalizationTime: record.resultsFinalizationTimeSeconds,
+                confidenceRunCount: record.confidenceRunCount,
+                confidenceMinimum: record.confidenceMinimum,
+                confidenceMean: record.confidenceMean,
+                confidenceBuckets: record.confidenceBuckets,
                 style: record.style
             )
         )

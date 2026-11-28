@@ -24,6 +24,12 @@ struct ASRDiagnosticsRecord: Equatable, Sendable {
     var rangeDurationSeconds: Double?
     var resultsFinalizationTimeSeconds: Double?
     var style: String
+    /// Character-weighted confidence aggregates. Kept as primitives so Domain
+    /// does not import Speech; nil when the framework omitted the attribute.
+    var confidenceRunCount: Int? = nil
+    var confidenceMinimum: Double? = nil
+    var confidenceMean: Double? = nil
+    var confidenceBuckets: [Int]? = nil
 }
 
 struct TranslationSubmitRecord: Equatable, Sendable {
@@ -121,6 +127,10 @@ struct DiagnosticsEvent: Codable, Equatable, Sendable {
     var rangeStart: Double?
     var rangeDuration: Double?
     var resultsFinalizationTime: Double?
+    var confidenceRunCount: Int?
+    var confidenceMinimum: Double?
+    var confidenceMean: Double?
+    var confidenceBuckets: [Int]?
     var style: String?
     var sourceLanguage: String?
     var targetLanguage: String?

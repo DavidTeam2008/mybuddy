@@ -41,6 +41,44 @@ struct ASRExperimentOptions: Equatable, Sendable {
     }
 }
 
+/// Character-weighted transcription confidence for one ASR result. Diagnostic
+/// only: it never participates in acceptance, publishing, or selection.
+struct ASRConfidenceStats: Equatable, Sendable {
+    var runCount: Int
+    var minimum: Double
+    var mean: Double
+    /// Ten 0.1-wide buckets, weighted by characters.
+    var buckets: [Int]
+
+    static func from(_ text: AttributedString) -> ASRConfidenceStats? {
+        var runCount = 0
+        var characterCount = 0
+        var minimum = Double.infinity
+        var weightedSum = 0.0
+        var buckets = Array(repeating: 0, count: 10)
+
+        for run in text.runs {
+            guard let confidence = run.transcriptionConfidence else { continue }
+            let count = text[run.range].characters.count
+            guard count > 0 else { continue }
+            runCount += 1
+            characterCount += count
+            minimum = Swift.min(minimum, confidence)
+            weightedSum += confidence * Double(count)
+            let bucket = Swift.min(9, Swift.max(0, Int(confidence * 10)))
+            buckets[bucket] += count
+        }
+
+        guard characterCount > 0 else { return nil }
+        return ASRConfidenceStats(
+            runCount: runCount,
+            minimum: minimum,
+            mean: weightedSum / Double(characterCount),
+            buckets: buckets
+        )
+    }
+}
+
 actor BilingualSpeechEngine: SpeechRecognizing {
     private let capturer: AudioCapturing
     private let diagnostics: any DiagnosticsRecording
@@ -357,13 +395,15 @@ actor BilingualSpeechEngine: SpeechRecognizing {
                 do {
                     for try await result in transcriber.results {
                         let text = String(result.text.characters)
+                        let confidence = ASRConfidenceStats.from(result.text)
                         await self?.handleTranscription(
                             language: language,
                             text: text,
                             isFinal: result.isFinal,
                             rangeStart: Self.seconds(result.range.start),
                             rangeDuration: Self.seconds(result.range.duration),
-                            resultsFinalizationTime: Self.seconds(result.resultsFinalizationTime)
+                            resultsFinalizationTime: Self.seconds(result.resultsFinalizationTime),
+                            confidence: confidence
                         )
                     }
                 } catch is CancellationError {
@@ -482,7 +522,8 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         isFinal: Bool,
         rangeStart: Double?,
         rangeDuration: Double?,
-        resultsFinalizationTime: Double?
+        resultsFinalizationTime: Double?,
+        confidence: ASRConfidenceStats? = nil
     ) {
         if Date() < ignoreTranscriptionUntil {
             return
@@ -511,7 +552,8 @@ actor BilingualSpeechEngine: SpeechRecognizing {
                 utterance: pending,
                 rangeStart: nil,
                 rangeDuration: nil,
-                resultsFinalizationTime: nil
+                resultsFinalizationTime: nil,
+                confidence: nil
             )
         }
         guard let utterance else {
@@ -526,7 +568,8 @@ actor BilingualSpeechEngine: SpeechRecognizing {
                 utterance: nil,
                 rangeStart: rangeStart,
                 rangeDuration: rangeDuration,
-                resultsFinalizationTime: resultsFinalizationTime
+                resultsFinalizationTime: resultsFinalizationTime,
+                confidence: confidence
             )
             return
         }
@@ -542,7 +585,8 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             utterance: utterance,
             rangeStart: rangeStart,
             rangeDuration: rangeDuration,
-            resultsFinalizationTime: resultsFinalizationTime
+            resultsFinalizationTime: resultsFinalizationTime,
+            confidence: confidence
         )
         if Self.shouldAcknowledgeFinal(utterance) {
             assembler.acknowledgeFinal(language: utterance.language)
@@ -568,7 +612,8 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             utterance: utterance,
             rangeStart: nil,
             rangeDuration: nil,
-            resultsFinalizationTime: nil
+            resultsFinalizationTime: nil,
+            confidence: nil
         )
     }
 
@@ -583,7 +628,8 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         utterance: Utterance?,
         rangeStart: Double?,
         rangeDuration: Double?,
-        resultsFinalizationTime: Double?
+        resultsFinalizationTime: Double?,
+        confidence: ASRConfidenceStats?
     ) {
         diagnostics.record(
             ASRDiagnosticsRecord(
@@ -599,7 +645,11 @@ actor BilingualSpeechEngine: SpeechRecognizing {
                 rangeStartSeconds: rangeStart,
                 rangeDurationSeconds: rangeDuration,
                 resultsFinalizationTimeSeconds: resultsFinalizationTime,
-                style: styleName
+                style: styleName,
+                confidenceRunCount: confidence?.runCount,
+                confidenceMinimum: confidence?.minimum,
+                confidenceMean: confidence?.mean,
+                confidenceBuckets: confidence?.buckets
             )
         )
     }
