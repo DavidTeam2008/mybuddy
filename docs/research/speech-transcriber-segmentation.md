@@ -612,6 +612,7 @@ Apple Developer Forums 帖 731761 与 Stack Overflow 79005416 报告：iOS 17/18
 | 漏词/误听改变意思 | 43 | `designs` → `Dess` | ASR |
 | 漏词/误听改变意思 | 67 | `I remind` 缺失 | ASR；该行 volatile 最长 36 字符，正好等于保留文本 |
 | 漏词/误听改变意思 | 81 | `yours to break` → `yours to bring` | ASR |
+| 漏词/误听改变意思 | 13/14（2026-11-28 全量复跑） | `For four days, silence.` → `for four` + `Silence.`（`days` 缺失） | ASR；requiredCue/短句门限正确失败 |
 | 表面变体（内容仍可懂） | 7/8/38/63/71/73/83 | Rushell/Russell、Yuknovic/Yuknavitch、thinkinging/Thinking、TedED/TED、`of, of`、kindergartners、`until` 缺失 | ASR，不改变主旨 |
 | 组装器 | 82 | 41 字符 volatile 有 range、无 final，store 只剩前后两句；见 §8.2 | 已修复，待真机复跑 |
 
