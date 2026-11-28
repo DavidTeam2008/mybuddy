@@ -222,6 +222,58 @@ struct TranslationJobPumpTests {
         #expect(recorder.failures.first?.error is TranslationIntegrityError)
     }
 
+    @Test("A corrupted list sentence falls back to translating its clauses")
+    func corruptedListSentenceUsesClauseFallback() async {
+        let recorder = FakePumpRecorder()
+        let bridge = TranslationJobBridge()
+        let full = "I was astounded, proud, liberated, and confused."
+        let firstClause = "I was astounded, proud, liberated,"
+        let secondClause = "and confused."
+        let job = makeTranslationJob(utteranceID: UUID(), text: full, isFinal: true)
+        bridge.submit(job)
+
+        await runPump(
+            on: bridge.makeConsumer(),
+            recorder: recorder,
+            translate: { @Sendable text in
+                switch text {
+                case full: return "你\u{FFFD}好"
+                case firstClause: return "我感到很惊讶，很自豪，很解放了，"
+                case secondClause: return "并且感到困惑。"
+                default: Issue.record("unexpected translation input: \(text)")
+                    return "unexpected"
+                }
+            },
+            onSuccess: { _, _ in withUnsafeCurrentTask { $0?.cancel() } }
+        )
+
+        #expect(recorder.translatedTexts == [full, full, firstClause, secondClause])
+        #expect(
+            recorder.successes
+                == [FakePumpRecorder.Success(
+                    job: job,
+                    text: "我感到很惊讶，很自豪，很解放了，并且感到困惑。"
+                )]
+        )
+        #expect(recorder.failures.isEmpty)
+    }
+
+    @Test("The clause fallback splits only at a comma conjunction")
+    func clauseFallbackSplit() {
+        #expect(
+            TranslationFallback.split(
+                "I was astounded, proud, liberated, and confused."
+            ) == ["I was astounded, proud, liberated,", "and confused."]
+        )
+        #expect(
+            TranslationFallback.split(
+                "I was astounded, proud, liberated and confused."
+            ) == ["I was astounded, proud, liberated", "and confused."]
+        )
+        #expect(TranslationFallback.split("I was astounded, proud, liberated.") == nil)
+        #expect(TranslationFallback.split("No comma here.") == nil)
+    }
+
     @Test("One wakeup drains every job the consumer still holds")
     func oneWakeupDrainsEveryQueuedJob() async {
         let recorder = FakePumpRecorder()
