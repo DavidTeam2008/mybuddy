@@ -14,7 +14,7 @@
 4. **建议规则：句号只影响显示/TTS，不影响 `Utterance.id`。** 行只由真实边界关闭：range gap > 0.75 s、语言切换/name swap、静音计时器、max row 保险丝。分两步落：**R0** 删除标点关行，直接修复本次假拆分；**R1** 把静音计时器改为能关闭“只有 final phrase、没有 volatile”的行，否则长停顿且下一 range 连续时仍会合并。`isFinal` 先保持 F0（现状，所有 phrase final 就发 final）；F1（关行才 final）另开 ticket。优先合并而不是拆开：假合并的伤害（一行两句、一次翻译、语义保留）小于假拆分（两个 ID、两条翻译、语义断裂）。
 5. **D8 决定了不能事后合并。** `Utterance.id` 是行/文字稿条目的唯一身份；`CaptionProjection` 一 ID 一条记录、不删除，`TranslationPipeline` 一 ID 一个 job。D8 只定义同一 ID 原地更新、新 ID 新行，没有“把两个已发布 ID 合并/删除”的语义；必须在发布第二个 ID 之前决定不拆（[D8]）。
 6. **最大未决风险是 range gap 是否可信。** 社区报告 per-word time ranges 背靠背、停顿会被下一个词的首个 range 吸收；如果 result 级 range 也如此，0.75 s gap 可能漏掉真实停顿。需要静音计时器兜底，必要时在 app 侧对已采集 PCM 做能量 VAD。真机验证项见 §8。
-7. **2026-11-27 夹具回归补丁**：R0/R1 让行身份正确，但短句被两种独立机制吞掉：finalized phrase 的 range 被 volatile 尾部膨胀后被当成短 final 的 revision（`preferredPhraseText` 更长者胜），以及 gap/language/cap 关行只关状态、不发布 open volatile。修复见 §8.1：tight range、same-phrase/same-audio-window 合并、disjoint 文本按 range 保留、boundary pending finals，以及 reviewer 发现的同音频误听替换/partial volatile tight range。单元 559/594、identity verifier clean；全量中间跑 85 行/97.92%、全量 pending-final 82 行/98.99%、180 s 边界硬化 17 行/98.98%、全量边界硬化 84 行/98.81%（旧跑 93.33%、问题跑 90.44%）。最终 13 min A/B 与语义评审完成前，P1-1 不签收。
+7. **2026-11-27 夹具回归补丁**：R0/R1 让行身份正确，但短句被两种独立机制吞掉：finalized phrase 的 range 被 volatile 尾部膨胀后被当成短 final 的 revision（`preferredPhraseText` 更长者胜），以及 gap/language/cap 关行只关状态、不发布 open volatile。修复见 §8.1：tight range、same-phrase/same-audio-window 合并、disjoint 文本按 range 保留、boundary pending finals，以及 reviewer 发现的同音频误听替换/partial volatile tight range。单元上次 559/594、identity verifier clean（新增 row82 回归 2 条后为 561 条声明；本次会话无 Xcode 未重跑 Swift 套件）；全量中间跑 85 行/97.92%、全量 pending-final 82 行/98.99%、180 s 边界硬化 17 行/98.98%、全量边界硬化 84 行/98.81%（旧跑 93.33%、问题跑 90.44%）。最终 13 min A/B 与语义评审完成前，P1-1 不签收。
 
 ## 1. 观测证据
 
@@ -555,7 +555,7 @@ Apple Developer Forums 帖 731761 与 Stack Overflow 79005416 报告：iOS 17/18
 **验证**：
 
 - 新增确定性回归（`UtteranceAssemblerRangeTests`）：`shortFinalBetweenLongPhrasesSurvives`（完整首行序列）、`disjointFinalsWithOverlappingRangesSurvive`、`similarConsecutiveFinalsWithPaddedOverlapSurvive`、`distinctFinalInsidePartialVolatileKeepsBoth`、`sameAudioMishearingReplaced`、`shortSameAudioCorrectionReplacesPreview`、`volatilePaddingDoesNotReplaceNextFinal`、`outOfOrderFinalKeepsAudioOrder`、`containedDisjointFinalIsAuthoritative`、`gapClosePublishesOpenVolatile`、`gapClosePublishesPrefixAndVolatile`。
-- 单元：范围测试 61/61；全量 559 logical / 594 expanded，0 failed；`verify-utterance-identity` clean。关键回归用精确文本断言，不只 `.contains`，避免“同时保留误听和纠正”也通过。
+- 单元：范围测试 63 条（新增 `shortFinalInsideLongVolatileKeepsPreview`、`shortFinalCannotTruncateLongVolatile`）；上次全量 559 logical / 594 expanded，0 failed；`verify-utterance-identity` clean。本次会话无 Xcode，未重跑 Swift 套件；row82 与同音频纠正用独立 Swift 断言验证。关键回归用精确文本断言，不只 `.contains`，避免“同时保留误听和纠正”也通过。
 - 真机夹具（同一音频起点）：
 
 | 运行 | 行数 | 覆盖 | 精确 | WER | 空译/乱码/前缀重复 | final p95 |
@@ -567,15 +567,16 @@ Apple Developer Forums 帖 731761 与 Stack Overflow 79005416 报告：iOS 17/18
 | 上述 + reviewer 边界修复，180 s | 17 | **98.98%** | 96.68% | 3.32% | 0 / 0 / 0 | 153.1 ms |
 | 上述 + reviewer 边界修复，全量 13 min | 84 | **98.81%** | 97.48% | 2.64% | 0 / 0 / 0 | 100.5 ms |
 
-- 全量中间跑的第 0 行包含 `She'll perform better.` 和 `She'll perform worse.`；180 s 边界硬化跑第 10 行把 `It's the shame we carry. The shame of not believing we deserve it.` 保持为一行，第 13 行包含 `we'll call him Ben.`，第 14 行包含 `How would you interpret this?`。这些都是旧问题跑丢失、修复后恢复的短句。全量边界硬化前跑 82 行、覆盖 98.99%、WER 2.45%；全量边界硬化后 84 行、覆盖 98.81%、WER 2.64%；两次都是 0 空译/0 U+FFFD/0 前缀重复/0 行内重复。
-- 残余漏词主要是 ASR：`white men perform better.` 在两次运行里都只识别成 `perform better.`（final 文本本身缺少主语）；`The shame…` 的 180 s 跑恢复完整，但全量中间跑仍受 ASR 变体影响。不要用组装器规则去补 ASR 没给的词。
+- 全量中间跑的第 0 行包含 `She'll perform better.` 和 `She'll perform worse.`；180 s 边界硬化跑第 10 行把 `It's the shame we carry. The shame of not believing we deserve it.` 保持为一行，第 13 行包含 `we'll call him Ben.`，第 14 行包含 `How would you interpret this?`。这些都是旧问题跑丢失、修复后恢复的短句。全量边界硬化前跑 82 行、覆盖 98.99%、WER 2.45%；全量边界硬化后 84 行、覆盖 98.81%、WER 2.64%（row 82 修复前）；两次都是 0 空译/0 U+FFFD/0 前缀重复/0 行内重复。
+- 残余漏词主要是 ASR：`white men perform better.` 在两次运行里都只识别成 `perform better.`（final 文本本身缺少主语）；`The shame…` 的 180 s 跑恢复完整，但全量中间跑仍受 ASR 变体影响。全量边界硬化跑里，`called Design Thinking Boot Camp` 被识别成 `called Design thinkinging Boot Camp`，`Recent graduates of kindergarten` 被识别成 `Recent graduates. of, of kindergarten`；`Fernando` 已在第 59 行正确出现。短句门限会把后两者标成 missing，需要按“ASR 表面变体”和“真漏词”分流，不能直接归因组装器。不要用组装器规则去补 ASR 没给的词。
 - 全量中间跑有 2 次 `corruptedOutput`（同一行 47，`I was astounded, proud, liberated, and confused.`），完整性闸门保留了更早的 preview 译文（结尾停在“解放了，”）；旧跑在同一段文本也有 2 次损坏。这是 TranslationSession 的可靠性问题，不是行合并新引入的。
-- 全量最终代码的 13 min A/B 见 `.device-state/fixture-runs/fix-full-final/`（不提交）；验收必须看“短句是否保留”与相对基线，不以 `--min-coverage 0.90` 的 PASS 作为质量签收。
+- 全量最终代码的 13 min A/B 见 `.device-state/fixture-runs/fix-full-edge/`（不提交）；`fix-full-final` 是边界硬化前的 pending-final 版本。验收必须看“短句是否保留”与相对基线，不以 `--min-coverage 0.90` 的 PASS 作为质量签收。
 
-**翻译效果**：第 0 行的新译文包含恢复的两句；旧跑同段短句各自有译文。当前证据支持“译文变差主要是源文被吞”的下游结果，而不是翻译模块单独回退：155 个 final job 全部应用、无空译/U+FFFD/前缀重复。长行（>120 字）是否降低译文质量仍需语义评审，不能只靠 CJK 行数。
+**翻译效果**：第 0 行的新译文包含恢复的两句；旧跑同段短句各自有译文。当前证据支持“这一轮译文变差主要是源文被吞”的下游结果，而不是翻译模块单独回退：155 个 final job 全部应用、无空译/U+FFFD/前缀重复。但 84 行语义评审仍发现 5 critical/16 major（含 row 82 组装器丢句和 `big one`/`working to break`/`and confused` 等翻译层错误），所以只能结论“本次回归不是翻译模块新引入”，不能结论“翻译语义质量已通过”。详见 §8.2。
 
 **仍未解决（不要混入本修复）**：
 
+- row 82 的 `There is the life that you can be living.` 已由 `sameVolatilePhrase`/`shouldReplaceSameAudio` 修复，但修复后尚未重跑 13 min 真机夹具；`requiredCues` canary 已能抓住修复前版本。
 - ASR final 自身可能漏词：40 s 跑的第 1 行 final 以 `perform better.` 开头，`white men` 在 volatile/final 文本里就没有出现；组装器不能凭空补回。归 P1-3。
 - “final 与已有 phrase 在同一音频窗口内、但文本完全不同”仍按 final authoritative 替换；这是同音频误听纠正的取舍（reviewer 的 `Headset off.` 案例已改为 tight range，不再由 speculative tail 触发替换），需更多真机样本校准。
 - 乱序/重复 final 的插入顺序已按 range 排序；same-audio 纠正不再拆成两句，但只有 padding 重叠、文本又不同时仍可能重复而非丢失。
@@ -583,7 +584,18 @@ Apple Developer Forums 帖 731761 与 Stack Overflow 79005416 报告：iOS 17/18
 - 双 locale 的 `preemptsIfNeeded` 仍会在语言抢占时移除原语言 state，没有 pending final；reviewer 已用 `They also cause us` + 中文 final 复现，单路夹具不覆盖。这是 pre-existing 的 crosstalk/路由取舍，需要面对面双路 A/B 决定是否改为关旧行/发 final。
 - 关闭 range 的 late volatile 若没有扩展，仍被忽略；如果它含有未发布的新词，旧行只保留旧文本，内容可能丢失。这是 closed-row 修订策略的残余风险，需要专门样本。
 - pending final 在 gap 边界如果 volatile 文本已经包含了下一句（preview 跨越停顿），可能和新行重复；全量夹具要检查行内/相邻重复。
-- 夹具 0.90 门限仍是健全性检查；需要相对基线（同一夹具上一次 run）或短句保留检查作为回归门。
+- 夹具 0.90 门限仍是健全性检查；2026-11-28 已加相对基线与 ≤5 词短句保留门（`tools/fixtures/ted-baseline.json`、`tools/fixture-score.py`、`tools/fixture-run.sh`）。91 行问题跑会在覆盖/精确/WER/短句四项全部失败，`fix-full-final` 的 `For four days, silence.` 缺失也会被短句门限拦下。该门限是机械回归检查，不是语义签收。
+
+### 8.2 语义评审与 row 82 丢句修复（2026-11-28）
+
+对 `fix-full-edge` 的 84 行做了逐行 LLM 语义评审（source vs translation vs TED ground truth；这是筛查，不是人工签收；完整表见 [`fixture-semantic-review-2026-11-28.md`](fixture-semantic-review-2026-11-28.md)）：
+
+- 5 个 critical：row 0/1（`white men` 不在源文，ASR 侧）、row 33（`It seems a big one.` → “这看起来是个大人物。”）、row 66（`I'm working to break.` → “我正在努力休息。”）、row 67（`myself of the marshmallow challenge` → “我自己挑战棉花糖”）、row 82（组装器丢句，见下）。row 82 已在代码中修复，修复后剩余 4 个 critical 均为 ASR/翻译层；设备复跑前不更新评审计数。
+- 16 个 major、38 个 minor、25 行无问题；24 行源文缺陷中 23 行归 ASR，1 行归组装器（row 82）。剩余翻译错误包括 `big one`、`working to break`、`and confused` 缺失、`pastor`/`got the best of him`、`ping ponging` 直译等；旧跑同段已存在，不是本次修复新引入。
+- **row 82 的组装器根因已复现并修复**：41 字符 volatile `There is the life that you can be living.` 的 range 为 766.912–770.859；下一句 `If you break your ropes.` 的首个 volatile 片段 `you` 出现在 769.912，落在旧 volatile 的 padding 尾部。旧逻辑用 `sameAudioWindow` + 文本包含把 `you` 当成同一 phrase 的修订，覆盖了 41 字符 preview；最终 row 82 只剩前后两句。另一个同源路径是短 final（8 字符）在长 volatile 的同一音频窗口内通过 `shouldReplaceSameAudio` 的起始位置检查，把长 preview 截断。
+- 修复：`sameVolatilePhrase` 要求新 volatile 的 start 仍在旧 phrase 的 `max(0.5 s, 25% duration)` 内才允许原地更新；`shouldReplaceSameAudio` 在 incoming 文本不足 existing 一半时拒绝替换，保留 preview 并插入 final。回归 `shortFinalInsideLongVolatileKeepsPreview`、`shortFinalCannotTruncateLongVolatile`；独立 Swift 断言复现 row 82 修复且 `I scream→ice cream`、`oh→Okay` 仍替换；`verify-utterance-identity` clean。
+- 短句门限抓不到 row 82，因为该 clause 是 8 词；`tools/fixtures/ted-baseline.json` 因此增加了 `requiredCues` canary（含 `there is the life that you can be living if you break your ropes.`、silence、Ben、Headset off、I still have ropes 等）。用修复前的 `fix-full-edge` 计分时 `requiredCueMissing` 正好是该 clause，门限会失败；这是先验证门限能抓住已知回归，不是修复后的设备结果。
+- **待办**：用含 row 82 修复的构建重跑 13 min 夹具，确认该 clause 回到文字稿、且 84 行指标不回退；在重跑前，上表的 84 行/98.81% 只能标为“row 82 修复前”。该 LLM 评审的 critical/major 仍需人工抽样校准，不能单独作为 P1-1 签收。
 
 ## 9. 引用
 

@@ -1104,4 +1104,55 @@ struct UtteranceAssemblerRangeTests {
         #expect(late.language == .english)
         #expect(late.isRevision == true)
     }
+
+    @Test("A short final inside a long volatile cannot delete the preview")
+    func shortFinalInsideLongVolatileKeepsPreview() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "No matter who you are or where you are in this moment.",
+            range(761.033, 766.733),
+            isFinal: true
+        )
+        _ = try requireIngest(
+            &assembler,
+            "There is the life that you can be living.",
+            range(766.912, 770.859)
+        )
+        // The next phrase starts inside the preview's padded tail. Its first
+        // volatile chunk is a short word that also occurs in the preview.
+        _ = try requireIngest(&assembler, "you", range(769.912, 770.986))
+        _ = try requireIngest(&assembler, "If you break", range(769.912, 771.819))
+        let next = try requireIngest(
+            &assembler,
+            "If you break your ropes.",
+            range(769.972, 772.852),
+            isFinal: true
+        )
+
+        #expect(
+            next.text
+                == "No matter who you are or where you are in this moment. "
+                + "There is the life that you can be living. If you break your ropes."
+        )
+    }
+
+    @Test("A short final inside a long volatile cannot truncate the preview")
+    func shortFinalCannotTruncateLongVolatile() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "There is the life that you can be living.",
+            range(766.912, 770.859)
+        )
+        let next = try requireIngest(
+            &assembler,
+            "You only.",
+            range(767.152, 769.912),
+            isFinal: true
+        )
+
+        #expect(next.text.contains("There is the life that you can be living."))
+        #expect(next.text.contains("You only."))
+    }
 }

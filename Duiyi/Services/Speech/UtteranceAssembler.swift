@@ -553,8 +553,8 @@ struct UtteranceAssembler: Sendable {
                    Self.describesSamePhrase(volatile.text, text) {
                     candidate = Self.mergeVolatile(volatile, final: candidate)
                 } else if Self.shouldReplaceSameAudio(
-                    existing: volatile.range,
-                    incoming: range
+                    existing: volatile,
+                    incoming: candidate
                 ) {
                     // A different text over the same audio is a re-hearing
                     // ("I scream" -> "ice cream"), not a second phrase. Keep
@@ -598,8 +598,8 @@ struct UtteranceAssembler: Sendable {
                 )
                 state.finalized[index].range = existing.range.union(candidate.range)
             } else if Self.shouldReplaceSameAudio(
-                existing: existing.range,
-                incoming: candidate.range
+                existing: existing,
+                incoming: candidate
             ) {
                 // The same audio answered differently. A transcriber final is
                 // authoritative for that audio.
@@ -619,8 +619,10 @@ struct UtteranceAssembler: Sendable {
         to state: inout LanguageRangeState
     ) {
         if let volatile = state.volatile, volatile.range.overlaps(range) {
-            if Self.sameAudioWindow(volatile.range, range),
-               Self.describesSamePhrase(volatile.text, text) {
+            if Self.sameVolatilePhrase(
+                existing: volatile,
+                incoming: RangePhrase(text: text, range: range)
+            ) {
                 state.volatile = RangePhrase(
                     text: text,
                     range: volatile.range.union(range)
@@ -717,6 +719,28 @@ struct UtteranceAssembler: Sendable {
         )
     }
 
+    /// A volatile update continues the same phrase only when its range still
+    /// starts near the existing preview. A short fragment from the next phrase
+    /// ("you") can be contained in the preview's text and overlap its padded
+    /// tail; treating that as a revision replaces the preview with the
+    /// fragment and deletes words the user already saw.
+    private static func sameVolatilePhrase(
+        existing: RangePhrase,
+        incoming: RangePhrase
+    ) -> Bool {
+        guard sameAudioWindow(existing.range, incoming.range) else { return false }
+        let startTolerance = max(0.5, existing.range.duration * 0.25)
+        guard incoming.range.start <= existing.range.start + startTolerance else {
+            return false
+        }
+        let existingText = SpokenText.compact(existing.text)
+        let incomingText = SpokenText.compact(incoming.text)
+        if incomingText.count * 2 < existingText.count {
+            return false
+        }
+        return describesSamePhrase(existing.text, incoming.text)
+    }
+
     /// True when the two ranges describe mostly the same audio window, not
     /// merely adjacent phrases with a padded overlap. A volatile revision of
     /// one phrase keeps (or grows) the same start; a new phrase starts later.
@@ -733,13 +757,23 @@ struct UtteranceAssembler: Sendable {
     /// and only covers the tail is a new phrase inside the preview's padded
     /// range; keep both rather than deleting the earlier text.
     private static func shouldReplaceSameAudio(
-        existing: SpeechRange,
-        incoming: SpeechRange
+        existing: RangePhrase,
+        incoming: RangePhrase
     ) -> Bool {
-        guard sameAudioWindow(existing, incoming) else { return false }
-        if incoming.contains(existing) { return true }
-        guard existing.duration > 0 else { return true }
-        let startFraction = (incoming.start - existing.start) / existing.duration
+        guard sameAudioWindow(existing.range, incoming.range) else { return false }
+        let existingText = SpokenText.compact(existing.text)
+        let incomingText = SpokenText.compact(incoming.text)
+        if incomingText.count * 2 < existingText.count {
+            // A final much shorter than the preview is a truncation or a
+            // fragment, not a re-hearing. Replacing would delete words the
+            // user already saw; keep the preview and insert the final after
+            // it instead.
+            return false
+        }
+        if incoming.range.contains(existing.range) { return true }
+        guard existing.range.duration > 0 else { return true }
+        let startFraction = (incoming.range.start - existing.range.start)
+            / existing.range.duration
         return startFraction <= 0.6
     }
 
