@@ -60,7 +60,7 @@ The output has two sections, `Text-only path` and `Range-aware path`. Each prope
 
 The counts are depth-scoped and count each sequence once per property (its first violation of that property).
 
-## Current state (verified 2026-11-27, based on `ef166ff`)
+## Current state (verified 2026-11-28, based on `40d9aa7`)
 
 The run exits `0` with all three properties clean: the text pass checks `finalized-text-identity` and `settled-language-identity`, the range pass checks `range-settled-language-identity`.
 
@@ -86,7 +86,7 @@ A clean run is the state to preserve. If any property reports a violation, treat
 ## Coverage and sync
 
 - Covered: the files and functions listed under **What is verified**. `ScriptCounts`/`AppLanguage` changes are caught only through the corpus preconditions and the run's confidence/preemption behavior.
-- Sync commit: `ef166ff`. The text and range fixes, the range refactor, and the verifier were confirmed clean there; move it forward only after the next covered change is rechecked.
+- Sync commit: `40d9aa7`. The row-82 volatile-range fix (`sameVolatilePhrase` + `shouldReplaceSameAudio` text guard) was rechecked clean after the change; the earlier text/range fixes and verifier were confirmed at `ef166ff`. Move it forward only after the next covered change is rechecked.
 - When covered code changes after the sync commit, re-run the check and read the diff. Move the sync commit forward **only after** confirming the verification still describes the code — update the alphabet, corpus, or properties if the behavior space changed. Use the pstack `maintain-formal-verification-skill` workflow when the verification needs to be brought back in line.
 - The check is clean and costs about 18 s. Consider adding it to the release checklist. It stays out of `tools/test-unit.sh` and the pre-commit hook unless the team wants the gate.
 

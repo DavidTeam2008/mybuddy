@@ -4,7 +4,9 @@ import Foundation
 import Speech
 
 /// DEBUG-only ASR A/B configuration. Production defaults to the current
-/// fast-results/no-bias behavior; fixture launches can flip either switch.
+/// fast-results/no-bias behavior; fixture launches can flip the fast switch.
+/// `contextualStrings` is retained only for future OS re-tests: Apple docs and
+/// forum thread 811083 say SpeechTranscriber currently ignores it.
 struct ASRExperimentOptions: Equatable, Sendable {
     var fastResults = true
     var contextualStrings: [String] = []
@@ -303,6 +305,9 @@ actor BilingualSpeechEngine: SpeechRecognizing {
             : nil
         let analyzer = SpeechAnalyzer(modules: modules, options: options)
         self.analyzer = analyzer
+        // SpeechTranscriber currently does not consume contextualStrings
+        // (Apple forum 811083). Keep this DEBUG path for future OS re-tests,
+        // but it must not be treated as a proper-name fix.
         let contextTerms = ASRExperimentOptions.current.contextualStrings
         if !contextTerms.isEmpty {
             var context = AnalysisContext()

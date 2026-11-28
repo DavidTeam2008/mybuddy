@@ -623,6 +623,8 @@ Apple Developer Forums 帖 731761 与 Stack Overflow 79005416 报告：iOS 17/18
 
 同一 WAV 的 511–871 s 片段（TED 08:31–14:31），DEBUG-only 开关，单次运行，用于筛掉明显不划算的配置；不是统计显著的结论。
 
+> **2026-11-28 研究更正**：Apple DocC 只把 `contextualStrings` 的偏置能力写给 `DictationTranscriber`，Apple 工程师论坛 811083 明确 `SpeechTranscriber` 当前不消费它。因此 C/C2/D 和 full context 里的“context”实际是 no-op；这些跑次与 A/B（fast）的差异只能视为 ASR 随机波动，**不能归因于词表偏置**。D10 不默认启用。根因与复测计划见 [`asr-accuracy-root-cause-2026-11-28.md`](asr-accuracy-root-cause-2026-11-28.md)。
+
 | 配置 | 行数 | 覆盖 | 精确 | WER | 短句 | requiredCues | final p95 | 关键 ASR 文本 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | A baseline（fast） | 40 | 98.35% | 96.31% | 3.82% | 21/24 | 1/6 | 104.7 ms | Cameron Rushell；Lydia Yuknovich；Design thinkinging；`white men`/`days` 缺失 |
@@ -644,11 +646,11 @@ full 13 min context 两次：
 结论：
 
 - **不关闭 `.fastResults`**：B 虽然恢复了几个词，但行数 40→73、WER 3.82→7.38、覆盖 98.35→95.67，明显不适合 live caption。
-- **contextualStrings 有轻微收益且部分可重复**：C/C2 两次精确都是 96.69%、WER 都是 3.31%，都恢复了 `For four days, silence.`；但 Cameron Russell 只在 C 恢复、C2 仍是 Rushell，Lidia/Design/`white men` 始终未修复。term 列表是夹具专用，产品没有来源。
-- ASR 仍有随机波动：A1/A2 baseline 的 WER 是 3.82%/3.69%，C/C2 都是 3.31%，context 的 WER 收益在两次 baseline 对照下仍存在；但 days 在 A2 也恢复，Cameron 只在 C1 恢复，专名不稳定。D 也完成：虽然恢复 `White men`/`Design Thinking`，但 71 行、覆盖 95.80%、WER 6.62%，Cameron/Lidia 仍错，确认 no-fast 路径不划算。
-- full 13 min context 两次 WER 2.01%/2.83%，baseline `row82-fix-full-1` 2.08%，没有稳定优于 baseline；required 10/10 但专名/`white men`/Design 仍错，短句 41/43 因 ASR 波动。context 不能作为默认修复。
+- **context 差异是 ASR 随机波动，不是词表偏置**：C/C2 两次精确都是 96.69%、WER 都是 3.31%，但 SpeechTranscriber 不消费 `contextualStrings`（Apple DocC/论坛 811083）；同一配置下 Cameron Russell 一次正确、一次 Rushell，Lidia/Design/`white men` 始终未修复。没有证据表明词表偏置对 SpeechTranscriber 生效。
+- ASR 仍有随机波动：A1/A2 baseline 的 WER 是 3.82%/3.69%，C/C2 都是 3.31%，差异在单次 ASR 波动范围内；days 在 A2 也恢复，Cameron 只在 C1 恢复。D 也完成：虽然恢复 `White men`/`Design Thinking`，但 71 行、覆盖 95.80%、WER 6.62%，Cameron/Lidia 仍错，确认 no-fast 路径不划算。
+- full 13 min 的三次 WER 2.01%/2.83%/2.08%，没有稳定优于 baseline；required 10/10 但专名/`white men`/Design 仍错，短句 41/43 因 ASR 波动。context 不能作为默认修复，也不能作为已生效的证据。
 - row 82 `life` 的 96 s 对照：baseline 11 行/100%/100%/WER 0/required 1/1；context 10 行/98.84%/98.26%/WER 2.33/required 1/1。两者都保留完整 clause，说明全量里的 `life` 丢失是随机/长窗 ASR 波动，context 无额外收益。
-- 下一步：不要默认启用夹具专用词表；若做 P1-3 后续，优先评估“用户可提供的名称/术语”设置、`alternativeTranscriptions` 选词和置信度诊断；任何低置信度丢 final 都不应默认开启。
+- 下一步：不要默认启用 contextualStrings（当前对 SpeechTranscriber 是 no-op）；真正 Apple 支持的词表路径是 `DictationTranscriber` + 自定义 LM（later spike）。P1-3 优先补 fixture-only raw ASR 证据包、置信度只读诊断和 canary 归因，再评估用户术语表（assembler 之后按 ID canonicalize）与 final-only alternatives 选词；任何低置信度丢 final 都不应默认开启。完整方案见 [`asr-accuracy-root-cause-2026-11-28.md`](asr-accuracy-root-cause-2026-11-28.md)。
 
 ## 9. 引用
 

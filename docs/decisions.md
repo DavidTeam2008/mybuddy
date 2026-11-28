@@ -18,11 +18,11 @@
 | D8 | 字幕/文字稿的 utterance identity | C04 前：`Utterance.id` 由 `UtteranceAssembler` 维护；投影层仍有跨 ID 文本相似度合并（`PaneState` + 三份 `upsertTranscript` + `TranslationPipeline` alias） | **`Utterance.id` 即 caption 行与 transcript 条目的唯一身份；assembler 独占新 ID 判定；同一 ID 同一行，新 ID 新行；不引入 `continuesFrom` / `groupID`；跨 ID 文本相似度只保留在 assembler 内部；投影 module 用单一有序 record store 派生显示窗口与全量 transcript**（C04 spec [#27](https://github.com/DavidTeam2008/mybuddy/issues/27)） | C04 Wave 3；assembler 认不出的修订成为独立行，各自翻译；删除 alias 与跨 ID 合并；行为变更测试按 spec 记录 |
 
 | D9 | ASR `.fastResults` 默认 | P1-3 360 s 同音频 A/B：fast 40 行/覆盖 98.35%/WER 3.82–3.69%；no-fast 73 行/95.67%/WER 7.38%，行碎片化；no-fast+context 71 行/95.80%/WER 6.62% | **Release 保持 `.fastResults` 开启**；`-duiyi.asrFastResults` 只作 DEBUG 实验开关。关闭 fast 必须重新做 p95/预览延迟与行稳定性 A/B，不能只为个别词恢复 | P1-3 A/B 默认 fast；no-fast 不进入产品 |
-| D10 | ASR `contextualStrings` 默认 | `AnalysisContext.contextualStrings[.general]` 在 360 s A/B 有小幅 WER 收益（3.31% vs 3.69–3.82%），但 Cameron/Lidia/Design/`white men` 仍随机失败；full context 两次 WER 2.01/2.83% vs baseline 2.08%，无稳定收益；词表是夹具专用，产品无来源 | **不默认启用 contextualStrings**；只保留 DEBUG 实验开关。若后续做“用户可提供名称/术语”的显式设置，需新增产品决策、隐私与存储设计，并证明不引入专名过拟合/延迟/串词 | P1-3 不因夹具词表改变 Release；用户词表功能另立决策 |
+| D10 | ASR `contextualStrings` 默认 | Apple DocC 只把词表偏置写给 `DictationTranscriber`；Apple 工程师论坛 811083（2026-01，iOS 26 时期）明确 `SpeechTranscriber` 当前不消费 `contextualStrings`；本机 SDK 也没有 contentHints/custom LM 参数。根因/复测计划见 [`research/asr-accuracy-root-cause-2026-11-28.md`](research/asr-accuracy-root-cause-2026-11-28.md)。我们的 360 s/full context A/B 因此不是有效偏置实验，观察到的 WER 差异是 ASR 随机波动（同配置 C/C2 专名仍切换，full context WER 2.01/2.83% vs baseline 2.08%）。 | **不默认启用 contextualStrings**；现有 DEBUG flag 只用于未来 OS 复测，不能当作已生效的专名修复。真正 Apple 支持的词表路径是 `DictationTranscriber` + 自定义 LM，属 later spike；用户可提供名称/术语的替换需另立产品决策和隐私/存储设计 | P1-3 不因夹具词表改变 Release；不得把 `contextualStrings` 宣传成 SpeechTranscriber 的修复 |
 
 ## v1 冻结口径（非 D 编号）
 
-> 本节只记录 D1–D8 之外、本次冻结的产品口径；涉及 D 的内容只引用编号，不复制。冻结日期：2026-11-23。
+> 本节只记录 D1–D10 之外、本次冻结的产品口径；涉及 D 的内容只引用编号，不复制。冻结日期：2026-11-23。
 
 ### 目标与范围
 

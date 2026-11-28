@@ -164,7 +164,7 @@ tools/fixture-run.sh --asr-context-terms "Cameron Russell,Lidia Yuknavitch,Ferna
 | `-duiyi.fixtureDeleteAfterRun YES` | 结束后删除设备上的夹具；脚本复用 `fixture-current.<ext>`，避免 72 MB 文件堆积 |
 | `-duiyi.storeFile fixture-<id>` | 隔离 SwiftData，避免污染真实历史 |
 
-P1-3 ASR A/B 使用 DEBUG-only 的两个开关：`--asr-fast-results no` 去掉 `SpeechTranscriber` 的 `.fastResults`；`--asr-context-terms "a,b"` 设置 `AnalysisContext.contextualStrings[.general]`。Release 默认仍是 fast + 无词表偏置；不要用低置信度丢 final。证据目录按 run-id 隔离，`--skip-build` 可复用同一安装包只换 launch args。
+P1-3 ASR A/B 使用 DEBUG-only 的两个开关：`--asr-fast-results no` 去掉 `SpeechTranscriber` 的 `.fastResults`；`--asr-context-terms "a,b"` 设置 `AnalysisContext.contextualStrings[.general]`。**Apple 文档只把词表偏置写给 `DictationTranscriber`，论坛 811083 明确 `SpeechTranscriber` 当前不消费 contextualStrings，所以这个开关目前对 SpeechTranscriber 是 no-op，只能用于未来 OS 复测，不能作为专名修复。** Release 默认仍是 fast + 无词表偏置；不要用低置信度丢 final。证据目录按 run-id 隔离，`--skip-build` 可复用同一安装包只换 launch args。
 
 判定边界：
 
