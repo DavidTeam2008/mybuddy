@@ -3,7 +3,7 @@
 > 本文是**当前**的工程待办与风险清单，替代早期的 04/08/12 路线图与 13 的问题清单。
 > 架构见 [`02-architecture.md`](02-architecture.md)，选型见 [`03-tech-choices.md`](03-tech-choices.md)。
 > 每条都尽量给出代码依据；行号会漂移，以类型/函数名为准。
-> **真源声明**：本文件的 P0/P1 验收判据与排期是唯一真源；[`decisions.md`](decisions.md) 的 D1–D13 / D-B* / D-AI* 只是决策记录，不影响排期判定；
+> **真源声明**：本文件的 P0/P1 验收判据与排期是唯一真源；[`decisions.md`](decisions.md) 的 D1–D14 / D-B* / D-AI* 只是决策记录，不影响排期判定；
 > 所有待确认决策统一见 [`decisions.md`](decisions.md)（本文件 §7 只保留指针）。
 
 ## 0. 状态
@@ -35,6 +35,8 @@
 | 测试基线 | 只增不减；入口为 `DuiyiTests` / `DuiyiUITests`；原 harness 基线未随提取保留 |
 
 > **下一步（2026-11-28）**：row 82/fallback 真机回放已完成（`row82-fix-full-1` requiredCues 10/10；fallback 全量 0 permanent failures；ASR canary 在复跑中漏 `days`/`life`）→ P1-1 抢占 DEBUG 双 locale A/B 已完成（A 丢非 final preview，B 保留 incumbent final；Release 默认已改 B（D12））→ P0-6b 可见失败状态 → 真实 Conversation/Meeting 麦克风 A/B 已完成（B 干净保留显著优于 A；见 §7.6）→ Release 默认切 B（D12）；真人 10 分钟复测暂缓（D11）→ P1-3 词表/alternatives/DictationTranscriber spike。P1-5/P2 仍暂缓，见 research §4。
+
+> **决策审计（2026-11-29）**：D12/D13/D14 已补记；发现 D6 总结 digest 回退、TTS 队列硬上限 10、能力门禁、导出快照保留等与文档/冻结口径的冲突或缺口，详见 [`research/decision-audit-2026-11-29.md`](research/decision-audit-2026-11-29.md)。
 
 ### Wave 1 测试调整说明（2026-11-23）
 
@@ -254,5 +256,5 @@
 
 ## 7. 交接前需要确认的产品/工程决策
 
-决策已合并到 [`decisions.md`](decisions.md) 的 **D1–D13**（唯一真源，D8 于 2026-11-24、D9–D10 于 2026-11-28、D11–D13 于 2026-11-29 补充）；
+决策已合并到 [`decisions.md`](decisions.md) 的 **D1–D14**（唯一真源，D8 于 2026-11-24、D9–D10 于 2026-11-28、D11–D14 于 2026-11-29 补充）；
 本文件不再保留重复列表，只在此留指针。P0-2/P0-3 的产品侧行为按 D5–D7 与「v1 冻结口径」实现。

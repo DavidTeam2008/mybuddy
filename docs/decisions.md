@@ -2,9 +2,9 @@
 
 > **唯一决策表**：其他文档只引用 D 编号，不复制内容。确认后更新本表并标注日期；未确认前不按假设实现。
 > 排期与验收见 [`04-roadmap.md`](04-roadmap.md)；工程论证见相关案例文档，不在此复述。
-> 状态：**D1–D7 已于 2026-11-23 确认；D8 已于 2026-11-24 确认；D9–D10 于 2026-11-28 确认；D11–D13 于 2026-11-29 确认（D12 取代 D11 的默认部分）**；D1–D13 之外的产品口径见文末「v1 冻结口径」。
+> 状态：**D1–D7 已于 2026-11-23 确认；D8 已于 2026-11-24 确认；D9–D10 于 2026-11-28 确认；D11–D14 于 2026-11-29 确认（D12 取代 D11 的默认部分）**；D1–D14 之外的产品口径见文末「v1 冻结口径」。
 
-## D1–D13（产品 / 工程，状态：已确认 2026-11-23；D8 于 2026-11-24、D9–D10 于 2026-11-28、D11–D13 于 2026-11-29 确认）
+## D1–D14（产品 / 工程，状态：已确认 2026-11-23；D8 于 2026-11-24、D9–D10 于 2026-11-28、D11–D14 于 2026-11-29 确认）
 
 | ID | 决策点 | 当前事实 / 已实现 | 已确认决策 | 验收影响 |
 | --- | --- | --- | --- | --- |
@@ -23,9 +23,11 @@
 | D11 | P1-1 抢占内容保留的 Release 默认 | 2026-11-29 真实麦克风 A/B（同构建/设备、交错、无 `fixtureAudio`）：Conversation en/ja A 干净保留 0/12、B 17/18；Meeting en/zh A 1/8、B 7/7；B `queuedFinal` 18/19；无 duplicate ID/U+FFFD/permanent failure，Conversation translation p95 不回退。详见 [`research/face-to-face-dual-locale-quality.md`](research/face-to-face-dual-locale-quality.md) §7.6 | **已由 D12 取代（2026-11-29）：Release 默认改为 publish。** 原决定：Release 默认保持 `publishesPreemptedIncumbent=false`，`-duiyi.assemblerPreemptionPublish YES` 只作 DEBUG 实验开关；真人验证暂缓、P1-1 不签收。D12 保留 `no` 作为回滚/对比开关。 | 原验收：Release 走旧丢弃路径；D12 改为 publish。P1-1/P1-3 仍不完成；不得把 A/B 机械指标当作发布签收 |
 | D12 | P1-1 抢占默认改为 publish | D11 原定 Release 默认 no；2026-11-29 用户明确要求“都改成 B”并把代码合并到 main。真实麦克风 A/B（同构建/设备、交错、无 fixtureAudio）Conversation A 干净保留 0/12 vs B 17/18，Meeting A 1/8 vs B 7/7；B `queuedFinal` 18/19；0 duplicate ID/U+FFFD/permanent failure，Conversation translation p95 不回退。见 [`research/face-to-face-dual-locale-quality.md`](research/face-to-face-dual-locale-quality.md) §7.6 | **Release 默认 `publishesPreemptedIncumbent=true`（B）**；`-duiyi.assemblerPreemptionPublish no` 保留为回滚/对比开关。非 confident incumbent 仍走旧丢弃路径；10 分钟真人验证仍暂缓；P1-1 仍不签收（ASR 漏词/专名未解） | Release 行为变更：抢占时先发布可见 incumbent final，再起新 row；必须全量单测/identity/静态回归；不得把 A/B 机械指标当作 P1-1 完成 |
 | D13 | 面对面默认换手方式 | `PreferencesStore.conversationListeningMode` 无持久值时默认 `.manual`；`autoStartListening` 默认 true 只在 `.automatic` 生效；`.automatic` 是语种路由备选（见 `docs/02-architecture.md`、GLOSSARY「手动换手」、PR #92）。2026-11-29 真机排查发现设备持久值被 DEBUG A/B harness 改成 automatic，不是产品默认值变更。 | **面对面默认手动换手**：新任务先显示「哪一侧先说」，点谁就只识别谁的语言，字幕送听者侧；自动模式只作为设置里的备选，不改为默认；manual 下新任务不自动开始听。 | 首次任务不得在未点选说话侧时自动录音/自动路由；`autoStartListening` 不能绕过 manual；自动模式可切换但不得成为默认。 |
+| D14 | 离线与依赖边界 | 全部使用系统框架；无后端、无 API Key、无第三方依赖；音频不上传、不落盘；诊断仅本机 DEBUG 导出（见 `AGENTS.md`、`docs/02-architecture.md` §1、`docs/03-tech-choices.md` §1）。 | **坚持端侧离线、无后端、无 API Key、无第三方依赖；音频不落盘、不上传**；诊断/导出只走本机文件与系统分享。 | 飞行模式下三模块全链路可用且无网络请求；不新增 SDK/服务端；诊断不得上传或写正文。 |
+
 ## v1 冻结口径（非 D 编号）
 
-> 本节只记录 D1–D13 之外、本次冻结的产品口径；涉及 D 的内容只引用编号，不复制。冻结日期：2026-11-23。
+> 本节只记录 D1–D14 之外、本次冻结的产品口径；涉及 D 的内容只引用编号，不复制。冻结日期：2026-11-23。
 
 ### 目标与范围
 
