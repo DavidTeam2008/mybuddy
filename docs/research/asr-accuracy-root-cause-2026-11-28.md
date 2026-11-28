@@ -4,7 +4,7 @@
 >
 > 相关决策：[D9/D10](../decisions.md)；夹具研究：[speech-transcriber-segmentation.md](speech-transcriber-segmentation.md) §8.4；语义评审：[fixture-semantic-review-2026-11-28.md](fixture-semantic-review-2026-11-28.md)。
 >
-> 实施状态（2026-11-28）：run-meta、ASR confidence 只读诊断、fixture-only raw ASR dump 已实现并在 iPhone 13 验证（raw dump 132 行，含 text/alternatives/confidence；拉取后设备文件为 0 字节）；assembler `dropReason`、canary 归因、用户术语表、alternatives 选词、preemption/closed-range 改造仍待实施。
+> 实施状态（2026-11-28）：run-meta、ASR confidence 只读诊断、fixture-only raw ASR dump 已实现并在 iPhone 13 验证（raw dump 132 行，含 text/alternatives/confidence；拉取后设备文件为 0 字节）。30 s raw dump 的所有 final 文本里没有 `white men`，transcript 从 `perform better` 开始，直接证明这是 ASR 漏词而不是组装器丢句。assembler `dropReason`、canary 归因、用户术语表、alternatives 选词、preemption/closed-range 改造仍待实施。
 
 ## 0. 结论摘要
 
