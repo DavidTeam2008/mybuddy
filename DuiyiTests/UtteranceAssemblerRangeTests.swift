@@ -1201,6 +1201,7 @@ struct UtteranceAssemblerRangeTests {
         #expect(chinese.language == .zhHans)
         let events = assembler.takePreemptionEvents()
         #expect(events.count == 1)
+        #expect(events[0].incumbentUtteranceID == english.id)
         #expect(events[0].incumbentLanguage == .english)
         #expect(events[0].challengerLanguage == .zhHans)
         #expect(events[0].applied)
@@ -1239,6 +1240,7 @@ struct UtteranceAssemblerRangeTests {
         #expect(assembler.takeDropEvents().contains { $0.reason == .preemption } == false)
         let events = assembler.takePreemptionEvents()
         #expect(events.count == 1)
+        #expect(events[0].incumbentUtteranceID == english.id)
         #expect(events[0].queuedFinal)
         #expect(events[0].applied)
     }

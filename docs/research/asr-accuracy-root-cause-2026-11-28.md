@@ -63,7 +63,7 @@
 4. **canary 归因（已实现）**：保留 coverage/exact/WER/短句/重复/空译/U+FFFD 单跑硬门禁；`missingCueAttribution` 区分 ASR miss / 表面变体 / assembler loss，无 raw dump 时明确 `unavailable`。`nameCues` 已加入基线但保持非阻断；只有确定性机制 + held-out 证据后才进 requiredCues；ASR-dependent canary 可要求连续两跑，best-of 不用于内容缺失。
 5. **用户术语表（opt-in）**：设置页 per-language canonical + aliases（≤100 条、1–4 token、无正则、不自动学习）；纯 `SpeechTextCanonicalizer` 在 **assembler 之后**按同一 Utterance.id 做最长整词/整短语替换，只改匹配 span，不插入/删除/改数字否定；Release 默认 off，需产品/隐私/存储决策；held-out 音频测误替换率。只改源文，不保证中文译名（TranslationSession 无术语 API）。
 6. **alternativeTranscriptions final-only 选词**：默认 off；只对有用户术语表的 locale 开；候选必须非空、含 canonical/alias、匹配 span 外前后缀逐字相等、token 数不变；空候选视为无语音/撤销；不选不含术语的候选；volatile 永远 alternatives[0]；iPhone 13 单/双 locale 测 p95/资源，超预算回退。不改 fast/volatile/assembler identity。
-7. **P1-1 抢占先诊断（已实现 DEBUG 实验）**：`speech.preemption` 诊断记录双方语言、长度、是否 confident、是否可见、是否 queue final、是否 applied，无正文；`-duiyi.assemblerPreemptionPublish YES` 下仅当 incumbent 有可见文本且 isConfident 时 `queueFinalForBoundary` + `closeCurrentRangeRow`，绝不 merge 到 challenger。双 locale Conversation 夹具 A/B 已证实 A 只剩非 final preview、B 保留 incumbent final（§6）；Release 默认仍为 no，真实 Conversation/Meeting A/B（wrong-side row、duplicate ID、p95、翻译量）通过前不改默认。
+7. **P1-1 抢占先诊断（已实现 DEBUG 实验）**：`speech.preemption` 诊断记录双方语言、长度、是否 confident、是否可见、是否 queue final、是否 applied，无正文；`-duiyi.assemblerPreemptionPublish YES` 下仅当 incumbent 有可见文本且 isConfident 时发布 visible final（`queueVisibleFinalForPreemption`）+ `closeCurrentRangeRow`，绝不 merge 到 challenger。双 locale Conversation 夹具 A/B 已证实 A 只剩非 final preview、B 保留 incumbent final（§6）；真实麦克风 A/B 见 §6.4/§7.6，已完成但真人复测前 Release 默认仍为 no。
 
 ### later
 
@@ -116,7 +116,7 @@
 | A（no） | `p11-preempt-ja-a-3`、`p11-preempt-ja-a-4` | 0 | 1 / 0 | 英文 `They also cause us` 只在非 final preview；文字稿无该行，结构性失败 |
 | B（yes） | `p11-preempt-ja-b-1`、`p11-preempt-ja-b-2` | 2 | 1 / 1 | 英文 final 保留，日语行照常；PASS |
 
-两次交错复现同一结果。结论：`preemptsIfNeeded` 的“直接 remove/clear 不 queue final”确实是可见内容丢失路径；DEBUG 条件修复能保留 incumbent 且不把 loser 并入 winner。限制：合成音频、固定 en/ja；Release/真实 Conversation/Meeting 的默认行为未改，仍需真实麦克风 A/B 才能签收 P1-1。
+两次交错复现同一结果。结论：`preemptsIfNeeded` 的“直接 remove/clear 不 queue final”确实是可见内容丢失路径；DEBUG 条件修复能保留 incumbent 且不把 loser 并入 winner。限制：合成音频、固定 en/ja；真实麦克风 A/B 已完成（§6.4），但 Release 默认未改、P1-1 不签收。
 
 ### 6.3 Canary 归因记录
 
@@ -130,6 +130,12 @@
 
 实现修正：最初版本用“每个 cue token 在 raw 任意位置有近似拼写”判 `surfaceVariant`，会把 `white`、`men`、`perform better` 在**不同句子**里的出现误判为同一短语；已改为**同长度连续 raw 窗口**近似匹配，并加
 `test_scattered_raw_words_are_not_a_surface_variant`。教训：canary 排查必须同时开 raw dump；没有 raw 只能记 `unavailable`，不能猜。
+
+### 6.4 真机麦克风 A/B 与诊断 ID 修正
+
+2026-11-28/29 补跑真实麦克风 Conversation en/ja 与 Meeting en/zh（无 `-duiyi.fixtureAudio`，Mac 扬声器脚本）。结果：Conversation A 干净保留 0/12、B 17/18；Meeting A 1/8、B 7/7；B 的 `queuedFinal` 18/19，B 唯一 preview 是非 confident incumbent 的旧回退路径。详见 [`face-to-face-dual-locale-quality.md`](face-to-face-dual-locale-quality.md) §7.6。
+
+排查中发现并修复一个诊断归因 bug：`speech.preemption.incumbentUtteranceID` 在 `beginNextUtterance` 之后读取，实际记成 challenger 新 ID，导致第一次真机 A/B 无法 join 文字稿。已改为抢占前捕获，并在 `preemptionRecordsIncumbentLoss` / `preemptionExperimentPublishesIncumbent` 加 `incumbentUtteranceID == english.id` 断言。另一个实验路径问题：`queueFinalForBoundary` 会重新 join range state，可能把已 reconciliation 的短语重复发布；抢占改为发布用户可见的 `texts[locked]`，修后 B 无重复短语。教训：新增诊断 ID 必须在状态变更前捕获；A/B join 断言要写进单测，不能只靠肉眼。
 
 ## 7. 引用
 

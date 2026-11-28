@@ -1069,6 +1069,36 @@ struct UtteranceAssembler: Sendable {
         closedRanges[index] = closed
     }
 
+    /// The preemption experiment must preserve the incumbent row's visible
+    /// text, not a re-joined range state. The two can differ when a late
+    /// phrase was already reconciled into `texts`.
+    private mutating func queueVisibleFinalForPreemption(
+        language: AppLanguage,
+        text: String
+    ) {
+        guard !text.isEmpty else { return }
+        if publishedFinalForCurrentID,
+           latestFinal?.id == utteranceID,
+           latestFinal?.text == text {
+            return
+        }
+        let utterance = Utterance(
+            id: utteranceID,
+            language: language,
+            text: text,
+            isFinal: true,
+            isRevision: publishedFinalForCurrentID
+        )
+        pendingFinals.append(utterance)
+        publishedFinalForCurrentID = true
+        latestFinal = FinalizedUtterance(
+            id: utterance.id,
+            language: utterance.language,
+            text: utterance.text,
+            at: now()
+        )
+    }
+
     /// A row closed by a boundary must publish any text the user can already
     /// see. The transcript only stores finals; closing an open volatile
     /// without this final is silent content loss.
@@ -1309,6 +1339,10 @@ struct UtteranceAssembler: Sendable {
         range: SpeechRange?
     ) -> PreemptionOutcome {
         guard let locked = lockedLanguage, language != locked else { return .proceed }
+        // Capture the incumbent id before a successful preemption starts the
+        // next utterance; the event must join to the row that was lost or
+        // published, not to the challenger's new id.
+        let incumbentID = utteranceID
         let incumbent = textFor(locked)
         let challengerConfident = Self.isConfident(text, language: language)
         let incumbentConfident = Self.isConfident(incumbent, language: locked)
@@ -1320,7 +1354,7 @@ struct UtteranceAssembler: Sendable {
         ) else {
             preemptionEvents.append(
                 SpeechPreemptionEvent(
-                    incumbentUtteranceID: utteranceID,
+                    incumbentUtteranceID: incumbentID,
                     incumbentLanguage: locked,
                     challengerLanguage: language,
                     incumbentTextLength: incumbent.count,
@@ -1344,25 +1378,11 @@ struct UtteranceAssembler: Sendable {
             && incumbentConfident
         let pendingBefore = pendingFinals.count
         if shouldPreserve {
-            if rangeStates[locked] != nil {
-                queueFinalForBoundary(language: locked)
-            } else if !(latestFinal?.id == utteranceID && latestFinal?.text == incumbent) {
-                let utterance = Utterance(
-                    id: utteranceID,
-                    language: locked,
-                    text: incumbent,
-                    isFinal: true,
-                    isRevision: false
-                )
-                pendingFinals.append(utterance)
-                publishedFinalForCurrentID = true
-                latestFinal = FinalizedUtterance(
-                    id: utterance.id,
-                    language: utterance.language,
-                    text: utterance.text,
-                    at: now()
-                )
-            }
+            // Publish exactly the text the user can already see. The range
+            // state can contain a duplicate/late phrase that the visible
+            // `texts` value already reconciled; joining it again would make
+            // the preserved final longer than the incumbent.
+            queueVisibleFinalForPreemption(language: locked, text: incumbent)
             closeCurrentRangeRow(language: locked)
             beginNextUtterance(keeping: language)
         } else {
@@ -1385,7 +1405,7 @@ struct UtteranceAssembler: Sendable {
 
         preemptionEvents.append(
             SpeechPreemptionEvent(
-                incumbentUtteranceID: utteranceID,
+                incumbentUtteranceID: incumbentID,
                 incumbentLanguage: locked,
                 challengerLanguage: language,
                 incumbentTextLength: incumbent.count,

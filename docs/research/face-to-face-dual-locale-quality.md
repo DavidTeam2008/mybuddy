@@ -200,3 +200,63 @@ H2 目前证据偏弱：面对面英文拒绝率 29.4%，同传 28.3%，几乎�
 - ASR 抢占是随机的；没有 applied preemption 的运行不是阴性结果。
 - 合成/扬声器脚本可复现机制，但不能替代双人真实对话；最后再做一轮 10 分钟中英真实对话。
 - `speech.preemption` 事件不含正文；可见性/内容保留必须用屏幕录制 + 文字稿，不能从长度推断。
+
+### 7.6 2026-11-28/29 真机执行：实现、数据与决策
+
+> 设备：iPhone 13（iPhone14,5），iOS 27.2.1，同一 DEBUG 构建。Mac 内置扬声器播放，iPhone 麦克风采集；**没有** `-duiyi.fixtureAudio`。所有 Conversation run 的 `speech.start` 都是 `usingDual=true`、requested/active `[english, japanese]`；Meeting 是 `[english, zhHans]`。
+
+#### 7.6.1 实现
+
+- `DebugMicABRun`（DEBUG-only）：`-duiyi.micABModule conversation|meeting`、`-duiyi.micABUserLanguage`、`-duiyi.micABPeerLanguage`、`-duiyi.micABDuration`；自动打开模块、建任务、开始监听、到点结束、导出诊断并写无正文 marker。它不替换音频采集，仍走真实麦克风。
+- `tools/mic-ab-run.sh`：Mac 播放脚本音频、轮询 ready/done、拉诊断与隔离 SwiftData store；证据在 `.device-state/mic-ab/runs/<run-id>/`，不提交。
+- `tools/mic-ab-analyze.py`：把 `speech.preemption.incumbentUtteranceID` 关联到 SwiftData `ZTRANSCRIPTENTITY.ZID`，区分 final / mixed-script final / preview，并汇总 A/B。
+
+真机命令：
+
+```bash
+tools/mic-ab-run.sh --run-id cja-a-7 --arm a \
+  --module conversation --user-language english --peer-language japanese \
+  --audio .device-state/mic-ab/audio/p11-kana-6cycles.wav
+tools/mic-ab-run.sh --run-id cja-b-10 --arm b \
+  --module conversation --user-language english --peer-language japanese \
+  --audio .device-state/mic-ab/audio/p11-kana-6cycles.wav
+python3 tools/mic-ab-analyze.py
+```
+
+音频由 `say` + `ffmpeg` 生成（本地、不提交）：1.1 s 英文 `They also cause`（音量 0.55），紧接着 5.9 s 日语假名句（音量 1.0），紧接 2.5 s 静音；6 个循环。英文与日文之间**没有静音**，否则 0.75 s range gap 会先关行，抢占不会发生。Meeting 用 6.2 s 中文句替换日语。
+
+#### 7.6.2 结果
+
+| 臂 | 模块 | runs | applied events | unique incumbent | clean final | mixed final | preview | queuedFinal |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| A（no） | Conversation en/ja | 4 | 13 | 12 | 0 | 1 | 11 | 0 |
+| B（yes） | Conversation en/ja | 7 | 19 | 18 | 17 | 0 | 1 | 18 |
+| A（no） | Meeting en/zh | 3 | 8 | 8 | 1 | 7 | 0 | 0 |
+| B（yes） | Meeting en/zh | 4 | 7 | 7 | 7 | 0 | 0 | 7 |
+
+- Conversation 干净保留率：A **0/12 = 0%**，B **17/18 = 94.4%**。
+- Meeting 干净保留率：A **1/8 = 12.5%**，B **7/7 = 100%**。A 的 7 行虽然 final，但源文是英文+中文混合；final 不等于内容完整。
+- B 的唯一 preview 是**非 confident incumbent**（日语 5 字）被英文抢占：`shouldPreserve` 要求 `incumbentConfident`，这里仍走旧丢弃路径。A 同样丢失；不是 B 新增回归，但仍是残余缺口。
+
+#### 7.6.3 根因与修正
+
+1. **产品路径**：A 的 `preemptsIfNeeded` 在抢占时 `rangeStates.removeValue` + `clearText`，不发布 open volatile；英文 preview 只存在于内存，文字稿没有该行。后续同 ID 的日文结果把它变成混合行。B 在 `beginNextUtterance` 前发布 visible incumbent final、关闭 range，再给 challenger 新 ID。
+2. **诊断归因 bug（已修）**：`speech.preemption.incumbentUtteranceID` 原来在 `beginNextUtterance` 之后读取，记成了 challenger 的新 ID；真机 A/B 第一次 join 全部错位。已改为抢占前捕获 `incumbentID`，并给两个抢占测试加 `events[0].incumbentUtteranceID == english.id` 断言。
+3. **visible-final 重复（已修）**：B 最初用 `queueFinalForBoundary` 重新 join range state，可能把已 reconciliation 的短语再拼一次（真机出现 `They also cause They also cause...`）。现在抢占专用 `queueVisibleFinalForPreemption` 只发布用户已经看到的 `texts[locked]`；修后 3 次 B Conversation + 1 次 B Meeting 无重复短语。
+
+#### 7.6.4 护栏
+
+- 所有 run：0 duplicate `Utterance.id`、0 U+FFFD、0 `permanentFailureCount`；Conversation 0 空 final 译文。
+- Conversation translation apply p95（按 run 中位数）：A 186.1 ms（170.7–197.6），B 182.4 ms（177.1–188.2）；无回退。
+- Meeting 不产生翻译，`ZTRANSLATEDTEXT` 为空是设计行为，不能算空译失败。
+- 每次运行都确认 `speech.start.usingDual=true`；没有单路 fallback 混入。
+
+#### 7.6.5 决策
+
+按 §7.4 预注册门槛：Conversation 已超过 10 个 visible preemption/臂，Meeting 覆盖，B 干净保留率显著高于 A，护栏无回退。**证据支持把 Release 默认改为 publish**，但本轮提交仍保持默认关闭（`publishesPreemptedIncumbent=false`），理由：
+
+1. 音频是 Mac 扬声器脚本，不是双人真实对话；§7.5 的 10 分钟真人验证尚未做。
+2. B 仍有 1/18 非 confident incumbent 走旧丢弃路径；P1-1 的 ASR 随机漏词/专名问题也未解决，不能签收 P1-1。
+3. 最近 3 次 B 是 visible-final 修正后的样本；翻默认前应再用真人对话确认没有新的重复/串行。
+
+下一步决策路径：真人 10 分钟中英 Conversation + Meeting（至少各 3 次可见抢占）；若 B 仍无重复/串行、护栏不回退，把默认改为 publish，并保留 `-duiyi.assemblerPreemptionPublish no` 作为灰度回滚开关；否则继续 DEBUG-only。不要因为本轮机械指标达标就标记 P1-1 完成。

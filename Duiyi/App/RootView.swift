@@ -76,6 +76,14 @@ struct RootView: View {
                     environment: environment
                 )
             }
+            if let conversationViewModel, let meetingViewModel {
+                DebugMicABRun.startIfRequested(
+                    conversationViewModel: conversationViewModel,
+                    meetingViewModel: meetingViewModel,
+                    coordinator: coordinator,
+                    environment: environment
+                )
+            }
             #endif
         }
         .onChange(of: environment.preferences.hasCompletedOnboarding) { _, completed in

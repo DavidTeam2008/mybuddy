@@ -189,7 +189,40 @@ P1-3 ASR A/B 使用 DEBUG-only 的两个开关：`--asr-fast-results no` 去掉 
 
 实现约束：所有夹具代码在 `#if DEBUG` 下，Release 不编译；不改 `UtteranceAssembler`/翻译语义；不 mock `SpeechTranscriber.isAvailable`；真机结果才算数。
 
-## 6. 常见故障
+### 5.2 真实麦克风抢占 A/B（P1-1）
+
+真机麦克风路径不能再用 `-duiyi.fixtureAudio`：那会绕过麦克风/ADC/房间声学，不能证明真实采集下的抢占。`DebugMicABRun` 是 DEBUG-only 的无夹具驱动：它只负责打开模块、建任务、开始监听、到点结束和导出诊断，音频仍由 Mac 扬声器播放、iPhone 麦克风采集。
+
+```bash
+# 生成脚本音频（本地，不入库）：英文短句 + 目标语言长句，中间不留静音
+say -v Samantha -r 180 -o /tmp/inc.aiff "They also cause"
+say -v Kyoko -r 180 -o /tmp/chal-ja.aiff \
+  "これはとてもたいへんなことですこれはわたしのせいかつにえいきょうをあたえます"
+ffmpeg -i /tmp/inc.aiff -t 1.1 -af "volume=0.55" -ar 44100 -ac 1 /tmp/inc.wav
+ffmpeg -i /tmp/chal-ja.aiff -ar 44100 -ac 1 /tmp/chal-ja.wav
+# 用 ffmpeg concat 重复 [inc.wav, chal-ja.wav, 2.5s 静音] 6 次
+
+# A/B 交错；每次新建 run-id，脚本自动隔离 store
+tools/mic-ab-run.sh --run-id cja-a-1 --arm a \
+  --module conversation --user-language english --peer-language japanese \
+  --audio /tmp/p11-ja-6cycles.wav
+tools/mic-ab-run.sh --run-id cja-b-1 --arm b \
+  --module conversation --user-language english --peer-language japanese \
+  --audio /tmp/p11-ja-6cycles.wav
+
+# Meeting 使用 en/zh（MeetingRecognition 固定 display + defaultPeer）
+tools/mic-ab-run.sh --run-id cme-a-1 --arm a \
+  --module meeting --user-language english --peer-language zhHans \
+  --audio /tmp/p11-zh-6cycles.wav
+
+python3 tools/mic-ab-analyze.py
+```
+
+- 每次证据在 `.device-state/mic-ab/runs/<run-id>/`：无正文诊断 JSON、marker/log、隔离 store；不提交。
+- `speech.start.usingDual` 必须为 true；`speech.preemption` 的 `incumbentUtteranceID` 关联 store `ZID`。`final` 且不含混合脚本才算 clean retention；preview 和 mixed final 都不算。
+- 判定/结果见 [`face-to-face-dual-locale-quality.md`](../research/face-to-face-dual-locale-quality.md) §7.6。Release 默认仍关闭，真人 10 分钟验证通过后才翻默认。
+
+
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
