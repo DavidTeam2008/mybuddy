@@ -215,6 +215,23 @@ class MissingCueAttributionTests(unittest.TestCase):
             {"asrMiss": 1},
         )
 
+    def test_scattered_raw_words_are_not_a_surface_variant(self) -> None:
+        result = self._score(
+            ["white men perform better."],
+            "She'll perform better.",
+            [
+                "Give someone a white coat and tell them it is a doctor's lab coat.",
+                "black men do.",
+                "She'll perform better.",
+            ],
+            required=["white men perform better."],
+        )
+
+        self.assertEqual(
+            result["missingCueAttribution"]["counts"],
+            {"asrMiss": 1},
+        )
+
     def test_no_raw_dump_marks_attribution_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)

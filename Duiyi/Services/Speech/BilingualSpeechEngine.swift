@@ -742,6 +742,7 @@ actor BilingualSpeechEngine: SpeechRecognizing {
     private func recordPreemption(_ event: SpeechPreemptionEvent) {
         diagnostics.record(
             SpeechPreemptionRecord(
+                incumbentUtteranceID: event.incumbentUtteranceID,
                 incumbentLanguage: event.incumbentLanguage,
                 challengerLanguage: event.challengerLanguage,
                 incumbentTextLength: event.incumbentTextLength,

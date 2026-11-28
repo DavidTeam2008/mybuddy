@@ -169,6 +169,7 @@ final class DiagnosticsRecorder: DiagnosticsRecording, @unchecked Sendable {
                 kind: "speech.preemption",
                 at: now(),
                 feature: session?.feature,
+                utteranceID: record.incumbentUtteranceID.uuidString,
                 language: record.incumbentLanguage.rawValue,
                 textLength: record.incumbentTextLength,
                 applied: record.applied,

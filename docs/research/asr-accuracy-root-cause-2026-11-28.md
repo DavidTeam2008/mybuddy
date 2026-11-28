@@ -102,7 +102,7 @@
 
 ### 6.1 已落地
 
-- `UtteranceAssembler` 只读诊断：`SpeechDropEvent`（empty/punctuationOnly/purity/suppression/lateVolatileClosedRange/preemption）与 `SpeechPreemptionEvent`（双方语言/长度/confident/visible/queuedFinal/applied）。引擎写 `asr.drop` / `speech.preemption` / `speech.start`（requested/active/usingDual）；事件不含正文，不参与接受/发布/identity。
+- `UtteranceAssembler` 只读诊断：`SpeechDropEvent`（empty/punctuationOnly/purity/suppression/lateVolatileClosedRange/preemption）与 `SpeechPreemptionEvent`（incumbent utteranceID/双方语言/长度/confident/visible/queuedFinal/applied）。引擎写 `asr.drop` / `speech.preemption` / `speech.start`（requested/active/usingDual）；事件不含正文，不参与接受/发布/identity。
 - `fixture-score.py`：`missingCueAttribution` 用 raw final 区分 `assemblerLoss` / `surfaceVariant` / `asrMiss`；无 raw dump 时 `unavailable`。`nameCues` 非阻断。
 - `tools/fixture-run.sh`：`--module conversation`、`--user-language`/`--peer-language`、`--preemption-publish`；自动把 `asr-raw.jsonl` 传给 scorer。
 - 单测 575 logical/610 expanded，0 failed/0 skipped；`verify-utterance-identity` 在文本/range 两 pass 均 clean；`check-static.sh` PASS。
@@ -117,6 +117,19 @@
 | B（yes） | `p11-preempt-ja-b-1`、`p11-preempt-ja-b-2` | 2 | 1 / 1 | 英文 final 保留，日语行照常；PASS |
 
 两次交错复现同一结果。结论：`preemptsIfNeeded` 的“直接 remove/clear 不 queue final”确实是可见内容丢失路径；DEBUG 条件修复能保留 incumbent 且不把 loser 并入 winner。限制：合成音频、固定 en/ja；Release/真实 Conversation/Meeting 的默认行为未改，仍需真实麦克风 A/B 才能签收 P1-1。
+
+### 6.3 Canary 归因记录
+
+已把每次运行的机械归因写入**本机** `score.json`（`.device-state/fixture-runs/<run>/`，不提交）；可复核的结论如下：
+
+| 运行 | 缺失 cue | 归因 | 证据 |
+| --- | --- | --- | --- |
+| `p13-raw-30-1` | `white men perform better.` | `asrMiss` | raw 7 条 final 无该连续短语；transcript 从 `perform better` 开始 |
+| `p11-preempt-ja-a-2/a-3` | 日文长 cue | `asrMiss` | raw final 是英文 hallucination + 日文的混合串，不含 ground-truth 连续句 |
+| `p11-regress-30-1` | `white men perform better.` | `unavailable` | 未开 `--dump-asr-text`，不能事后归因 |
+
+实现修正：最初版本用“每个 cue token 在 raw 任意位置有近似拼写”判 `surfaceVariant`，会把 `white`、`men`、`perform better` 在**不同句子**里的出现误判为同一短语；已改为**同长度连续 raw 窗口**近似匹配，并加
+`test_scattered_raw_words_are_not_a_surface_variant`。教训：canary 排查必须同时开 raw dump；没有 raw 只能记 `unavailable`，不能猜。
 
 ## 7. 引用
 

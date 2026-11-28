@@ -76,6 +76,9 @@ struct SpeechDropEvent: Equatable, Sendable {
 /// One diagnostic language-preemption decision. `language` in the exported
 /// event is the incumbent; `challengerLanguage` is the result that arrived.
 struct SpeechPreemptionEvent: Equatable, Sendable {
+    /// The incumbent row that was dropped or published. Lets a real-device
+    /// A/B join the event to the final ASR event/transcript row.
+    var incumbentUtteranceID: UUID
     var incumbentLanguage: AppLanguage
     var challengerLanguage: AppLanguage
     var incumbentTextLength: Int
@@ -1317,6 +1320,7 @@ struct UtteranceAssembler: Sendable {
         ) else {
             preemptionEvents.append(
                 SpeechPreemptionEvent(
+                    incumbentUtteranceID: utteranceID,
                     incumbentLanguage: locked,
                     challengerLanguage: language,
                     incumbentTextLength: incumbent.count,
@@ -1381,6 +1385,7 @@ struct UtteranceAssembler: Sendable {
 
         preemptionEvents.append(
             SpeechPreemptionEvent(
+                incumbentUtteranceID: utteranceID,
                 incumbentLanguage: locked,
                 challengerLanguage: language,
                 incumbentTextLength: incumbent.count,

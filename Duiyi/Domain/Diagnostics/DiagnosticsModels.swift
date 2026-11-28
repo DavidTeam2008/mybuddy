@@ -48,6 +48,7 @@ struct ASRDropRecord: Equatable, Sendable {
 /// Diagnostic-only language-preemption decision. The incumbent is the losing
 /// row; the challenger is the result that arrived. No caption text is carried.
 struct SpeechPreemptionRecord: Equatable, Sendable {
+    var incumbentUtteranceID: UUID
     var incumbentLanguage: AppLanguage
     var challengerLanguage: AppLanguage
     var incumbentTextLength: Int

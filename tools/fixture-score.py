@@ -186,6 +186,30 @@ def token_similarity(left: str, right: str) -> float:
     return SequenceMatcher(None, left, right).ratio()
 
 
+def near_contiguous_variant(
+    cue_tokens: list[str],
+    raw_tokens: list[str],
+    threshold: float = 0.8,
+) -> bool:
+    """True when a same-length raw window is a near-spelling of the cue.
+
+    Scattered cue words elsewhere in the transcript are not a surface variant:
+    `white men perform better` must not be excused because `white`, `men`, and
+    `perform better` occur in unrelated phrases.
+    """
+    width = len(cue_tokens)
+    if width == 0 or len(raw_tokens) < width:
+        return False
+    for start in range(len(raw_tokens) - width + 1):
+        if all(
+            token_similarity(cue_tokens[index], raw_tokens[start + index])
+            >= threshold
+            for index in range(width)
+        ):
+            return True
+    return False
+
+
 def cue_attribution(
     cue: str,
     raw_tokens: list[str],
@@ -208,14 +232,10 @@ def cue_attribution(
             "reason": "assemblerLoss",
             "detail": "exact cue present in raw ASR finals",
         }
-    matched = 0
-    for token in cue_tokens:
-        if any(token_similarity(token, raw) >= 0.8 for raw in raw_tokens):
-            matched += 1
-    if matched == len(cue_tokens):
+    if near_contiguous_variant(cue_tokens, raw_tokens):
         return {
             "reason": "surfaceVariant",
-            "detail": "all cue tokens have a near-spelling in raw ASR",
+            "detail": "a contiguous raw window is a near-spelling of the cue",
         }
     return {"reason": "asrMiss", "detail": "cue not found in raw ASR finals"}
 

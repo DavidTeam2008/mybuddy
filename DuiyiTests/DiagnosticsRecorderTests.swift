@@ -410,8 +410,10 @@ struct DiagnosticsRecorderTests {
                 style: "liveCaptions"
             )
         )
+        let incumbentID = UUID()
         recorder.record(
             SpeechPreemptionRecord(
+                incumbentUtteranceID: incumbentID,
                 incumbentLanguage: .english,
                 challengerLanguage: .zhHans,
                 incumbentTextLength: 18,
@@ -437,6 +439,7 @@ struct DiagnosticsRecorderTests {
         #expect(drop.textLength == 12)
         let preemption = try #require(snapshot.events.last)
         #expect(preemption.kind == "speech.preemption")
+        #expect(preemption.utteranceID == incumbentID.uuidString)
         #expect(preemption.language == AppLanguage.english.rawValue)
         #expect(preemption.challengerLanguage == AppLanguage.zhHans.rawValue)
         #expect(preemption.challengerLength == 14)
