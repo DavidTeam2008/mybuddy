@@ -109,7 +109,7 @@
 
 ### 6.2 双 locale 抢占 A/B
 
-夹具：1 s 英文（截断）+ 日语 TTS，`ConversationViewModel` 自动双 locale（english/japanese），真实 ASR/assembler/翻译/落库，仅音频采集替换。A/B 只切 `-duiyi.assemblerPreemptionPublish`。
+夹具：1 s 英文（截断）+ 日语 TTS，`ConversationViewModel` 自动双 locale（english/japanese），真实 ASR/assembler/翻译/落库，仅音频采集替换。用 en/ja 而非 zh/en 是因为中文 transcriber 会把英文 hallucination 与后续中文拼在同一 strict 结果里，常被 purity 拒绝而进不到抢占；en/ja 能在英文 open volatile 后产生可 preempt 的日文 challenger。A/B 只切 `-duiyi.assemblerPreemptionPublish`。
 
 | 臂 | run | appFinalRows | preemption applied/queued | 结果 |
 | --- | --- | --- | --- | --- |
