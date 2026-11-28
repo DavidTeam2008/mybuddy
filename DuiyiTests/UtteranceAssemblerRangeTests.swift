@@ -211,6 +211,208 @@ struct UtteranceAssemblerRangeTests {
         #expect(next.text == "And then")
     }
 
+    @Test("Short final phrases between long contiguous phrases survive")
+    func shortFinalBetweenLongPhrasesSurvives() throws {
+        var assembler = UtteranceAssembler()
+        let intro = "Highlight an Asian woman's Asian identity before a math test."
+        let better = "She'll perform better."
+        let identity = "Highlight her female identity."
+        let worse = "She'll perform worse."
+        let lead = "Lead a group of men to believe an athletic task is diagnostic of sports intelligence."
+
+        _ = try requireIngest(&assembler, intro, range(0, 4.949), isFinal: false)
+        _ = try requireIngest(&assembler, intro, range(0.18, 3.96), isFinal: true)
+        _ = try requireIngest(&assembler, "she", range(3.96, 5.226), isFinal: false)
+        _ = try requireIngest(&assembler, better, range(3.96, 5.226), isFinal: false)
+        _ = try requireIngest(&assembler, better, range(4.14, 5.88), isFinal: true)
+        _ = try requireIngest(&assembler, identity, range(5.88, 9.749), isFinal: false)
+        _ = try requireIngest(&assembler, identity, range(6.24, 8.76), isFinal: true)
+        _ = try requireIngest(&assembler, "she", range(8.76, 10.78), isFinal: false)
+        _ = try requireIngest(&assembler, worse, range(8.76, 10.78), isFinal: false)
+        _ = try requireIngest(&assembler, worse, range(8.76, 9.78), isFinal: true)
+        _ = try requireIngest(&assembler, lead, range(9.78, 16.6), isFinal: false)
+        let last = try requireIngest(&assembler, lead, range(11.04, 16.44), isFinal: true)
+
+        #expect(last.text == "\(intro) \(better) \(identity) \(worse) \(lead)")
+    }
+
+    @Test("Disjoint finals with overlapping padded ranges both survive")
+    func disjointFinalsWithOverlappingRangesSurvive() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "The best designs came",
+            range(0, 4),
+            isFinal: true
+        )
+        let second = try requireIngest(
+            &assembler,
+            "only after multiple failed attempts.",
+            range(3.8, 6),
+            isFinal: true
+        )
+
+        #expect(second.text == "The best designs came only after multiple failed attempts.")
+    }
+
+    @Test("Similar consecutive finals with padded overlap both survive")
+    func similarConsecutiveFinalsWithPaddedOverlapSurvive() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "It's the shame of wanting something good.",
+            range(0, 4),
+            isFinal: true
+        )
+        let second = try requireIngest(
+            &assembler,
+            "It's the shame of feeling something good.",
+            range(3.5, 7),
+            isFinal: true
+        )
+
+        #expect(
+            second.text
+                == "It's the shame of wanting something good. "
+                + "It's the shame of feeling something good."
+        )
+    }
+
+    @Test("A distinct final inside a partial volatile's text keeps both")
+    func distinctFinalInsidePartialVolatileKeepsBoth() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "She'll perform better today.",
+            range(3.96, 5.6)
+        )
+        _ = try requireIngest(
+            &assembler,
+            "She'll perform better.",
+            range(4.14, 4.9),
+            isFinal: true
+        )
+        let last = try requireIngest(
+            &assembler,
+            "Headset off.",
+            range(5.0, 5.5),
+            isFinal: true
+        )
+
+        #expect(last.text == "She'll perform better today. Headset off.")
+    }
+
+    @Test("A late distinct final inside a finalized phrase keeps both")
+    func lateDistinctFinalInsideFinalizedPhraseKeepsBoth() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "She'll perform better today.",
+            range(3.96, 5.6),
+            isFinal: true
+        )
+        let final = try requireIngest(
+            &assembler,
+            "Headset off.",
+            range(5.0, 5.5),
+            isFinal: true
+        )
+
+        #expect(final.text == "She'll perform better today. Headset off.")
+    }
+
+    @Test("A late distinct final inside an open volatile keeps both")
+    func lateDistinctFinalInsideVolatileKeepsBoth() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "She'll perform better today.",
+            range(3.96, 5.6)
+        )
+        let final = try requireIngest(
+            &assembler,
+            "Headset off.",
+            range(5.0, 5.5),
+            isFinal: true
+        )
+
+        #expect(final.text == "She'll perform better today. Headset off.")
+    }
+
+    @Test("A same-audio mishearing is replaced, not duplicated")
+    func sameAudioMishearingReplaced() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(&assembler, "I scream", range(0, 3))
+        let final = try requireIngest(
+            &assembler, "ice cream", range(0.5, 2), isFinal: true
+        )
+
+        #expect(final.text == "ice cream")
+    }
+
+    @Test("A short same-audio correction replaces the preview")
+    func shortSameAudioCorrectionReplacesPreview() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(&assembler, "oh", range(0, 2))
+        let final = try requireIngest(
+            &assembler, "Okay.", range(1, 1.5), isFinal: true
+        )
+
+        #expect(final.text == "Okay.")
+    }
+
+    @Test("A volatile padding overlap does not replace the next phrase's final")
+    func volatilePaddingDoesNotReplaceNextFinal() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(&assembler, "First phrase", range(0, 4))
+        let second = try requireIngest(
+            &assembler,
+            "Second phrase",
+            range(3.8, 6),
+            isFinal: true
+        )
+
+        #expect(second.text == "First phrase Second phrase")
+    }
+
+    @Test("A final before an existing phrase keeps audio order")
+    func outOfOrderFinalKeepsAudioOrder() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "Second phrase",
+            range(2, 4),
+            isFinal: true
+        )
+        let first = try requireIngest(
+            &assembler,
+            "First phrase",
+            range(0, 2),
+            isFinal: true
+        )
+
+        #expect(first.text == "First phrase Second phrase")
+    }
+
+    @Test("A final that re-transcribes the same audio is authoritative")
+    func containedDisjointFinalIsAuthoritative() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler,
+            "Their house",
+            range(0, 3),
+            isFinal: true
+        )
+        let corrected = try requireIngest(
+            &assembler,
+            "There house",
+            range(0.2, 2.8),
+            isFinal: true
+        )
+
+        #expect(corrected.text == "There house")
+    }
+
     @Test("A drastically truncated final keeps the fuller volatile text")
     func truncatedFinalKeepsFullerVolatile() throws {
         var assembler = UtteranceAssembler()
@@ -705,6 +907,39 @@ struct UtteranceAssemblerRangeTests {
 
         #expect(first.id != second.id)
         #expect(second.text == "Second phrase")
+    }
+
+    @Test("A gap close publishes the open volatile as a final")
+    func gapClosePublishesOpenVolatile() throws {
+        var assembler = UtteranceAssembler()
+        let first = try requireIngest(&assembler, "First phrase", range(0, 2))
+        _ = try requireIngest(&assembler, "Second phrase", range(3, 5))
+
+        let pending = assembler.takePendingFinals()
+        #expect(pending.count == 1)
+        #expect(pending.first?.id == first.id)
+        #expect(pending.first?.text == "First phrase")
+        #expect(pending.first?.isFinal == true)
+        #expect(pending.first?.isRevision == false)
+        #expect(assembler.takePendingFinals().isEmpty)
+    }
+
+    @Test("A gap close publishes the finalized prefix plus the open volatile")
+    func gapClosePublishesPrefixAndVolatile() throws {
+        var assembler = UtteranceAssembler()
+        _ = try requireIngest(
+            &assembler, "Hello.", range(0, 2), isFinal: true
+        )
+        _ = try requireIngest(&assembler, "there", range(2, 3))
+        let next = try requireIngest(
+            &assembler, "Next.", range(4, 6), isFinal: true
+        )
+
+        let pending = assembler.takePendingFinals()
+        #expect(pending.count == 1)
+        #expect(pending.first?.text == "Hello. there")
+        #expect(pending.first?.isRevision == true)
+        #expect(next.text == "Next.")
     }
 
     @Test("A final after an audio gap starts a new row")

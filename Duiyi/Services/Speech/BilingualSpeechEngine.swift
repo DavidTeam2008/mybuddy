@@ -442,12 +442,32 @@ actor BilingualSpeechEngine: SpeechRecognizing {
         }
         let scriptMismatch = UtteranceAssembler.isScriptMismatch(text, claimed: language)
         let range = SpeechRange(rangeStart: rangeStart, rangeDuration: rangeDuration)
-        guard let utterance = assembler.ingest(
+        let utterance = assembler.ingest(
             language: language,
             text: text,
             isFinal: isFinal,
             range: range
-        ) else {
+        )
+        // A boundary closed the previous row. Publish its final before the
+        // new row so an open volatile is not dropped at the gap/language
+        // change/cap.
+        for pending in assembler.takePendingFinals() {
+            let pendingPublished = publish(pending)
+            recordASR(
+                language: pending.language,
+                textLength: pending.text.count,
+                isFinal: true,
+                synthetic: false,
+                scriptMismatch: false,
+                accepted: true,
+                published: pendingPublished,
+                utterance: pending,
+                rangeStart: nil,
+                rangeDuration: nil,
+                resultsFinalizationTime: nil
+            )
+        }
+        guard let utterance else {
             recordASR(
                 language: language,
                 textLength: text.count,
