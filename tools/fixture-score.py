@@ -17,6 +17,11 @@ import sqlite3
 import unicodedata
 from pathlib import Path
 
+# A short cue is a sentence fragment the assembler must not lose while it is
+# revising rows. Five tokens covers the fixture's short sentences without
+# counting every clause.
+SHORT_CUE_MAX_TOKENS = 5
+
 CONTRACTIONS = {
     "i'm": "i am",
     "i've": "i have",
@@ -86,6 +91,58 @@ def read_cues(path: Path) -> list[str]:
         if tokenize(cleaned):
             cues.append(cleaned)
     return cues
+
+
+def contains_contiguous(haystack: list[str], needle: list[str]) -> bool:
+    """Return whether `needle` appears as a contiguous token sequence."""
+    if not needle:
+        return True
+    width = len(needle)
+    return any(
+        haystack[index : index + width] == needle
+        for index in range(len(haystack) - width + 1)
+    )
+
+
+def short_cue_retention(
+    cue_texts: list[str],
+    app_tokens: list[str],
+    max_tokens: int = SHORT_CUE_MAX_TOKENS,
+) -> dict:
+    """Check that every short ground-truth cue survives somewhere in the app text.
+
+    Contiguous matching is deliberately strict: a cue whose words were dropped,
+    reordered, or replaced by an ASR mishearing is counted as missing. Merging
+    short cues into a longer row still passes because the app tokens are
+    concatenated in row order.
+    """
+    short_cues = [
+        cue for cue in cue_texts if 0 < len(tokenize(cue)) <= max_tokens
+    ]
+    missing = [
+        cue for cue in short_cues if not contains_contiguous(app_tokens, tokenize(cue))
+    ]
+    found = len(short_cues) - len(missing)
+    return {
+        "shortCueMaxTokens": max_tokens,
+        "shortCueTotal": len(short_cues),
+        "shortCueFound": found,
+        "shortCueRetention": found / len(short_cues) if short_cues else None,
+        "missingShortCues": missing,
+    }
+
+
+def required_cue_retention(required_cues: list[str], app_tokens: list[str]) -> dict:
+    """Check named canary cues that must survive regardless of cue length."""
+    missing = [
+        cue for cue in required_cues
+        if not contains_contiguous(app_tokens, tokenize(cue))
+    ]
+    return {
+        "requiredCueTotal": len(required_cues),
+        "requiredCueFound": len(required_cues) - len(missing),
+        "requiredCueMissing": missing,
+    }
 
 
 def read_store(path: Path) -> list[tuple[str, str, int]]:
@@ -161,6 +218,57 @@ def levenshtein_counts(a: list[str], b: list[str]) -> tuple[int, int, int, int]:
     return matches, substitutions, deletions, insertions
 
 
+HIGHER_IS_BETTER = ("sourceCoverage", "exactMatchRate", "shortCueRetention")
+LOWER_IS_BETTER = ("wordErrorRate",)
+
+
+def baseline_regressions(result: dict, baseline: dict) -> list[dict]:
+    """Return metrics that moved outside the committed baseline's tolerance."""
+    metrics = baseline.get("metrics", {})
+    tolerance = baseline.get("tolerance", {})
+    regressions: list[dict] = []
+    for metric, reference in metrics.items():
+        if metric not in HIGHER_IS_BETTER and metric not in LOWER_IS_BETTER:
+            raise ValueError(f"unknown baseline metric: {metric}")
+        allowed_delta = float(tolerance.get(metric, 0.0))
+        if allowed_delta < 0:
+            raise ValueError(f"baseline tolerance must be non-negative: {metric}")
+        current = result.get(metric)
+        if current is None:
+            regressions.append(
+                {
+                    "metric": metric,
+                    "current": None,
+                    "baseline": reference,
+                    "allowed": None,
+                }
+            )
+            continue
+        if metric in HIGHER_IS_BETTER:
+            allowed = float(reference) - allowed_delta
+            if current < allowed:
+                regressions.append(
+                    {
+                        "metric": metric,
+                        "current": current,
+                        "baseline": reference,
+                        "allowed": allowed,
+                    }
+                )
+        else:
+            allowed = float(reference) + allowed_delta
+            if current > allowed:
+                regressions.append(
+                    {
+                        "metric": metric,
+                        "current": current,
+                        "baseline": reference,
+                        "allowed": allowed,
+                    }
+                )
+    return regressions
+
+
 def diagnostics_metrics(path: Path) -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
     events = data.get("events", [])
@@ -195,7 +303,19 @@ def diagnostics_metrics(path: Path) -> dict:
     }
 
 
-def score(store: Path, ground_truth: Path, marker: Path | None, diagnostics: Path | None) -> dict:
+def score(
+    store: Path,
+    ground_truth: Path,
+    marker: Path | None,
+    diagnostics: Path | None,
+    baseline: dict | None = None,
+) -> dict:
+    short_cue_max_tokens = (
+        int(baseline.get("shortCueMaxTokens", SHORT_CUE_MAX_TOKENS))
+        if baseline is not None
+        else SHORT_CUE_MAX_TOKENS
+    )
+    required_cues = baseline.get("requiredCues", []) if baseline is not None else []
     rows = read_store(store)
     final_rows = [row for row in rows if row[2]]
     scored_rows = final_rows or rows
@@ -249,6 +369,8 @@ def score(store: Path, ground_truth: Path, marker: Path | None, diagnostics: Pat
         "wordErrorRate": (substitutions + deletions + insertions) / ground_count
         if ground_count
         else None,
+        **short_cue_retention(cue_texts, app_tokens, short_cue_max_tokens),
+        **required_cue_retention(required_cues, app_tokens),
         "prefixDuplicatePairs": prefix_duplicates,
         "emptyTranslationRows": empty_translations,
         "rowsWithoutTranslation": sum(
@@ -263,6 +385,9 @@ def score(store: Path, ground_truth: Path, marker: Path | None, diagnostics: Pat
         result["marker"] = json.loads(marker.read_text(encoding="utf-8"))
     if diagnostics and diagnostics.exists():
         result["diagnostics"] = diagnostics_metrics(diagnostics)
+    if baseline is not None:
+        result["baselineName"] = baseline.get("name")
+        result["baselineRegressions"] = baseline_regressions(result, baseline)
     return result
 
 
@@ -272,10 +397,22 @@ def main() -> int:
     parser.add_argument("--ground-truth", required=True, type=Path)
     parser.add_argument("--marker", type=Path)
     parser.add_argument("--diagnostics", type=Path)
+    parser.add_argument("--baseline", type=Path)
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
 
-    result = score(args.store, args.ground_truth, args.marker, args.diagnostics)
+    baseline = (
+        json.loads(args.baseline.read_text(encoding="utf-8"))
+        if args.baseline
+        else None
+    )
+    result = score(
+        args.store,
+        args.ground_truth,
+        args.marker,
+        args.diagnostics,
+        baseline,
+    )
     payload = json.dumps(result, indent=2, ensure_ascii=False)
     if args.out:
         args.out.write_text(payload + "\n", encoding="utf-8")

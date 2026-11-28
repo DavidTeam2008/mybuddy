@@ -140,9 +140,12 @@ tools/fixture-run.sh --run-id ted-2 --noise     # Mac 外放人声，证环境�
 tools/fixture-run.sh --codec m4a                 # 9 MB 级夹具，便于快速传输
 tools/fixture-run.sh --pacing max                # 只用于 ASR 筛选，墙钟窗口不保真
 tools/fixture-run.sh --start 511 --duration 30 --ground-truth /tmp/gt-30s.tsv --min-coverage 0.5
+tools/fixture-run.sh --baseline none              # 只做结构检查，不做相对基线
 ```
 
 前置：`Config/Local.xcconfig`、已连接的物理 iPhone、`ffmpeg`、`python3`、`docs/media/TED.mp3`。脚本会构建/安装 Debug、把夹具推到 App `Documents`、用 `-duiyi.fixtureAudio` 启动、轮询 `fixture-run-done.json`、结束 App、拉取证据并用 `tools/fixture-score.py` 计分。证据在 `.device-state/fixture-runs/<run-id>/`，不提交。
+
+默认窗口（511 s 起、785 s）、WAV、`realtime` 的全量跑会读取 `tools/fixtures/ted-baseline.json`，对同一 ground truth 做相对基线检查：`sourceCoverage`/`exactMatchRate` 不得低于基线 1 个百分点，`wordErrorRate` 不得高于基线 1 个百分点，≤5 词短句保留率不得低于基线 2 个百分点。短句保留率按 ground-truth 短 cue 的规范化 token 是否连续出现在整份文字稿中计算；合行不扣分，丢词/误听/丢整句会扣分。基线里的 `requiredCues` 是人工 canary 列表（silence、Ben、Headset off、`there is the life that you can be living…` 等），任一缺失直接失败；它覆盖短句门限够不到的长句丢失。改变窗口/codec/pacing 或自定义 `--ground-truth` 时默认关闭基线，避免拿不同口径硬比；需要时显式传 `--baseline <path>`，或 `--baseline none` 关闭。`score.json` 会写 `shortCueFound`/`shortCueTotal`/`shortCueRetention`/`missingShortCues` 和 `baselineRegressions`。
 
 运行参数（也可手工传给 `devicectl device process launch`）：
 
@@ -160,7 +163,7 @@ tools/fixture-run.sh --start 511 --duration 30 --ground-truth /tmp/gt-30s.tsv --
 - 能证明：文件音频走真实 ASR/组装/翻译/落库；同一夹具可重复；房间噪声不进入字幕；`EOF → endTask → 最后 final/译文` 的收口。
 - 不能证明：麦克风硬件、音频路由/回声、真实 TTS 出声、房间噪声下的 ASR 鲁棒性、长时热/内存稳定性。发布前的安静房间声学冒烟仍保留。
 - 1× 是常规回归口径：1.1 s 静音 finalize、40/90 ms 翻译防抖、380 ms TTS 结算都是墙钟；`max` 只用于 ASR 文本筛选，不用于句界/延迟结论。
-- 翻译语义质量不由脚本判定；`score.json` 只给源文覆盖/精确匹配/WER、前缀重复、空译、U+FFFD、中文译文行数。语义评审按 `docs/research/simultaneous-translation-quality.md` 的口径另做 LLM + 人工。
+- 翻译语义质量不由脚本判定；`score.json` 只给源文覆盖/精确匹配/WER、短句保留、前缀重复、空译、U+FFFD、中文译文行数。短句保留也只是 token 级机械检查，不能替代语义评审；语义评审按 `docs/research/simultaneous-translation-quality.md` 的口径另做 LLM + 人工。
 
 实现约束：所有夹具代码在 `#if DEBUG` 下，Release 不编译；不改 `UtteranceAssembler`/翻译语义；不 mock `SpeechTranscriber.isAvailable`；真机结果才算数。
 

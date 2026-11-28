@@ -38,6 +38,9 @@ NOISE=0
 SKIP_BUILD=0
 GROUND_TRUTH="$ROOT/tools/fixtures/ted-cue132-331.tsv"
 MIN_COVERAGE="0.90"
+BASELINE="$ROOT/tools/fixtures/ted-baseline.json"
+BASELINE_EXPLICIT=0
+GROUND_TRUTH_EXPLICIT=0
 
 usage() {
     cat <<'EOF'
@@ -53,6 +56,8 @@ Options:
   --settle <seconds>     Wait after EOF before ending the task (default: 12)
   --noise                Play speech on the Mac speakers during the run
   --ground-truth <path>  Cue TSV for scoring
+  --baseline <path|none> Regression baseline (default: tools/fixtures/ted-baseline.json
+                         for the default full WAV/realtime run; pass none to disable)
   --min-coverage <0-1>   Fail below this source coverage (default: 0.90)
   --skip-build           Reuse the installed app and last build
   -h, --help             Show this help
@@ -69,13 +74,31 @@ while [[ $# -gt 0 ]]; do
         --pacing) PACING="$2"; shift 2 ;;
         --settle) SETTLE="$2"; shift 2 ;;
         --noise) NOISE=1; shift ;;
-        --ground-truth) GROUND_TRUTH="$2"; shift 2 ;;
+        --ground-truth) GROUND_TRUTH="$2"; GROUND_TRUTH_EXPLICIT=1; shift 2 ;;
+        --baseline) BASELINE="$2"; BASELINE_EXPLICIT=1; shift 2 ;;
         --min-coverage) MIN_COVERAGE="$2"; shift 2 ;;
         --skip-build) SKIP_BUILD=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
     esac
 done
+
+if [[ "$BASELINE_EXPLICIT" -eq 0 ]] && {
+    [[ "$GROUND_TRUTH_EXPLICIT" -eq 1 ]] ||
+    [[ "$START" != "511" ]] ||
+    [[ "$DURATION" != "785" ]] ||
+    [[ "$CODEC" != "wav" ]] ||
+    [[ "$PACING" != "realtime" ]]
+}; then
+    BASELINE=""
+fi
+if [[ "$BASELINE" == "none" ]]; then
+    BASELINE=""
+fi
+if [[ -n "$BASELINE" && ! -f "$BASELINE" ]]; then
+    printf 'Missing baseline: %s\n' "$BASELINE" >&2
+    exit 1
+fi
 
 config_value() {
     local key="$1"
@@ -129,6 +152,7 @@ shasum -a 256 "$FIXTURE_PATH" > "$EVIDENCE/fixture.sha256"
 echo "fixture: $FIXTURE_PATH"
 echo "sha256:  $(cut -d' ' -f1 "$EVIDENCE/fixture.sha256")"
 echo "info:    $(grep -E 'Data format|estimated duration' "$EVIDENCE/fixture-info.txt" | tr '\n' ' ')"
+echo "baseline: ${BASELINE:-none}"
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
     echo "== build for device =="
@@ -266,12 +290,17 @@ sqlite3 -header -separator $'\t' "$STORE" \
     > "$EVIDENCE/transcript.tsv"
 
 echo "== score =="
-python3 -I "$ROOT/tools/fixture-score.py" \
-    --store "$STORE" \
-    --ground-truth "$GROUND_TRUTH" \
-    --marker "$EVIDENCE/fixture-run-done.json" \
-    --diagnostics "$EVIDENCE/duiyi-diagnostics.json" \
-    --out "$EVIDENCE/score.json" >/dev/null
+SCORE_ARGS=(
+    --store "$STORE"
+    --ground-truth "$GROUND_TRUTH"
+    --marker "$EVIDENCE/fixture-run-done.json"
+    --diagnostics "$EVIDENCE/duiyi-diagnostics.json"
+    --out "$EVIDENCE/score.json"
+)
+if [[ -n "$BASELINE" ]]; then
+    SCORE_ARGS+=(--baseline "$BASELINE")
+fi
+python3 -I "$ROOT/tools/fixture-score.py" "${SCORE_ARGS[@]}" >/dev/null
 
 echo "== result =="
 jq -r '
@@ -285,6 +314,11 @@ jq -r '
     "coverage:           \(.sourceCoverage)",
     "exact match:        \(.exactMatchRate)",
     "WER:                \(.wordErrorRate)",
+    "required cues:      \(.requiredCueFound)/\(.requiredCueTotal) (\(.requiredCueMissing // [] | length) missing)",
+    "short-cue retention: \(.shortCueFound)/\(.shortCueTotal) (\(((.shortCueRetention // 0) * 10000 | round) / 100)%)",
+    "short-cue missing:  \(.missingShortCues | join(" | "))",
+    "baseline:           \(.baselineName // "none")",
+    "baseline fails:     \(.baselineRegressions // [] | length)",
     "prefix duplicates:  \(.prefixDuplicatePairs)",
     "empty translations: \(.emptyTranslationRows)",
     "U+FFFD:             \(.replacementCharacters)",
@@ -309,6 +343,29 @@ COVERAGE=$(jq -r '.sourceCoverage' "$EVIDENCE/score.json")
 if [[ "$ERRORS" -ne 0 || "$LISTENING" != "true" || "$END" != "ended" || "$ROWS" -eq 0 || "$EMPTY" -ne 0 || "$BAD" -ne 0 ]]; then
     echo "FAIL: structural checks (errors=$ERRORS listening=$LISTENING end=$END rows=$ROWS empty=$EMPTY u+fffd=$BAD)" >&2
     exit 1
+fi
+
+if [[ -n "$BASELINE" ]]; then
+    BASELINE_SHA=$(jq -r '.recordedFrom.fixtureSha256 // empty' "$BASELINE")
+    CURRENT_SHA=$(cut -d' ' -f1 "$EVIDENCE/fixture.sha256")
+    if [[ -n "$BASELINE_SHA" && "$BASELINE_SHA" != "$CURRENT_SHA" ]]; then
+        echo "WARN: fixture sha $CURRENT_SHA differs from baseline $BASELINE_SHA" >&2
+    fi
+
+    REGRESSIONS=$(jq -r '.baselineRegressions // [] | length' "$EVIDENCE/score.json")
+    if [[ "$REGRESSIONS" -ne 0 ]]; then
+        echo "FAIL: baseline regressions ($REGRESSIONS):" >&2
+        jq -r '.baselineRegressions[] | "  \(.metric): current=\(.current) baseline=\(.baseline) allowed=\(.allowed)"' \
+            "$EVIDENCE/score.json" >&2
+        exit 1
+    fi
+
+    REQUIRED_MISSING=$(jq -r '.requiredCueMissing // [] | length' "$EVIDENCE/score.json")
+    if [[ "$REQUIRED_MISSING" -ne 0 ]]; then
+        echo "FAIL: required cues missing ($REQUIRED_MISSING):" >&2
+        jq -r '.requiredCueMissing[] | "  \(.)"' "$EVIDENCE/score.json" >&2
+        exit 1
+    fi
 fi
 
 if python3 -I -c "import sys; sys.exit(0 if float('$COVERAGE') >= float('$MIN_COVERAGE') else 1)"; then
